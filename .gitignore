@@ -65,8 +65,16 @@ Desktop.ini
 .workbuddy/tmp/
 *.tmp
 
-# ---- 运行时数据（用户上传照片与缓存，不进版本库）----
-# 注意：data/compass、data/qian、data/naming 等「领域数据」必须提交
+# ---- 运行时数据（不进版本库）----
+# 根 data/ 只装运行时产物：SQLite 库、上传原件、缓存。
+# ⚠️ 领域数据表**不在这里** —— fenjin120.py / naming.py / qian.py 的默认路径
+#    全部指向 packages/fortune-core/data/（随包提交）。此前注释写的是
+#    「data/compass、data/qian、data/naming 等『领域数据』必须提交」，
+#    与实际不符：它会让人以为根 data/ 是有效数据路径，而它只是运行时目录。
+data/*.db
+data/*.db-journal
+data/*.db-wal
+data/*.db-shm
 data/uploads/
 data/cache/
 data/tmp/
