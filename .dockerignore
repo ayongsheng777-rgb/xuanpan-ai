@@ -1,0 +1,57 @@
+# ============================================
+# 玄盘 AI — .dockerignore
+# 目的：把构建上下文从 385MB 压到 <1MB
+# ============================================
+#
+# 为什么必须存在：仓库 385MB 里有 379MB 是 apps/mobile/node_modules。
+# 不加这个文件，每次 `docker build` 都会把 379MB 传送给 daemon，
+# 构建慢到让人误以为"卡死了"。
+
+# ---- 最大的一个：移动端依赖（API 镜像根本不需要 RN）----
+apps/
+node_modules/
+**/node_modules/
+
+# ---- 版本库与本地工作区 ----
+.git/
+.gitattributes
+.workbuddy/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ---- Python 产物 ----
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# ---- 测试（运行时镜像不带测试；验证在宿主机做）----
+tests/
+conftest.py
+
+# ---- 文档与方案材料（2MB，运行时不需要）----
+docs/
+*.md
+!README.md
+
+# ---- 运行时数据与密钥（绝不进镜像）----
+.env
+.env.*
+!.env.example
+data/uploads/
+data/cache/
+data/tmp/
+data/*.db
+data/*.db-journal
+*.pem
+*.key
+
+# ---- 本地临时与日志 ----
+*.log
+logs/
+*.tmp
+.DS_Store
+Thumbs.db

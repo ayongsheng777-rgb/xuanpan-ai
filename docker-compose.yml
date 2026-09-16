@@ -1,0 +1,80 @@
+# ============================================
+# 玄盘 AI — 本地容器编排
+# ============================================
+#
+# 起服务：
+#     cp .env.example .env          # 首次（不填任何 key 也能跑，走零成本路径）
+#     docker compose up -d --build
+#     curl http://127.0.0.1:8360/healthz
+#     docker compose logs -f api
+#
+# 端到端冒烟（服务起来之后，[Host] 跑）：
+#     python scripts/smoke_api.py --base http://127.0.0.1:8360
+#
+# ─────────────────────────────────────────────────────────────
+# 为什么只有一个 service，没有 PostgreSQL / Redis / MinIO
+# ─────────────────────────────────────────────────────────────
+# 生产路线报告 §4 把数据库/缓存/对象存储列为 `[推测]`，那是**选型建议，不是既成事实**。
+# 实际代码的存储层是 SQLite 单文件（services/api/xuanpan_api/storage.py），
+# 且没有任何 Redis / S3 调用。把没被使用的组件写进 compose，会让编排"看起来完整"
+# 却掩盖真实架构，还会平白引入运维面。**编排照实现的现状写，要改先改代码。**
+#
+# 后续若真的引入这些组件，属于架构变更，应先更新报告与 AGENTS.md §5 再改这里。
+
+# 显式项目名：否则 compose 会从目录名派生，而本目录名是非 ASCII 的（玄盘AI），
+# 派生结果会变成 `ai` —— 卷名随之变成 `ai_xuanpan-data`，无从预期也不好找。
+# 固定下来后：卷 / 网络 / 容器前缀一律是 xuanpan-ai。
+name: xuanpan-ai
+
+services:
+  api:
+    build:
+      # 上下文必须是仓库根：运行期需要 services/ 三个包 + packages/fortune-core
+      context: .
+      dockerfile: services/api/Dockerfile
+    image: xuanpan-api:0.1.0
+    container_name: xuanpan-api
+
+    ports:
+      # 宿主:容器。容器内固定 8352（应用默认端口），
+      # ⚠️ 宿主默认映射到 8360 —— 本机 8352 已被 SysCenter 占用（AGENTS.md §5.3）。
+      # 需要换端口：在 .env 里改 XUANPAN_HOST_PORT，不必动本文件。
+      - "${XUANPAN_HOST_PORT:-8360}:8352"
+
+    # 全部用 ${VAR:-默认值} 取值：这样**没有 .env 也能起**（全走默认），
+    # 有 .env 则覆盖。比 env_file 更耐操 —— env_file 在文件缺失时会让 compose 直接失败。
+    environment:
+      XUANPAN_HOST: "0.0.0.0"          # 容器内必须 0.0.0.0，否则宿主访问不到
+      XUANPAN_PORT: "8352"
+      XUANPAN_DB_PATH: /app/data/xuanpan.db
+      XUANPAN_MAX_UPLOAD_MB: "${XUANPAN_MAX_UPLOAD_MB:-12}"
+      XUANPAN_KEEP_PHOTOS: "${XUANPAN_KEEP_PHOTOS:-false}"
+      XUANPAN_AI_MODE: "${XUANPAN_AI_MODE:-auto}"
+      XUANPAN_CORS_ORIGINS: "${XUANPAN_CORS_ORIGINS:-*}"
+      # 不配即空 → 路由链只剩本地模板（零成本）。见 .env.example 的成本声明。
+      XUANPAN_LLM_BASE_URL: "${XUANPAN_LLM_BASE_URL:-}"
+      XUANPAN_LLM_API_KEY: "${XUANPAN_LLM_API_KEY:-}"
+      XUANPAN_LLM_MODEL: "${XUANPAN_LLM_MODEL:-}"
+      XUANPAN_LLM_CAPABILITY: "${XUANPAN_LLM_CAPABILITY:-reasoning}"
+      XUANPAN_VISION_API_KEY: "${XUANPAN_VISION_API_KEY:-}"
+      XUANPAN_VISION_BASE_URL: "${XUANPAN_VISION_BASE_URL:-}"
+      XUANPAN_VISION_MODEL: "${XUANPAN_VISION_MODEL:-}"
+
+    volumes:
+      # 命名卷而非 bind mount，是刻意的：宿主 data/xuanpan.db 是本地开发实例的库。
+      # 若 bind 到 ./data，容器与本地实例会写同一个 SQLite 文件 → 锁冲突与交叉污染。
+      - xuanpan-data:/app/data
+
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8352/healthz',timeout=3).status==200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+
+    restart: unless-stopped
+
+volumes:
+  xuanpan-data:
+    # 库与上传照片都在这里。备份 = 备份这个卷；删除 = 清空全部记录。
+    # 查看落点：docker volume inspect xuanpanai_xuanpan-data

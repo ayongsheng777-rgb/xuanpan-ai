@@ -263,6 +263,42 @@ cd apps/mobile && npm start
 >
 > 报告由脚本生成，**不要手工编辑** —— 手改的数字无法追溯，改数据后重跑。
 
+**容器化运行**（不需要本机 Python 环境）
+
+```bash
+# [Host] 首次：复制配置样例（不填任何 key 也能跑，走零成本路径）
+cp .env.example .env
+
+# [Host] 构建并启动（构建上下文实测仅 1.17kB，靠 .dockerignore 挡掉 node_modules）
+docker compose up -d --build
+
+# [Host] 看健康与日志
+curl http://127.0.0.1:8360/healthz
+docker compose logs -f api
+
+# [Host] 对容器跑端到端冒烟
+"$PY" scripts/smoke_api.py --base http://127.0.0.1:8360
+
+# [Host] 停止 / 连数据一起清空
+docker compose down
+docker compose down -v
+```
+
+> **端口**：容器内 8352，宿主映射 **8360**（`.env` 的 `XUANPAN_HOST_PORT` 可改）。
+> 容器仍监听 8352 是因为那是应用自身默认端口；8360 只是宿主侧避开 SysCenter 的映射。
+>
+> **数据**在命名卷 `xuanpan-ai_xuanpan-data`（`/app/data`），**故意不用 bind mount** ——
+> 宿主 `data/` 是本地开发实例的库，bind 进来会让两个进程写同一个 SQLite 文件。
+> 备份就是备份这个卷；`docker compose down -v` 会连库一起删。
+>
+> 🔴 **国内 PyPI 镜像不是优化，是不指定就装不上**：本机连宿主都解析不了 `pypi.org`
+> （宿主靠 HTTP_PROXY 让代理远端解析才装得上），容器内没有代理环境变量，直连必然
+> `Temporary failure in name resolution`。要换源改构建参数即可，别改 Dockerfile：
+> `docker compose build --build-arg PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/`
+>
+> ⚠️ **不要把 PostgreSQL / Redis / MinIO 加进 compose**。当前存储层是 SQLite 单文件，
+> 代码里没有任何 Redis / S3 调用。编排要照实现写，加组件属架构变更 —— 先改代码与报告。
+
 **数据表再生成**（`kangxi_strokes.json` 由脚本产出，防止手写出重复键与错值）
 
 ```bash
