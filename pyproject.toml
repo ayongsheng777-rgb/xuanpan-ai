@@ -1,0 +1,27 @@
+[project]
+name = "xuanpan-ai"
+version = "0.1.0"
+description = "玄盘 AI — 罗盘视觉识别 × 确定性术数计算 × AI 解释"
+requires-python = ">=3.11"
+dependencies = [
+    "lunar-python>=1.3.0",
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.29",
+    "numpy>=1.26",
+    "pillow>=10.0",
+    "python-multipart>=0.0.9",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "httpx>=0.27"]
+
+[tool.pytest.ini_options]
+testpaths = ["packages/fortune-core/tests", "tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-q --tb=short"
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"
