@@ -167,10 +167,50 @@ xuanpan-ai/
 - 已安装并验证：`lunar-python`
 - **已知坑**：`sxtwl` 需 C 编译环境，Py3.13 下安装失败；如必须使用，需降级 Python 版本
 
-### 5.3 命令
+### 5.3 命令（已回填）
 
-> 骨架尚未落地，本节命令**待 monorepo 建好后立即回填**。
-> 在此之前，凡声称"测试通过"，**必须附上实际执行的命令原文与输出**，不得引用本节占位。
+> 全部命令在项目根目录执行。`$PY` = `C:/Users/anyong/.workbuddy/binaries/python/envs/default/Scripts/python.exe`（managed venv）。
+> 凡声称"测试通过"，必须附实际执行的命令与输出，不得引用本节占位。
+
+**测试（无需安装，`conftest.py` 注入四个包的路径）**
+
+```bash
+# 全量
+"$PY" -m pytest
+
+# 分层
+"$PY" -m pytest packages/fortune-core/tests   # 计算内核
+"$PY" -m pytest tests/vision                  # 罗盘识别
+"$PY" -m pytest tests/ai                      # AI 解释层
+"$PY" -m pytest tests/api                     # 后端服务
+
+# 注意：pyproject 的 addopts 已含 -q，命令行再传 -q 会变成 -qq 而**吞掉汇总行**。
+# 想看到 "N passed" 就不要重复传 -q；屏蔽依赖告警用 -p no:warnings。
+```
+
+**起服务**
+
+```bash
+# [Host] 注意 PYTHONPATH 用 Windows 分隔符 ';'（Git Bash 下用 ':' 会 import 失败）
+PYTHONPATH='services/api;services/ai;services/vision;packages/fortune-core' \
+  "$PY" -m uvicorn xuanpan_api.app:create_app --factory --host 127.0.0.1 --port 8360
+```
+
+> ⚠️ **8352 已被本机 SysCenter 占用**，本地联调一律用 8360 等其它端口。
+> 文档：<http://127.0.0.1:8360/docs>
+
+**端到端冒烟（对真实服务发请求，非 TestClient）**
+
+```bash
+"$PY" scripts/smoke_api.py --base http://127.0.0.1:8360
+```
+
+**数据表再生成**（`kangxi_strokes.json` 由脚本产出，防止手写出重复键与错值）
+
+```bash
+"$PY" scripts/gen_strokes_table.py --check     # 只校验，不写盘
+"$PY" scripts/gen_strokes_table.py             # 重新生成
+```
 
 ### 5.4 依赖引入的前置说明（持续有效）
 
