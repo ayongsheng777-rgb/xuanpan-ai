@@ -103,8 +103,15 @@ def count_elements(
         include_hidden: False 时只计本气（天干 + 地支本气）
         hidden_weights: 地支藏干权重，按本气→余气顺序取用
 
-    >>> count_elements(["甲子", "丙寅", "戊午", "庚申"], include_hidden=False).counts["wood"]
-    3.0
+    >>> s = count_elements(["甲子", "丙寅", "戊午", "庚申"], include_hidden=False)
+    >>> [s.counts[k] for k in ("wood", "fire", "earth", "metal", "water")]
+    [2.0, 2.0, 1.0, 2.0, 1.0]
+
+    明现木为 2（天干「甲」＋ 地支「寅」本气），不是 3 —— 逐字可数：
+
+    >>> s = count_elements(["甲子", "丙寅", "戊午", "庚申"])   # 含藏干：本气1.0 / 余气0.5 / 0.3
+    >>> [round(s.counts[k], 2) for k in ("wood", "fire", "earth", "metal", "water")]
+    [2.0, 2.5, 2.1, 2.0, 1.5]
     """
     if not pillars:
         raise InvalidInputError("pillars 不能为空")
