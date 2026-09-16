@@ -69,7 +69,55 @@ def main() -> int:
     args = ap.parse_args()
 
     base = args.base.rstrip("/")
-    client = httpx.Client(base_url=base, timeout=90.0)
+
+    # `trust_env=False`：本机回环不该走代理。本机环境常设 HTTP_PROXY/HTTPS_PROXY
+    # （实测本机指向 127.0.0.1:58283），httpx 默认 `trust_env=True` 会把
+    # 127.0.0.1 的请求也交给代理，代理回一句 "upstream connect failed" 并附带
+    # 非 JSON 正文 —— 结果是把「服务没起」误报成一串 JSONDecodeError 堆栈。
+    client = httpx.Client(base_url=base, timeout=90.0, trust_env=False)
+
+    # 先探活：服务没起是**使用问题**，应当给一句能照做的提示，而不是抛堆栈。
+    if not _probe(client, base):
+        return 2
+
+    try:
+        return _run(client, base, args)
+    except httpx.HTTPError as exc:
+        # 服务在跑的过程中失联（被 kill / 端口被回收）
+        print(f"\n✗ 中途失联：{type(exc).__name__}: {exc}")
+        print(f"  服务可能已停止。检查 {base}/healthz 是否仍可访问。")
+        return 2
+
+
+def _probe(client: "httpx.Client", base: str) -> bool:
+    """探活。失败时打印可直接照做的启动命令。"""
+    try:
+        r = client.get("/healthz")
+    except httpx.HTTPError as exc:
+        print(f"✗ 无法连接 {base} — {type(exc).__name__}: {exc}\n")
+        _print_start_hint(base)
+        return False
+
+    if r.status_code != 200:
+        print(f"✗ {base}/healthz 返回 {r.status_code}，服务未就绪\n")
+        _print_start_hint(base)
+        return False
+    return True
+
+
+def _print_start_hint(base: str) -> None:
+    port = base.rsplit(":", 1)[-1] if ":" in base else "8360"
+    print("请先另开一个终端启动服务：\n")
+    print(
+        "  # [Host]\n"
+        "  PY=\"C:/Users/anyong/.workbuddy/binaries/python/envs/default/Scripts/python.exe\"\n"
+        "  PYTHONPATH='services/api;services/ai;services/vision;packages/fortune-core' \\\n"
+        f"    \"$PY\" -m uvicorn xuanpan_api.app:create_app --factory --host 127.0.0.1 --port {port}\n"
+    )
+    print("> 8352 已被本机 SysCenter 占用，本地联调统一用 8360。")
+
+
+def _run(client: "httpx.Client", base: str, args: argparse.Namespace) -> int:
 
     # ---------------------------------------------------------------- 健康
     section("健康检查")
