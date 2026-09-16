@@ -1,0 +1,72 @@
+# ============================================
+# 玄盘 AI — .gitignore
+# 依据 AGENTS.md §5.1 目录结构与 §6 红线制定
+# ============================================
+
+# ---- 密钥与环境（最高优先级，绝不提交）----
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+secrets/
+credentials/
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+htmlcov/
+.coverage
+.coverage.*
+dist/
+build/
+
+# ---- Node / React Native / Expo ----
+node_modules/
+.expo/
+.expo-shared/
+dist/
+build/
+web-build/
+*.tsbuildinfo
+.next/
+.npm/
+.metro-health-check*
+
+# ---- 日志 ----
+*.log
+logs/
+npm-debug.log*
+yarn-error.log*
+
+# ---- 系统 ----
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# ---- IDE ----
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json.example
+
+# ---- 本地临时（AI 工作区，memory 需提交故不整体忽略）----
+.workbuddy/tmp/
+*.tmp
+
+# ---- 运行时数据（用户上传照片与缓存，不进版本库）----
+# 注意：data/compass、data/qian、data/naming 等「领域数据」必须提交
+data/uploads/
+data/cache/
+data/tmp/
