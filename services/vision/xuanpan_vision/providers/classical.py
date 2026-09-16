@@ -119,9 +119,11 @@ class ClassicalVisionProvider:
             sitting.append(MountainCandidate(m_sit.name, end % 360.0, confidence, "sitting"))
             facing.append(MountainCandidate(m_face.name, (end + 180.0) % 360.0, confidence, "facing"))
 
-        # 按置信度降序，UI 直接取第一个作为「默认建议」
-        sitting.sort(key=lambda c: c.name)
-        facing.sort(key=lambda c: c.name)
+        # 排序：置信度降序，同置信度按山名升序兜底。
+        # 为什么需要兜底：两端置信度在本 provider 里恒等（几何上无法区分哪端为坐山），
+        # 若不给第二关键字，`max()` 取到哪个候选就取决于遍历顺序，结果不可复现。
+        sitting.sort(key=lambda c: (-c.confidence, c.name))
+        facing.sort(key=lambda c: (-c.confidence, c.name))
 
         uncertain.append("几何上无法判断鱼丝线哪一端为坐山，请用户在确认页选择")
 

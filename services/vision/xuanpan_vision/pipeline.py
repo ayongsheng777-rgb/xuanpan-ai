@@ -146,13 +146,20 @@ class CompassAnalyzer:
     ) -> CompassVisionResult:
         """用 fortune_core 做确定性几何校验 —— **不听 provider 的**。
 
-        无论 provider 是本地 CV 还是云端大模型，都做两件事：
-        1. **角度一律以 fortune_core 的规范山心角为准**（防止 provider 注入任意角度）
-        2. 坐向必须互为对宫，否则按坐山重推导向山
+        无论 provider 是本地 CV 还是云端大模型，都做三件事：
+        1. **山名以 fortune_core 为准**：非法山名丢弃，山名不得由 provider 自造
+        2. **角度必须落在所属山内**（±7.5°）：越界即用山心角覆盖，
+           provider 无权把角度挪到别的山去（RULE-002）；山内则保留实测精度
+        3. **向山由坐山推导**：坐向是一条直线，向山必然是对宫，没有 provider 说话的余地
 
-        这是 RULE-002 在识别层的落地：识别层没有权力定义"角度是多少"。
+        这是 RULE-002 在识别层的落地：识别层没有权力定义"是哪个山、什么角度"。
         """
-        from fortune_core.mountain24 import get_mountain, is_opposite, mountain_at
+        from fortune_core.mountain24 import (
+            HALF_SPAN,
+            angular_distance,
+            get_mountain,
+            opposite,
+        )
 
         from .models import MountainCandidate
         from .providers import is_user_authoritative
@@ -170,46 +177,64 @@ class CompassAnalyzer:
                 except KeyError:
                     problems.append(f"provider 返回了非法山名「{c.name}」，已丢弃")
                     continue
-                if abs((c.angle - canonical) % 360.0) > 1e-6:
+
+                # 山名永远是 fortune_core 说了算；角度分两种情形处理：
+                #   实测角落在该山范围内（±7.5°）→ **保留**，因为一百二十分金是 3° 级精度，
+                #     把实测角粗暴替换成山心角会让分金永远落在正中格，等于丢掉整个分金功能；
+                #   实测角与山名矛盾 → 用山心角覆盖。
+                # 这样既保住了测量精度，又堵死了 provider「注入任意角度」的通道（RULE-002）：
+                # provider 可以让精度更高，但不能让角度跑到另一个山里去。
+                if angular_distance(c.angle, canonical) <= HALF_SPAN:
+                    angle = c.angle % 360.0
+                else:
                     problems.append(
-                        f"「{c.name}」的角度被改写为 {c.angle:.2f}°（应为 {canonical:.2f}°），已纠正"
+                        f"「{c.name}」的角度被改写为 {c.angle:.2f}°（不在该山范围内，山心 "
+                        f"{canonical:.2f}°），已纠正为山心角"
                     )
-                out.append(MountainCandidate(c.name, canonical, c.confidence, end))  # type: ignore[arg-type]
+                    angle = canonical
+                out.append(MountainCandidate(c.name, angle, c.confidence, end))  # type: ignore[arg-type]
             return out
 
         sitting = canonicalize(result.mountain_candidates, "sitting")
         facing = canonicalize(result.direction_candidates, "facing")
 
-        # 每个坐山候选都应能在向山候选里找到对宫；缺则补
+        def derive_opposites(src: list[MountainCandidate], end: str) -> list[MountainCandidate]:
+            """由一侧候选推导另一侧（互为对宫）。
+
+            为什么是「推导」而不是「校验 provider 给的向山」：
+            坐向是一条直线，向山必然是对宫 —— 这件事没有 provider 说话的余地。
+            早先的做法是保留 provider 的向山列表再做一致性检查，但 `sitting` 与
+            `facing` 是同一组两端的两个平行列表，各自排序后**索引天然对齐成同山**，
+            于是"坐向同山"检查被误触发，向山被重推、实测角被替换成山心角。
+
+            推导同时保住了精度：对宫端实测角 = 本端实测角 + 180°，3° 级分金照常可用。
+            """
+            best: dict[str, MountainCandidate] = {}
+            for c in src:
+                opp_name = opposite(c.name)
+                angle = (c.angle + 180.0) % 360.0
+                prev = best.get(opp_name)
+                if prev is None or c.confidence > prev.confidence:
+                    best[opp_name] = MountainCandidate(opp_name, angle, c.confidence, end)  # type: ignore[arg-type]
+            return [best[k] for k in sorted(best, key=lambda n: (-best[n].confidence, n))]
+
         if sitting:
-            have = {c.name for c in facing}
-            for s in sitting:
-                opp = mountain_at(s.angle + 180.0)
-                if opp.name not in have:
-                    facing.append(MountainCandidate(opp.name, opp.center_degree, s.confidence, "facing"))
-                    problems.append(f"向山候选缺少「{opp.name}」的对宫项，已补全")
-                    have.add(opp.name)
-
-        # 主候选不得同山。
-        # 注意：**不能**用"坐山集合 ∩ 向山集合"来判定非法 —— 几何识别本就无法
-        # 判断鱼丝线哪一端是坐山，所以「坐=[丑,未]、向=[未,丑]」是完全合法的
-        # 候选形态；早先按集合相交一刀切会把向山候选项全部清空。
-        # 真正非法的只有「主坐山与主向山指向同一山」。
-        if sitting and facing and sitting[0].name == facing[0].name:
-            opp = mountain_at(sitting[0].angle + 180.0)
-            problems.append(
-                f"主候选坐、向同为「{sitting[0].name}」，已按坐山重推导向山「{opp.name}」"
-            )
-            facing = [MountainCandidate(opp.name, opp.center_degree, sitting[0].confidence, "facing")]
-
-        # 主候选必须互为对宫
-        if sitting and facing and not is_opposite(sitting[0].name, facing[0].name):
-            base = sitting[0]
-            opp = mountain_at(base.angle + 180.0)
-            problems.append(
-                f"主候选坐「{base.name}」与向「{facing[0].name}」不构成对宫，已按坐山重推"
-            )
-            facing = [MountainCandidate(opp.name, opp.center_degree, base.confidence, "facing")]
+            derived = derive_opposites(sitting, "facing")
+            if facing and {c.name for c in facing} != {c.name for c in derived}:
+                problems.append(
+                    "provider 给出的向山候选「"
+                    + "、".join(sorted(c.name for c in facing))
+                    + "」与坐山不构成对宫，已按坐山重推为「"
+                    + "、".join(c.name for c in derived)
+                    + "」"
+                )
+            facing = derived
+        elif facing:
+            problems.append("provider 未给出坐山候选，已按向山候选推导对宫作为坐山")
+            sitting = derive_opposites(facing, "sitting")
+        else:
+            # 声称识别成功却没有任何候选 —— 如实降级，不编造
+            problems.append("provider 声称识别成功但未给出任何坐向候选，已按未识别处理")
 
         return CompassVisionResult(
             compass_detected=True,

@@ -107,6 +107,24 @@ class CompassVisionResult:
 
     @property
     def best_facing(self) -> MountainCandidate | None:
+        """与 `best_sitting` **构成同一组**的向山候选。
+
+        为什么不能简单地 `max(direction_candidates, key=confidence)`：
+        two 候选列表是各自排序的，独立取最大会选到"各自最可信的一项"，
+        而这两项未必来自同一组（实测出现过 `best_sitting=丑` 与 `best_facing=丑`，
+        因为两侧列表的首项恰好同名）。坐向必须成组，故由坐山锚定向山。
+        """
+        s = self.best_sitting
+        if s is None:
+            return max(self.direction_candidates, key=lambda c: c.confidence, default=None)
+
+        from fortune_core.mountain24 import opposite
+
+        want = opposite(s.name)
+        for c in self.direction_candidates:
+            if c.name == want:
+                return c
+        # 候选中确实没有对宫项（异常形态）→ 退化为各自取最大，但调用方应能察觉
         return max(self.direction_candidates, key=lambda c: c.confidence, default=None)
 
     @property

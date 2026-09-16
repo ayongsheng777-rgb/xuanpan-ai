@@ -405,12 +405,38 @@ class TestCrossValidation:
         result, _ = analyze_compass(render_compass(size=900), provider=_BogusProvider())
         assert result.needs_user_confirmation is True, "provider 无权关闭用户确认"
 
-    def test_all_candidates_canonical_after_validation(self) -> None:
+    def test_illegal_angle_replaced_by_center(self) -> None:
+        """与山名矛盾的角度 → 用山心角覆盖（provider 不得把角度塞进别的山）。"""
         from fortune_core.mountain24 import get_mountain
 
         result, _ = analyze_compass(render_compass(size=900), provider=_BogusProvider())
         for c in result.mountain_candidates + result.direction_candidates:
             assert c.angle == get_mountain(c.name).center_degree
+
+    def test_measurement_inside_mountain_is_preserved(self) -> None:
+        """落在所属山范围内的实测角**必须保留** —— 否则分金永远落在正中格。
+
+        一百二十分金是 3° 级精度：把实测角一律替换成山心角，等于把整个分金
+        功能废掉（永远返回同一个格位）。这条测试锁住"精度不被校验顺手抹掉"。
+        """
+        from fortune_core.mountain24 import HALF_SPAN, angular_distance, get_mountain
+
+        # 3.0° 落在「子」山范围内（子山 352.5°~7.5°），但明显偏离山心 0°
+        result, _ = analyze_compass(render_compass(size=900, thread_angle=3.0))
+        by_name = {c.name: c for c in result.mountain_candidates}
+        assert "子" in by_name
+        best = by_name["子"]
+        assert angular_distance(best.angle, 3.0) < 0.5, (
+            f"实测角应被保留（约 3.0°），实得 {best.angle:.2f}°"
+        )
+        assert best.angle != get_mountain("子").center_degree, "不得被压回山心角"
+        assert angular_distance(best.angle, get_mountain("子").center_degree) <= HALF_SPAN
+
+        # 对宫端同样应保留实测角（坐向轴是一条直线，两端测量同源）
+        face = {c.name: c for c in result.direction_candidates}["午"]
+        assert angular_distance(face.angle, 183.0) < 0.5, (
+            f"向山实测角应约 183.0°，实得 {face.angle:.2f}°"
+        )
 
 
 # ==========================================================================
