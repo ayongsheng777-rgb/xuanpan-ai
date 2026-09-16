@@ -183,6 +183,7 @@ xuanpan-ai/
 "$PY" -m pytest tests/vision                  # 罗盘识别
 "$PY" -m pytest tests/ai                      # AI 解释层
 "$PY" -m pytest tests/api                     # 后端服务
+"$PY" -m pytest tests/mobile                  # 前端几何 ↔ 后端山表 一致性
 
 # 注意：pyproject 的 addopts 已含 -q，命令行再传 -q 会变成 -qq 而**吞掉汇总行**。
 # 想看到 "N passed" 就不要重复传 -q；屏蔽依赖告警用 -p no:warnings。
@@ -198,6 +199,40 @@ PYTHONPATH='services/api;services/ai;services/vision;packages/fortune-core' \
 
 > ⚠️ **8352 已被本机 SysCenter 占用**，本地联调一律用 8360 等其它端口。
 > 文档：<http://127.0.0.1:8360/docs>
+
+**移动端（`$NODE` = `C:/Users/anyong/.workbuddy/binaries/node/versions/22.22.2-3/node.exe`）**
+
+```bash
+# [Host] 安装依赖（首次）。registry 已在 apps/mobile/.npmrc 指向国内镜像 ——
+# 本机 registry.npmjs.org 不可达（curl 返回 000），用默认源会**静默卡死**十几分钟
+# 且 node_modules 一直不出现，很容易被误判成"Expo 依赖本来就大"。
+cd apps/mobile && npm install
+
+# [Host] 类型检查（零容忍）
+cd apps/mobile && npm run typecheck
+
+# [Host] 打包验证 —— 最强的一道：真实解析全部 import 与依赖图
+# 产出 .hbc 字节码即为通过，不需要设备/模拟器。
+# 必跑的理由：tsc 只查类型，不查模块能否解析 —— 本轮 query-string 缺失
+# 就是"tsc 全绿、一打包就炸"。
+cd apps/mobile && npx expo export --platform android --output-dir /tmp/xp-export
+
+# [Host] 导出环形选择器几何（JSON 到 stdout），人工核对用
+cd apps/mobile && npm run geometry:probe
+
+# [Host] 起开发服务器（需先起后端）
+cd apps/mobile && npm start
+```
+
+> `tests/mobile/` 下有两道前后端一致性校验，都**不依赖 React Native 运行时**：
+>
+> | 文件 | 校验什么 | 失败意味着 |
+> |---|---|---|
+> | `test_ring24_parity.py` | 真正执行 `apps/mobile/src/lib/ring24.ts`（Node ≥ 22.6 的 `--experimental-strip-types`），把几何结果与 `fortune_core.mountain24` 逐位比对 | 环形选择器与后端山表漂移 → 用户点「午」算出「未」 |
+> | `test_types_contract.py` | 跑通真实链路取回响应，核对 `types.ts` 声明的字段是否都存在 | 前端字段名写错 → 界面某格静默变空（不报编译错） |
+>
+> 两者都做过**变异验证**（故意改坏后确认能失败），不是假绿。
+> 没装 Node 时前者跳过而非失败。
 
 **端到端冒烟（对真实服务发请求，非 TestClient）**
 
