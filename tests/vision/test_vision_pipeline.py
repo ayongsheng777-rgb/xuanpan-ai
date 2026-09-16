@@ -10,7 +10,7 @@ from __future__ import annotations
 import math
 
 import pytest
-from PIL import Image
+from PIL import Image, ImageDraw
 
 from xuanpan_vision.geometry import (
     detect_circle,
@@ -546,3 +546,80 @@ class TestVisionPromptContract:
     def test_extract_json_failure(self) -> None:
         with pytest.raises(ValueError):
             extract_json("完全没有 JSON")
+
+
+# ==========================================================================
+# 贴边判据 —— 「罗盘未完整进入画面」必须是几何结论，不是噪点结论
+# ==========================================================================
+#
+# 这一组锁的是一个已修复的真实缺陷：原实现为
+#     touches = mask[:2,:].any() or mask[-2:,:].any() or mask[:,:2].any() or mask[:,-2:].any()
+# 即「边缘 2px 条带里存在任意一个前景像素」就判贴边。噪点下必然误报。
+#
+# 为什么必须锁死：真实照片必然带传感器噪点，而该判据给出的补救指引是
+# 「调整距离让整个圆盘入镜」—— 盘体本来就在画面内，用户**永远修不好**。
+# 实测（scripts/gate1_eval.py）：640px 合成图叠加 noise=6 从 5/5 掉到 0/5，
+# 而同一张图半径估计 270.5px vs 真值 268.8px，仅差 0.6% —— 检测本身是对的。
+
+
+class TestBorderCriterion:
+    """贴边判据必须是「拟合圆被画面裁切」，而非「掩膜边缘有条带像素」。"""
+
+    def test_stray_border_pixels_do_not_fake_crop(self) -> None:
+        """干净图 + 边缘杂散像素 → 仍应识别成功。
+
+        这是缺陷的最紧致复现：改动前每加一个边缘像素都可能翻掉结论。
+        """
+        base = render_compass(size=900, thread_angle=45.0)
+        dirty = base.copy()
+        draw = ImageDraw.Draw(dirty)
+        for xy in ((2, 2), (897, 3), (450, 1), (450, 898), (1, 700)):
+            draw.point(xy, fill=0)
+
+        clean_detect = detect_circle(base)
+        dirty_detect = detect_circle(dirty)
+
+        assert clean_detect.touches_border is False
+        assert dirty_detect.touches_border is False, (
+            "边缘单个杂散像素不应被判定为「罗盘未完整进入画面」——"
+            "真实照片一定有噪点，此类误报会让用户按提示调距离而永远修不好"
+        )
+
+        result, _ = analyze_compass(dirty)
+        assert result.compass_detected is True
+        assert not any("完整进入画面" in r for r in result.uncertain_regions)
+
+    def test_noise_does_not_fake_crop(self) -> None:
+        """噪点降质图 → 不得报「未完整进入画面」。
+
+        用 640px（触发 DETECT_WORK_SIZE=384 缩放）+ noise=6，
+        这是实测中从 5/5 掉到 0/5 的那一档。
+        """
+        for angle in (0.0, 45.0, 90.0, 177.0, 270.0):
+            img = render_compass(size=640, thread_angle=angle, noise=6.0)
+            result, _ = analyze_compass(img)
+            assert result.compass_detected is True, f"{angle}° 噪点图被误拒"
+            names = sorted(c.name for c in result.mountain_candidates)
+            assert names == sorted(expected_mountains(angle)), f"{angle}° 候选错误：{names}"
+
+    def test_genuinely_cropped_compass_is_still_rejected(self) -> None:
+        """真裁切仍须被拒 —— 修误报不能把闸门一起删掉。
+
+        把圆盘右侧切掉约 1/4，拟合圆必然越界，属几何意义上的「未完整入镜」。
+        """
+        base = render_compass(size=900, thread_angle=45.0)
+        cropped = base.crop((0, 0, 760, 900))
+
+        detection = detect_circle(cropped)
+        assert detection.touches_border is True, "真裁切未被判贴边，闸门覆盖出现漏洞"
+
+        result, _ = analyze_compass(cropped)
+        assert result.compass_detected is False
+        assert any("完整进入画面" in r for r in result.uncertain_regions)
+
+    # 注：曾有第四个用例想断言「遮挡由 circularity 兜底」，实测证伪 ——
+    # circularity 衡量的是**超出**等效半径的离群前景占比，中心挖洞或盘缘缺口
+    # 都不降低它（实测均为 1.00），故该断言不成立，已删除而非改成迁就实现的弱断言。
+    #
+    # 由此暴露的真实问题（背景杂物污染掩膜）记在《Gate1 合成退化扫描》的
+    # 「背景杂物」档位，不在此处用测试固化当前错误行为。

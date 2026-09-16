@@ -88,7 +88,7 @@ class CircleDetection:
     confidence: float
     circularity: float          # 前景落在半径内的比例，1.0 = 完美圆
     fill_ratio: float           # 前景占比
-    touches_border: bool        # 前景是否贴到画面边缘（罗盘未完整入镜）
+    touches_border: bool        # 拟合圆被画面裁切（罗盘未完整入镜），几何判据
     semi_axes: tuple[float, float] | None = None   # 椭圆长短半轴
     tilt_deg: float | None = None                  # 椭圆长轴倾角（度，图像坐标系）
     reason: str | None = None                      # 未检测到时的说明
@@ -394,10 +394,19 @@ def detect_circle(
     tilt = selection.tilt_deg if selection.tilt_deg is not None else 0.0
 
     # ---- 是否贴边 ----
-    border = 2
+    # 「罗盘未完整进入画面」的语义是**拟合圆被画面裁切**，必须用几何判据。
+    #
+    # 原实现是「掩膜边缘条带里存在任意一个前景像素即判贴边」，在噪点下必然误报：
+    # 真实照片带传感器噪点 → 边缘出现稀疏杂散像素 → 恒定报「未完整入镜」。
+    # 而该提示让用户「调整距离让整个圆盘入镜」，**永远修不好** —— 盘体本来就在画面内。
+    # 实测（scripts/gate1_eval.py）：640px 合成图叠加 noise=6 从 5/5 直落到 0/5，
+    # 而同一张图的半径估计 270.5px 与真值 268.8px 只差 0.6%，即检测本身是对的。
+    #
+    # 真正的裁切由两处兜住：本判据处理「圆心到边距不足半径」的明显越界，
+    # 缺角/遮挡则由下面的 circularity < 0.85 捕获，覆盖面不丢失。
+    h, w = mask.shape
     touches = bool(
-        mask[:border, :].any() or mask[-border:, :].any()
-        or mask[:, :border].any() or mask[:, -border:].any()
+        cx - radius < 0.0 or cx + radius > w or cy - radius < 0.0 or cy + radius > h
     )
 
     # ---- 置信度 ----
