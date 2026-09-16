@@ -1,0 +1,377 @@
+/**
+ * 后端 API 客户端。
+ *
+ * 三条设计原则：
+ *
+ * 1. **错误必须带可读原因**。后端已经把"谁的错"分成了 400/404/413/422/503，
+ *    这里把 `{"detail": "..."}` 抽出来包成 `ApiError`，让界面能直接显示
+ *    「坐山「戊」不是二十四山之一；可用值：…」。若只抛 `Request failed: 400`，
+ *    用户看到的是一句没有信息量的红字。
+ *
+ * 2. **只读与写分离**。所有写操作（确认坐向、生成报告）都是显式方法，
+ *    不做"自动重试" —— 生成报告要花钱，重试会把账单翻倍。
+ *
+ * 3. **不在客户端持有任何模型密钥**（AGENTS.md §5.5 红线）：
+ *    provider 的能力与可用性一律从 `/meta/ai-providers` 读服务端状态，
+ *    客户端只负责**展示**，不负责录入 key。
+ *
+ * ## 为什么公开方法写成箭头函数属性，而不是普通类方法
+ *
+ * 普通类方法依赖调用时的接收者。一旦把它当值传出去 ——
+ * 例如 `useSubmit(getApiClient().scan)` —— 就丢了 `this`，
+ * 方法内部 `this.request` 抛 `TypeError: Cannot read properties of undefined`。
+ *
+ * 这个坑**不会在编译期暴露**：类型完全合法，只在用户真的按下按钮时才炸。
+ * 本次开发中它一次性出现在 9 个调用点上（八字页、占测页各若干），
+ * 说明问题不在调用方粗心，而在 API 形状本身 —— 一个"必须先 bind 才能用"
+ * 的对象是易误用的接口。所以根治方式是让它天生可传：
+ * 公开方法一律写成箭头函数属性（词法捕获 `this`），
+ * 调用方无论怎么传都不会丢接收者。
+ *
+ * 私有的 `request` / `json` 保持普通方法 —— 它们从不被单独传出去，
+ * 且每次调用都显式写成 `this.request(...)`。
+ */
+
+import Constants from 'expo-constants';
+
+import type {
+  AiProvidersResponse,
+  AskRequest,
+  BaziInput,
+  CapabilitiesResponse,
+  CompassConfirmRequest,
+  CompassInput,
+  DeletedResponse,
+  InputPatch,
+  LayerPreview,
+  LiuyaoInput,
+  MountainsResponse,
+  NamingInput,
+  QianInput,
+  QianSet,
+  QuestionCategoriesResponse,
+  RecognitionSnapshot,
+  ReportMeta,
+  ReportRequest,
+  ReportResponse,
+  ScanResult,
+  SessionCreated,
+  SessionDetail,
+  SessionListResponse,
+  Turn,
+  VisionProvidersResponse,
+} from './types';
+
+// ==========================================================================
+// 错误
+// ==========================================================================
+
+export class ApiError extends Error {
+  readonly status: number;
+  readonly detail: string;
+  readonly code?: string;
+
+  constructor(status: number, detail: string, code?: string) {
+    super(detail);
+    this.name = 'ApiError';
+    this.status = status;
+    this.detail = detail;
+    this.code = code;
+  }
+
+  /** 是否为"用户输入不成立"类错误（可直接把 detail 展示给用户） */
+  get isUserFixable(): boolean {
+    return this.status === 400 || this.status === 413 || this.status === 422;
+  }
+}
+
+/** 网络层失败（断网、后端没起、超时）—— 与"后端返回错误"是两回事 */
+export class NetworkError extends Error {
+  // `override` 是必需的：`cause` 在 ES2022 的 `Error` 上已存在，
+  // 漏写会被 tsc 判为 TS4115（tsconfig 的 lib 含 ESNext，故该成员可见）。
+  constructor(message: string, override readonly cause?: unknown) {
+    super(message);
+    this.name = 'NetworkError';
+  }
+}
+
+// ==========================================================================
+// 客户端
+// ==========================================================================
+
+export interface ApiClientOptions {
+  baseUrl: string;
+  /** 超时（毫秒）。识别与报告都要跑模型，给得比普通请求宽 */
+  timeoutMs?: number;
+  /** 注入用（测试/自定义 fetch） */
+  fetchImpl?: typeof fetch;
+}
+
+const DEFAULT_TIMEOUT = 20_000;
+const HEAVY_TIMEOUT = 90_000;
+
+/**
+ * 后端默认地址。
+ *
+ * 刻意**不是 8352** —— 该端口被同机另一个服务（SysCenter）占用，
+ * 用它会让"后端没起"与"端口被别的东西占了"这两种故障长得一模一样。
+ */
+export const DEFAULT_BASE_URL = 'http://127.0.0.1:8360';
+
+export class ApiClient {
+  readonly baseUrl: string;
+  private readonly timeoutMs: number;
+  private readonly fetchImpl: typeof fetch;
+
+  constructor(opts: ApiClientOptions) {
+    this.baseUrl = opts.baseUrl.replace(/\/+$/, '');
+    this.timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT;
+    // RN 全局有 fetch；绑定到 globalThis 避免 "Illegal invocation"
+    this.fetchImpl = opts.fetchImpl ?? globalThis.fetch.bind(globalThis);
+  }
+
+  // ------------------------------------------------------------------ 内部
+
+  private async request<T>(
+    path: string,
+    init: RequestInit & { timeoutMs?: number } = {},
+  ): Promise<T> {
+    const { timeoutMs, ...rest } = init;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs ?? this.timeoutMs);
+
+    let res: Response;
+    try {
+      res = await this.fetchImpl(`${this.baseUrl}${path}`, {
+        ...rest,
+        signal: controller.signal,
+        headers: { Accept: 'application/json', ...(rest.headers ?? {}) },
+      });
+    } catch (err) {
+      // AbortError 也要区分出来：超时与"后端没起"对用户的指引完全不同
+      if (err instanceof Error && err.name === 'AbortError') {
+        throw new NetworkError('请求超时，请检查后端服务是否可用', err);
+      }
+      throw new NetworkError('无法连接后端服务，请检查地址与网络', err);
+    } finally {
+      clearTimeout(timer);
+    }
+
+    const text = await res.text();
+    const body = text ? safeJson(text) : null;
+
+    if (!res.ok) {
+      const detail =
+        (body && typeof body === 'object' && 'detail' in body
+          ? String((body as { detail: unknown }).detail)
+          : null) ?? `请求失败（HTTP ${res.status}）`;
+      const code =
+        body && typeof body === 'object' && 'error' in body
+          ? String((body as { error: unknown }).error)
+          : undefined;
+      throw new ApiError(res.status, detail, code);
+    }
+
+    return body as T;
+  }
+
+  private json<T>(path: string, method: string, payload?: unknown, timeoutMs?: number): Promise<T> {
+    return this.request<T>(path, {
+      method,
+      headers: payload === undefined ? undefined : { 'Content-Type': 'application/json' },
+      body: payload === undefined ? undefined : JSON.stringify(payload),
+      timeoutMs,
+    });
+  }
+
+  // ------------------------------------------------------------------ 运维
+
+  health = (): Promise<{ status: string; db: string; ai_mode: string; keep_photos: boolean }> =>
+    this.request('/healthz');
+
+  // ------------------------------------------------------------------ 元信息
+
+  mountains = (): Promise<MountainsResponse> => this.request('/api/v1/meta/mountains');
+
+  questionCategories = (): Promise<QuestionCategoriesResponse> =>
+    this.request('/api/v1/meta/question-categories');
+
+  aiProviders = (): Promise<AiProvidersResponse> => this.request('/api/v1/meta/ai-providers');
+
+  visionProviders = (): Promise<VisionProvidersResponse> =>
+    this.request('/api/v1/meta/vision-providers');
+
+  qianSets = (): Promise<{ sets: QianSet[] }> => this.request('/api/v1/meta/qian-sets');
+
+  capabilities = (): Promise<CapabilitiesResponse> => this.request('/api/v1/meta/capabilities');
+
+  disclaimer = (): Promise<{ disclaimer: string }> => this.request('/api/v1/meta/disclaimer');
+
+  // ------------------------------------------------------------------ 识别
+
+  /**
+   * 上传罗盘照片识别。
+   *
+   * 相机与相册在客户端是两个入口，但**走同一个方法** —— 基线规范 §4.1
+   * 要求"相册里的旧照片同样必须先过质量检测"，分两个方法迟早有人只给相机加质检。
+   */
+  scan = async (uri: string, filename = 'compass.jpg'): Promise<ScanResult> => {
+    const form = new FormData();
+    // RN 的 FormData 接受 {uri, name, type} 这种"文件对象"
+    form.append('image', {
+      uri,
+      name: filename,
+      type: guessMime(filename),
+    } as unknown as Blob);
+
+    return this.request<ScanResult>('/api/v1/scan?provider=classical', {
+      method: 'POST',
+      body: form,
+      timeoutMs: HEAVY_TIMEOUT,
+    });
+  };
+
+  // ------------------------------------------------------------------ 会话
+
+  createSession = (
+    payload: {
+      question_category?: string | null;
+      question_text?: string | null;
+      title?: string | null;
+    } = {},
+  ): Promise<SessionCreated> => this.json('/api/v1/sessions', 'POST', payload);
+
+  listSessions = (limit = 50, offset = 0): Promise<SessionListResponse> =>
+    this.request(`/api/v1/sessions?limit=${limit}&offset=${offset}`);
+
+  getSession = (sessionId: string): Promise<SessionDetail> =>
+    this.request(`/api/v1/sessions/${encodeURIComponent(sessionId)}`);
+
+  patchInputs = (
+    sessionId: string,
+    patch: InputPatch,
+  ): Promise<{
+    session_id: string;
+    updated: string[];
+    previews: Record<string, LayerPreview>;
+  }> => this.json(`/api/v1/sessions/${encodeURIComponent(sessionId)}/inputs`, 'PATCH', patch);
+
+  /** 确认坐向 —— 识别链路进入计算链路的**唯一**放行点（RULE-004） */
+  confirmCompass = (sessionId: string, payload: CompassConfirmRequest): Promise<LayerPreview> =>
+    this.json(
+      `/api/v1/sessions/${encodeURIComponent(sessionId)}/compass/confirm`,
+      'POST',
+      payload,
+    );
+
+  deleteSession = (sessionId: string): Promise<DeletedResponse> =>
+    this.json(`/api/v1/sessions/${encodeURIComponent(sessionId)}`, 'DELETE');
+
+  // ------------------------------------------------------------------ 计算预览
+
+  calcCompass = (input: CompassInput): Promise<LayerPreview> =>
+    this.json('/api/v1/calc/compass', 'POST', input);
+
+  calcBazi = (input: BaziInput): Promise<LayerPreview> =>
+    this.json('/api/v1/calc/bazi', 'POST', input);
+
+  calcLiuyao = (input: LiuyaoInput): Promise<LayerPreview> =>
+    this.json('/api/v1/calc/liuyao', 'POST', input);
+
+  calcQian = (input: QianInput): Promise<LayerPreview> =>
+    this.json('/api/v1/calc/qian', 'POST', input);
+
+  calcNaming = (input: NamingInput): Promise<LayerPreview> =>
+    this.json('/api/v1/calc/naming', 'POST', input);
+
+  // ------------------------------------------------------------------ 报告
+
+  /** 生成报告（写操作，**不自动重试** —— 要花钱） */
+  generateReport = (sessionId: string, req: ReportRequest = {}): Promise<ReportResponse> =>
+    this.json(
+      `/api/v1/sessions/${encodeURIComponent(sessionId)}/report`,
+      'POST',
+      req,
+      HEAVY_TIMEOUT,
+    );
+
+  ask = (sessionId: string, req: AskRequest): Promise<ReportResponse> =>
+    this.json(
+      `/api/v1/sessions/${encodeURIComponent(sessionId)}/ask`,
+      'POST',
+      req,
+      HEAVY_TIMEOUT,
+    );
+
+  listReports = (sessionId: string): Promise<{ items: ReportMeta[] }> =>
+    this.request(`/api/v1/sessions/${encodeURIComponent(sessionId)}/reports`);
+
+  listTurns = (sessionId: string): Promise<{ items: Turn[] }> =>
+    this.request(`/api/v1/sessions/${encodeURIComponent(sessionId)}/turns`);
+
+  getReport = (
+    reportId: string,
+  ): Promise<{
+    report_id: string;
+    session_id: string;
+    created_at: string;
+    question: string | null;
+    payload: Record<string, unknown>;
+  }> => this.request(`/api/v1/reports/${encodeURIComponent(reportId)}`);
+}
+
+// ==========================================================================
+// 工具
+// ==========================================================================
+
+function safeJson(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+
+function guessMime(filename: string): string {
+  const lower = filename.toLowerCase();
+  if (lower.endsWith('.png')) return 'image/png';
+  if (lower.endsWith('.webp')) return 'image/webp';
+  if (lower.endsWith('.heic')) return 'image/heic';
+  return 'image/jpeg';
+}
+
+/** 供 `RecognitionSnapshot` 类型收窄用（后端返回的识别快照） */
+export type { RecognitionSnapshot };
+
+// ==========================================================================
+// 默认实例
+// ==========================================================================
+
+/**
+ * 从 Expo 配置读后端地址。
+ *
+ * 默认 `http://127.0.0.1:8360`（**不是 8352** —— 该端口被本机 SysCenter 占用）。
+ * 真机调试时改为局域网 IP，例如 `http://192.168.1.10:8360`。
+ * 地址属于"环境"而非"密钥"，写在 app.json 的 extra 里是合适的。
+ */
+export function resolveBaseUrl(): string {
+  // 静态导入而非 require()：本工程 tsconfig 的 `types` 只放行 react-native，
+  // Node 的 `require` 全局并不在其中，用 require 会报 "Cannot find name"。
+  const cfg = Constants.expoConfig;
+  return cfg?.extra?.apiBaseUrl ?? DEFAULT_BASE_URL;
+}
+
+let _client: ApiClient | null = null;
+
+export function getApiClient(): ApiClient {
+  if (!_client) {
+    _client = new ApiClient({ baseUrl: resolveBaseUrl() });
+  }
+  return _client;
+}
+
+/** 切换后端地址（「我的 → 网络线路」用） */
+export function setApiBaseUrl(baseUrl: string): ApiClient {
+  _client = new ApiClient({ baseUrl });
+  return _client;
+}

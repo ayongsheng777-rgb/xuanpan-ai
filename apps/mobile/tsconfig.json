@@ -1,0 +1,21 @@
+{
+  "extends": "expo/tsconfig.base",
+  "compilerOptions": {
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "forceConsistentCasingInFileNames": true,
+    "jsx": "react-jsx",
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["src/*"]
+    },
+    "types": ["react", "react-native"]
+  },
+  "include": ["**/*.ts", "**/*.tsx", ".expo/types/**/*.ts", "expo-env.d.ts"],
+  // scripts/ 是给 Node 直接执行（--experimental-strip-types）的校验探针，
+  // 它们按 Node ESM 要求**显式带 .ts 后缀**导入模块，而 tsc 默认禁止这种写法
+  // （allowImportingTsExtensions）。这些文件不进 Metro 打包，单独排除即可。
+  "exclude": ["node_modules", "dist", ".expo", "scripts"]
+}

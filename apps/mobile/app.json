@@ -1,0 +1,58 @@
+{
+  "expo": {
+    "name": "玄盘 AI",
+    "slug": "xuanpan-ai",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "scheme": "xuanpan",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "splash": {
+      "resizeMode": "contain",
+      "backgroundColor": "#E5D7C7"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.xuanpan.ai",
+      "infoPlist": {
+        "NSCameraUsageDescription": "用于拍摄罗盘进行坐向识别",
+        "NSPhotoLibraryUsageDescription": "用于从相册选择已拍摄的罗盘照片"
+      }
+    },
+    "android": {
+      "package": "com.xuanpan.ai",
+      "edgeToEdgeEnabled": true,
+      "permissions": [
+        "CAMERA",
+        "READ_MEDIA_IMAGES"
+      ]
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "single"
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "用于拍摄罗盘进行坐向识别"
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "用于从相册选择已拍摄的罗盘照片"
+        }
+      ],
+      "expo-asset",
+      "expo-font"
+    ],
+    "experiments": {
+      "typedRoutes": false
+    },
+    "extra": {
+      "apiBaseUrl": "http://127.0.0.1:8360"
+    }
+  }
+}
