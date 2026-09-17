@@ -676,3 +676,40 @@ class TestSchool:
     def test_default_base_is_the_jingjing_one(self) -> None:
         d = cast_taiyi(2002).to_dict()
         assert d["jiyan_base"] == JIYAN_BASE
+
+
+# ==========================================================================
+# 十三、包门面完整性
+# ==========================================================================
+
+
+class TestPackageFacade:
+    """包门面的完整性守卫。
+
+    路由层是从 `fortune_core.taiyi` 这个门面导入领域表的。门面漏一个名字，
+    接口会在**运行期**抛 ImportError —— 实测发生过：写 `/taiyi/meta` 时漏了
+    `BAMEN_CYCLE_YEARS`、`WENCHANG_CYCLE_YEARS`、`WUYUAN_NAMES` 等 8 个，
+    直到路由测试报 400 才发现。这条守卫让漏名字在测试期就暴露。
+    """
+
+    def test_every_constant_is_reachable_from_facade(self) -> None:
+        import fortune_core.taiyi as facade
+        from fortune_core.taiyi import constants as C
+
+        missing = [n for n in C.__all__ if not hasattr(facade, n)]
+        assert missing == [], f"包门面缺少常量：{missing}"
+
+    def test_every_pan_public_name_is_reachable_from_facade(self) -> None:
+        import fortune_core.taiyi as facade
+        from fortune_core.taiyi import pan
+
+        missing = [n for n in pan.__all__ if not hasattr(facade, n)]
+        assert missing == [], f"包门面缺少函数：{missing}"
+
+    def test_facade_all_has_no_dead_names(self) -> None:
+        """反向也要查：门面 `__all__` 里列了但取不到的名字同样是 bug
+        （`from x import *` 会直接炸）。"""
+        import fortune_core.taiyi as facade
+
+        dead = [n for n in facade.__all__ if not hasattr(facade, n)]
+        assert dead == [], f"__all__ 里有无效名字：{dead}"
