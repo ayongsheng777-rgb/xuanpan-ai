@@ -14,14 +14,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Sequence
 
-from .constants import (
+from ..constants import (
     DIZHI,
     ELEMENT_CN,
     GUA_XIANTIAN_NUMBER,
     GUA_ELEMENT,
     GUA_YAO,
 )
-from .exceptions import InvalidInputError
+from ..exceptions import InvalidInputError
 
 # 先天八卦序（1..8），用于取余定卦：余 0 归 8（坤）
 GUA_ORDER_BY_NUMBER: tuple[str, ...] = ("乾", "兑", "离", "震", "巽", "坎", "艮", "坤")
