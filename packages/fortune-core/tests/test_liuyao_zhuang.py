@@ -572,6 +572,28 @@ class TestYongShen:
         d = zhuang_gua(result, day_pillar="甲子")
         assert d.yongshen is None and d.yongshen_yao == ()
 
+    def test_all_question_categories_map_to_yongshen(self):
+        """App 里用户可选的每个类别都必须能取到用神（「其他」除外）。
+
+        为什么值得单测：`QUESTION_CATEGORIES`（用户在 App 里选的 8 个类别）与
+        `YONGSHEN_BY_TOPIC`（取用神用的词表）是**两套词表**，只靠命名来对齐。
+        一旦有人往前者加了类别而忘了补后者，用户在 App 里选它 →
+        `yongshen_of` 返回 None → 断卦走「用神不上卦」分支给出「中平」。
+        那个结果**看起来完全正常**，实际与所问之事毫无关系 ——
+        这正是本项目最该防的静默降级。这条断言把它变成红灯。
+        """
+        from fortune_core.context import QUESTION_CATEGORIES
+
+        unmapped = [
+            c for c in QUESTION_CATEGORIES
+            if c not in ("其他", "婚姻") and yongshen_of(c) is None
+        ]
+        assert unmapped == [], f"这些全项目问题类别取不到用神：{unmapped}"
+
+        # 婚姻类按性别取用，两个方向都必须取得（缺性别则返回 None 是**设计**，不在此断言）
+        assert yongshen_of("婚姻", "male") is not None
+        assert yongshen_of("婚姻", "female") is not None
+
 
 # ==========================================================================
 # 十一、全卦遍历 —— 装卦不得对任何一卦报错
