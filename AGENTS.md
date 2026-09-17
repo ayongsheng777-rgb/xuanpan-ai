@@ -153,8 +153,8 @@ xuanpan-ai/
 ├── apps/mobile/              # React Native + Expo
 ├── services/                 # api / ai-router / vision / gateway / worker
 ├── packages/fortune-core/    # 唯一计算内核（确定性，禁 LLM 介入）
-├── mcp/xuanpan-mcp/          # 后续：对外暴露计算能力
-├── data/                     # 领域数据（二十四山 / 签文 / 命名）
+├── services/mcp/             # MCP 暴露层（已落地，8 工具，stdio）
+├── data/                     # 运行时产物（SQLite 库、上传原件）；领域数据表在 packages/fortune-core/data/
 ├── tests/
 ├── docs/
 └── AGENTS.md
