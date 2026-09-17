@@ -55,6 +55,16 @@ SCHOOLS: dict[str, dict[str, str]] = {
 
 YUAN_LABEL: tuple[str, str, str] = ("上元", "中元", "下元")
 
+#: 内核**显式未覆盖项**。提为模块常量而不是写在 `cast_qimen` 里，
+#: 是为了让 HTTP 的 `/qimen/meta` 与排盘结果**共用同一份文案** ——
+#: 两处各写一份的话，改了内核忘了接口，界面就会少报一项未覆盖项。
+UNCERTAINTIES: tuple[str, ...] = (
+    "定局取拆补法；置闰法（超神接气）本版未实现，节气交界附近局数可能与置闰派不同",
+    "三元起算取「交节当日算第 1 天」（自然日），与按满 24 小时计的口径略有差异",
+    "八神名目取「白虎 / 玄武」，另有「勾陈 / 朱雀」一派",
+    "未做真太阳时校正：传入时刻按本地区时直接使用",
+)
+
 
 # --------------------------------------------------------------------------
 # 数据结构
@@ -95,7 +105,7 @@ class Dingju:
             "yang_dun": self.yang_dun,
             "dun_name": self.dun_name,
             "jushu": self.jushu,
-            "jushu_label": f"{self.dun_name}{self.jushu}局",
+            "jushu_label": self.jushu_label,
         }
 
 
@@ -459,13 +469,6 @@ def cast_qimen(
             )
         )
 
-    uncertainties = (
-        "定局取拆补法；置闰法（超神接气）本版未实现，节气交界附近局数可能与置闰派不同",
-        "三元起算取「交节当日算第 1 天」（自然日），与按满 24 小时计的口径略有差异",
-        "八神名目取「白虎 / 玄武」，另有「勾陈 / 朱雀」一派",
-        "未做真太阳时校正：传入时刻按本地区时直接使用",
-    )
-
     return QimenChart(
         dingju=dingju,
         pillars=pillars,
@@ -480,7 +483,7 @@ def cast_qimen(
         xun_kong=xun_kong,
         yima=yima,
         school=school,
-        uncertainties=uncertainties,
+        uncertainties=UNCERTAINTIES,
     )
 
 
@@ -501,6 +504,7 @@ def _gong_of_zhi(zhi: str) -> int:
 
 __all__ = [
     "SCHOOLS",
+    "UNCERTAINTIES",
     "YUAN_LABEL",
     "ZHI_TO_GONG",
     "Dingju",

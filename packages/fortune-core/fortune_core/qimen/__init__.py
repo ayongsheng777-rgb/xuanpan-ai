@@ -48,6 +48,7 @@ from .constants import (
 )
 from .pan import (
     SCHOOLS,
+    UNCERTAINTIES,
     YUAN_LABEL,
     ZHI_TO_GONG,
     Dingju,
@@ -71,7 +72,7 @@ __all__ = [
     "YANG_DUN_JIEQI", "YIN_DUN_JIEQI", "SHANGYUAN_JUSHU",
     "is_yang_dun", "jushu_of", "jushu_table",
     # 定局与排盘
-    "SCHOOLS", "YUAN_LABEL", "ZHI_TO_GONG",
+    "SCHOOLS", "UNCERTAINTIES", "YUAN_LABEL", "ZHI_TO_GONG",
     "Dingju", "QimenPalace", "QimenChart",
     "build_dipan", "cast_qimen", "resolve_dingju",
     "xun_kong_of", "xunshou_of", "yima_of",

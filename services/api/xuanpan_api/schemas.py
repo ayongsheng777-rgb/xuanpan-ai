@@ -10,7 +10,7 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -367,6 +367,46 @@ class DuanResponse(ApiModel):
     detail: dict[str, Any] = Field(default_factory=dict)
 
 
+# ======================================================================
+# 奇门遁甲（三式之一）
+# ======================================================================
+
+
+class QimenCastRequest(ApiModel):
+    """奇门排盘请求。
+
+    `dt` 用 datetime 而非 date —— 奇门以**时辰**起局（同一日不同时辰局可能不同），
+    只给日期排不出盘。时区由调用方换算，内核不做真太阳时校正（已在
+    `uncertainties` 中声明）。
+    """
+
+    dt: datetime = Field(
+        description="本地时刻（ISO 8601，如 2026-09-17T12:00:00）。必须是**本地时间**",
+    )
+    school: str = Field(default="chaibu", description="定局流派，见 /qimen/meta")
+    day_boundary: Literal["zi", "early_zi"] = Field(
+        default="zi", description="日界口径：zi=晚子时算次日（通行）"
+    )
+
+
+class QimenMetaResponse(ApiModel):
+    """排盘界面需要的静态元数据。
+
+    把局数表放进接口而不是让前端自己算 —— 局数表是**领域数据**（RULE-005），
+    前端硬编码一份必然与内核漂移，而漂移的表现是「界面显示的局数与实排不符」。
+    """
+
+    schools: list[dict[str, str]]
+    jushu_table: dict[str, list[int]] = Field(
+        description="节气 -> [上元, 中元, 下元] 局数"
+    )
+    yang_dun_jieqi: list[str]
+    yin_dun_jieqi: list[str]
+    uncertainties: list[str] = Field(
+        default_factory=list, description="内核未覆盖项，界面应如实展示"
+    )
+
+
 __all__ = [
     "ApiModel", "SessionCreate", "CompassInput", "BaziInput", "LiuyaoInput",
     "QianInput", "NamingInput", "InputPatch", "CompassConfirm",
@@ -375,4 +415,5 @@ __all__ = [
     "AlmanacDay", "AlmanacRange", "ZeriEvent", "ZeriEventsResponse",
     "ZeriSelect", "ZeriDayResponse", "ZeriResultResponse",
     "DuanLiuyaoRequest", "DuanResponse",
+    "QimenCastRequest", "QimenMetaResponse",
 ]
