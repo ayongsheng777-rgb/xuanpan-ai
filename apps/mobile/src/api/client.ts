@@ -57,6 +57,9 @@ import type {
   LiurenCastRequest,
   LiurenChart,
   LiurenMetaResponse,
+  TaiyiCastRequest,
+  TaiyiChart,
+  TaiyiMetaResponse,
   LiuyaoInput,
   MountainsResponse,
   NamingInput,
@@ -390,6 +393,26 @@ export class ApiClient {
    */
   liurenCast = (input: LiurenCastRequest): Promise<LiurenChart> =>
     this.json('/api/v1/liuren/cast', 'POST', input);
+
+  // ---------------------------------------------------------------- 太乙
+
+  /**
+   * 太乙元数据：宫号表 / 十六神落宫 / 文昌序列 / 值事八门。
+   *
+   * 「这一局是怎么来的」面板读它，**不自己维护一份宫号表** ——
+   * 宫号表是领域数据（RULE-005），前端存一份必然与内核漂移。
+   * 🔴 尤其宫号表与洛书逐宫错位：前端自己抄洛书必然整盘转 45°。
+   */
+  taiyiMeta = (): Promise<TaiyiMetaResponse> => this.request('/api/v1/taiyi/meta');
+
+  /**
+   * 太乙起局（年局）。
+   *
+   * `year` 必须是**公元年份** —— 太乙年局以年为最小单位，
+   * 与奇门/六壬「必须给到时辰」相反，这里不接受日期或时刻。
+   */
+  taiyiCast = (input: TaiyiCastRequest): Promise<TaiyiChart> =>
+    this.json('/api/v1/taiyi/cast', 'POST', input);
 
   // ------------------------------------------------------------------ 报告
 

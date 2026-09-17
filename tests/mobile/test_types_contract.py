@@ -352,6 +352,28 @@ def responses(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Any]:
         out["LiurenPalace"] = lr["palaces"][0]
         out["LiurenChuan"] = lr["chuan"][0]
 
+        # ---- 三式 · 太乙（年局，不落库、不进会话体系）----
+        # 年份**写死**到 1972（壬子年）：这是太乙阳遁首局的古籍锚点，
+        # 太乙起乾一宫、文昌在申、主算 7 客算 13 定算 13，
+        # 用固定年份才能核对确定事实，用"今年"会让断言随运行年漂移。
+        taiyi_meta = client.get("/api/v1/taiyi/meta").json()
+        out["TaiyiMetaResponse"] = taiyi_meta
+        out["TaiyiSchool"] = taiyi_meta["schools"][0]
+
+        ty = client.post(
+            "/api/v1/taiyi/cast",
+            json={"year": 1972, "school": "default"},
+        ).json()
+        out["TaiyiChart"] = ty
+        out["TaiyiTaiyi"] = ty["taiyi"]
+        out["TaiyiEpoch"] = ty["epoch"]
+        # 文昌/始击/定目三者同构（都是 TaiyiMu），取文昌做代表校验一次即可
+        out["TaiyiMu"] = ty["wenchang"]
+        out["TaiyiJishen"] = ty["jishen"]
+        out["TaiyiSuan"] = ty["sansuan"][0]
+        out["TaiyiBamen"] = ty["bamen"]
+        out["TaiyiBamenLayout"] = ty["bamen"]["layout"][0]
+
     return out
 
 
@@ -387,6 +409,13 @@ _CHECKED: tuple[str, ...] = (
     # 把「键存在但值为 null」误判成「键缺失」，是这类扁平盘面最常见的漂移。
     "LiurenMetaResponse", "LiurenSchool",
     "LiurenChart", "LiurenGuiren", "LiurenLesson", "LiurenPalace", "LiurenChuan",
+    # 三式 · 太乙 —— 同类风险，且多一层「宫号≠洛书」：
+    # `TaiyiMu.is_zheng` 区分八正神/间神（文昌/始击/定目三者同构，校验一次即可），
+    # `TaiyiTaiyi.li` 是理天/理地/理人，`TaiyiSuan.san_cai` 是列表（可能为空）。
+    "TaiyiMetaResponse", "TaiyiSchool",
+    "TaiyiChart", "TaiyiEpoch", "TaiyiTaiyi",
+    "TaiyiMu", "TaiyiJishen",
+    "TaiyiSuan", "TaiyiBamen", "TaiyiBamenLayout",
 )
 
 
@@ -901,4 +930,96 @@ def test_liuren_carries_uncertainties(responses: dict[str, Any]) -> None:
     )
     assert chart["school_name"], "盘面应带上流派显示名"
     assert chart["school"] in {s["id"] for s in meta["schools"]}
+
+
+# ==========================================================================
+# 三式 · 太乙
+# ==========================================================================
+
+
+def test_taiyi_never_enters_center_palace(responses: dict[str, Any]) -> None:
+    """太乙落宫永不为中五宫 —— 这是「太乙不入中宫」的铁律。
+
+    前端据此把八宫盘中央留白；若某年太乙落到 5，界面上会渲染一个
+    本不该存在的格子，且不报错。
+    """
+    ty = responses["TaiyiTaiyi"]
+    assert ty["palace"] != 5, f"太乙落宫为 {ty['palace']}，违反「不入中宫」"
+    assert ty["palace"] in {1, 2, 3, 4, 6, 7, 8, 9}
+    assert ty["gua"] != "中"
+
+
+def test_taiyi_palace_table_is_not_luoshu(responses: dict[str, Any]) -> None:
+    """太乙宫号表与洛书**逐宫错位** —— 前端摆位必须用独立表。
+
+    这是最危险的错法：复用奇门的洛书表会把整盘转 45°，
+    八个宫一个不少地渲染、盘面看起来完全正常，只是方位全错。
+    """
+    meta = responses["TaiyiMetaResponse"]
+    palace_gua = meta["palace_gua"]
+    # 太乙表：乾1 兑6；洛书：乾6 兑7 —— 逐宫错位
+    assert palace_gua["1"] == "乾", "太乙表里 1 宫应是乾（洛书里 1 是坎）"
+    assert palace_gua["6"] == "兑", "太乙表里 6 宫应是兑（洛书里 6 是乾）"
+    assert palace_gua["8"] == "坎", "太乙表里 8 宫应是坎（洛书里 8 是艮）"
+    # 八正宫（不含中五）齐全
+    assert set(int(k) for k in palace_gua if k != "5") == {1, 2, 3, 4, 6, 7, 8, 9}
+
+
+def test_taiyi_sansuan_is_three(responses: dict[str, Any]) -> None:
+    """主算 / 客算 / 定算恰好三算，顺序固定。"""
+    sansuan = responses["TaiyiChart"]["sansuan"]
+    assert [s["name"] for s in sansuan] == ["主算", "客算", "定算"]
+    assert len(sansuan) == 3
+
+
+def test_taiyi_bamen_layout_covers_eight_palaces(responses: dict[str, Any]) -> None:
+    """值事八门恰好覆盖八个非中宫，且每门带自身吉凶属性。"""
+    layout = responses["TaiyiBamen"]["layout"]
+    assert len(layout) == 8
+    palaces = sorted(l["palace"] for l in layout)
+    assert palaces == [1, 2, 3, 4, 6, 7, 8, 9], f"八门应覆盖八正宫，实为 {palaces}"
+    doors = sorted(l["door"] for l in layout)
+    assert doors == sorted(
+        ["开门", "休门", "生门", "伤门", "杜门", "景门", "死门", "惊门"]
+    ), f"八门应齐全，实为 {doors}"
+
+
+def test_taiyi_no_verdict_fields(responses: dict[str, Any]) -> None:
+    """RULE-008：太乙盘面只给事实，不给「利主利客」这类结论。
+
+    三算的长短、和数孤数、三才、八门吉凶都是**属性**，格局与断法属上层解读。
+    盘面顶层出现任何结论性字段都是违规。
+    """
+    top = set(responses["TaiyiChart"])
+    for forbidden in ("verdict", "conclusion", "jixiong", "ji_xiong", "judgement",
+                      "advice", "li_zhu", "li_ke"):
+        assert forbidden not in top, (
+            f"太乙盘面出现了结论性字段 {forbidden!r} —— 盘面只给事实（RULE-008）"
+        )
+
+
+def test_taiyi_carries_uncertainties(responses: dict[str, Any]) -> None:
+    """未覆盖项必须如实带出，且盘面与元数据**同源**。"""
+    chart = responses["TaiyiChart"]
+    meta = responses["TaiyiMetaResponse"]
+    assert chart["uncertainties"], "太乙盘面必须带出未覆盖项"
+    assert chart["uncertainties"] == meta["uncertainties"], (
+        "盘面与元数据的未覆盖项不同源"
+    )
+    assert chart["school"] in {s["id"] for s in meta["schools"]}
+
+
+def test_taiyi_1972_anchor_matches(responses: dict[str, Any]) -> None:
+    """1972（壬子）是太乙阳遁首局古籍锚点，逐字段核对。"""
+    chart = responses["TaiyiChart"]
+    assert chart["year"] == 1972
+    assert chart["year_ganzhi"] == "壬子"
+    assert chart["epoch"]["ju_label"] == "壬子元第 1 局"
+    assert chart["taiyi"]["palace"] == 1
+    assert chart["taiyi"]["gua"] == "乾"
+    assert chart["wenchang"]["pos"] == "申"
+    assert chart["wenchang"]["name"] == "武德"
+    assert chart["jishen"]["zhi"] == "寅"
+    assert chart["shiji"]["pos"] == "坤"
+    assert [s["value"] for s in chart["sansuan"]] == [7, 13, 13]
 

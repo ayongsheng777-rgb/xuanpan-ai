@@ -820,3 +820,187 @@ export interface LiurenCastRequest {
   dt: string;
   school?: string;
 }
+// ======================================================================
+// 太乙神数（三式之三）
+// ======================================================================
+
+/**
+ * 太乙落宫。
+ *
+ * 🔴 太乙宫号与洛书**逐宫错位**（乾1 离2 艮3 震4 兑6 坤7 坎8 巽9），
+ * 不要套用奇门的九宫 —— 前端摆位必须用独立的表，绝不能复用 `QIMEN_GRID`。
+ * `li`（理天 / 理地 / 理人）由「入宫第几年」导出：太乙每 3 年移一宫，
+ * 第 1 年理天、第 2 年理地、第 3 年理人。
+ */
+export interface TaiyiTaiyi {
+  /** 太乙宫号（1~9，永不为 5） */
+  palace: number;
+  /** 八卦名（太乙口径，与洛书错位） */
+  gua: string;
+  direction: string;
+  yinyang: 'yin' | 'yang';
+  /** 入宫第几年（1~3） */
+  ru_gong_year: number;
+  /** 理天 / 理地 / 理人 */
+  li: string;
+}
+
+/** 一个十六神位上的「目」（文昌 / 始击 / 定目）。 */
+export interface TaiyiMu {
+  /** 十六神位（子丑寅… 含四维乾坤巽艮） */
+  pos: string;
+  /** 神名（地主 / 阳德 / 武德 …） */
+  name: string;
+  palace: number;
+  gua: string;
+  direction: string;
+  /** 是否八正神（正宫）；间神（间辰）不落正宫 */
+  is_zheng: boolean;
+}
+
+/** 计神：只在十二支（不含四维）上起。 */
+export interface TaiyiJishen {
+  zhi: string;
+}
+
+/** 五元六纪。 */
+export interface TaiyiEpoch {
+  /** 元序（0~4，对应甲子元…壬子元） */
+  wuyuan_index: number;
+  wuyuan: string;
+  /** 元内局数 */
+  ju: number;
+  ju_label: string;
+  /** 纪序（1~6） */
+  ji_number: number;
+  /** 纪内第几年 */
+  ji_year: number;
+}
+
+/** 值事八门。 */
+export interface TaiyiBamen {
+  zhishi: string;
+  zhishi_jixiong: string;
+  layout: TaiyiBamenLayout[];
+}
+
+/** 一算（主算 / 客算 / 定算）。 */
+export interface TaiyiSuan {
+  name: string;
+  source_label: string;
+  source_pos: string;
+  source_name: string;
+  source_palace: number;
+  source_palace_gua: string;
+  /** 算数（和数） */
+  value: number;
+  /** 长 / 短 */
+  length: string;
+  /** 三才判定（无天 / 无地 / 无人 等，可为空） */
+  san_cai: string[];
+  he_class: string | null;
+  gu_class: string | null;
+  /** 大将落宫号 */
+  da_jiang: number;
+  da_jiang_gua: string;
+  /** 参将落宫号 */
+  can_jiang: number;
+  can_jiang_gua: string;
+}
+
+/** 值事八门中的一门落宫。 */
+export interface TaiyiBamenLayout {
+  palace: number;
+  gua: string;
+  door: string;
+  /** 门自身的固有吉凶属性，不是对所问之事的结论 */
+  jixiong: string;
+}
+
+/**
+ * 一张太乙年局盘。
+ *
+ * 与奇门 / 六壬一样是**扁平结构**：积年、五元六纪、太乙落宫、三目、
+ * 主客定三算、八门都在顶层，不分 facts / tradition 两层 ——
+ * 年局当前只有确定性的盘面事实。
+ */
+export interface TaiyiChart {
+  year: number;
+  year_ganzhi: string;
+  /** 太乙积年（取决于流派） */
+  jiyan: number;
+  school: string;
+  school_name: string;
+  jiyan_base: number;
+  /** 五元六纪 */
+  epoch: TaiyiEpoch;
+  tai_sui: string;
+  /** 合神 */
+  he_shen: string;
+  taiyi: TaiyiTaiyi;
+  wenchang: TaiyiMu;
+  jishen: TaiyiJishen;
+  shiji: TaiyiMu;
+  dingmu: TaiyiMu;
+  sansuan: TaiyiSuan[];
+  bamen: TaiyiBamen;
+  warnings: string[];
+  /** 本版**未覆盖项**，界面应如实展示，不得省略 */
+  uncertainties: string[];
+}
+
+export interface TaiyiSchool {
+  id: string;
+  name: string;
+  jiyan_base: number;
+  note: string;
+}
+
+/**
+ * 起局界面需要的静态元数据。
+ *
+ * 宫号表 / 十六神落宫 / 文昌序列 / 值事八门都由接口返回而**不是前端自己算**：
+ * 它们是领域数据（RULE-005），前端存一份必然与内核漂移。
+ * 🔴 尤其 `palace_gua` —— 太乙宫号与洛书逐宫错位，若前端自己抄一份洛书
+ * 必然整盘转 45°，且不报错。
+ */
+export interface TaiyiMetaResponse {
+  schools: TaiyiSchool[];
+  jiyan_base: number;
+  /** 宫号 -> 卦名（太乙口径，🔴≠洛书） */
+  palace_gua: Record<string, string>;
+  palace_direction: Record<string, string>;
+  palace_door_name: Record<string, string>;
+  palace_fenye: Record<string, string>;
+  palace_qi: Record<string, string>;
+  /** 十六神位 -> 神名 */
+  shen_names: Record<string, string>;
+  /** 八正神 -> 宫号 */
+  shen_palace: Record<string, number>;
+  zheng_shen: string[];
+  jian_shen: string[];
+  /** 文昌十八年行宫序列 */
+  wenchang_seq: string[];
+  jishen_rule: string;
+  bamen_order: string[];
+  bamen_benwei: Record<string, string>;
+  bamen_jixiong: Record<string, string>;
+  /** 太乙行宫序列（跳过中五） */
+  taiyi_xun_gong: number[];
+  years_per_palace: number;
+  cycle_years: number;
+  wenchang_cycle_years: number;
+  bamen_switch_years: number;
+  bamen_cycle_years: number;
+  wuyuan_names: string[];
+  uncertainties: string[];
+}
+
+export interface TaiyiCastRequest {
+  /**
+   * 公元年份。太乙是**年局** —— 最小单位就是年，
+   * 不接受日期或时刻（与奇门 / 六壬相反）。
+   */
+  year: number;
+  school?: string;
+}
