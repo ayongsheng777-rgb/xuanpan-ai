@@ -127,6 +127,18 @@ def test_parser_actually_works(ts_interfaces: dict[str, list[str]]) -> None:
     assert "string" not in ts_interfaces["QianSet"]
     assert ts_interfaces["ReportSection"] == ["title", "body"]
 
+    # 内联对象类型的各分量都写在**同一行**（如
+    # `gan_zhi: { year: string; month: string; day: string };`）。
+    # 若花括号深度判定失效，year/month/day 会被当成 AlmanacFacts 的顶层字段，
+    # 于是对着真实响应报出「缺 year」这种**假失败** —— 第一版就栽在这里，故显式钉住。
+    assert ts_interfaces["AlmanacFacts"] == [
+        "solar_date", "lunar", "gan_zhi", "jian_chu", "xiu", "tian_shen",
+        "chong", "yi", "ji", "ji_shen", "xiong_sha", "peng_zu", "rule_consistency",
+    ]
+    # 可选字段的 `?` 不能把字段名吞掉，否则它会整天报"响应里没有 unverified"
+    assert "unverified" in ts_interfaces["ZeriSchool"]
+    assert "description" in ts_interfaces["ZeriSchool"]
+
 
 # ==========================================================================
 # 真实响应采集
@@ -234,6 +246,71 @@ def responses(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Any]:
 
         out["DeletedResponse"] = client.delete(f"/api/v1/sessions/{sid}").json()
 
+        # ---- 日历域与断卦（不落库、不进会话体系）----
+        #
+        # 这三组接口与 session 完全独立：没有会话、没有报告、也不写库。
+        # 日期一律**写死**而不是用"今天" —— 这几条断言要的是"某一天的宜忌是什么"
+        # 这种确定事实，用相对日期会让结果随运行日漂移，失败时也说不清是算错还是日期变了。
+        day = client.get("/api/v1/almanac/day?date=2026-09-17").json()
+        out["AlmanacDay"] = day
+        out["AlmanacFacts"] = day["facts"]
+        out["AlmanacTradition"] = day["tradition"]
+        out["AlmanacRange"] = client.get(
+            "/api/v1/almanac/range?start=2026-09-17&end=2026-09-19"
+        ).json()
+
+        zeri_events = client.get("/api/v1/zeri/events").json()
+        out["ZeriEventsResponse"] = zeri_events
+        out["ZeriEvent"] = zeri_events["events"][0]
+        out["ZeriSchool"] = zeri_events["schools"][0]
+
+        # `include_unfavorable` 必须开：默认只回"可用"的日子，而某个区间
+        # 可能一天都没有 —— 那样 candidates 为空，`ZeriDay` 就无从校验，
+        # 测试会变成"没测到"而不是"测过"，且表现为通过。
+        sel = client.post(
+            "/api/v1/zeri/select",
+            json={
+                "event": "jiaqu",
+                "start": "2026-09-17",
+                "end": "2027-09-17",
+                "limit": 5,
+                "include_unfavorable": True,
+            },
+        ).json()
+        out["ZeriResultResponse"] = sel
+        out["ZeriResultFacts"] = sel["facts"]
+        out["ZeriResultTradition"] = sel["tradition"]
+        assert sel["facts"]["candidates"], (
+            "开了 include_unfavorable 仍无候选日 —— 无法校验 ZeriDay，"
+            "请换一个区间或事件"
+        )
+        out["ZeriDay"] = sel["facts"]["candidates"][0]
+
+        # `cast_date` 同样写死：起卦日决定日辰与月令，用"今天"会让旺衰结论
+        # 随运行日变化，而本测试要核对的是**字段是否齐全**，不该被结论变动干扰。
+        # 顺带覆盖"补录隔夜的卦"这条路径（显式传起卦日）。
+        out["DuanResponse"] = client.post(
+            "/api/v1/duan/liuyao",
+            json={
+                "method": "yao",
+                "yao_values": [7, 7, 7, 7, 7, 7],
+                "topic": "事业",
+                "gender": "male",
+                "cast_date": "2026-09-17",
+            },
+        ).json()
+
+        # 八字断卦与六爻共用同一个 `DuanResponse` 类型，但 **verdict 的语义不同**：
+        # 六爻是吉凶倾向，八字是「身强 / 身弱」这种日主状态。前端靠
+        # `verdictLabel` 与白名单着色来区分，所以两份响应都要采回来核对。
+        out["DuanBaziResponse"] = client.post(
+            "/api/v1/duan/bazi",
+            json={
+                "year": 1981, "month": 9, "day": 14, "hour": 8, "minute": 0,
+                "calendar": "solar", "gender": "male", "timezone": "Asia/Shanghai",
+            },
+        ).json()
+
     return out
 
 
@@ -252,6 +329,12 @@ _CHECKED: tuple[str, ...] = (
     "LayerPreview", "SessionDetail", "RecognitionSnapshot", "CompassConfirmState",
     "ReportResponse", "Report", "Interpretation", "ReportSection", "Attempt",
     "Turn", "ReportMeta", "DeletedResponse",
+    # 日历域与断卦 —— 这三组是新接入 App 的，属于最容易漂移的一批：
+    # 它们是手写类型，且此前只经 MCP 暴露，前端从未核对过。
+    "AlmanacDay", "AlmanacFacts", "AlmanacTradition", "AlmanacRange",
+    "ZeriEventsResponse", "ZeriEvent", "ZeriSchool",
+    "ZeriResultResponse", "ZeriResultFacts", "ZeriResultTradition", "ZeriDay",
+    "DuanResponse",
 )
 
 
@@ -349,3 +432,127 @@ def test_turn_content_is_not_empty(responses: dict[str, Any]) -> None:
     """
     assert responses["Turn"]["content"].strip(), "追问留痕不该是空内容"
     assert responses["Interpretation"]["raw_text"].strip(), "AI 原文不该为空"
+
+
+# ==========================================================================
+# 断卦：可回溯性
+# ==========================================================================
+
+
+def test_duan_liuyao_carries_traceable_basis(responses: dict[str, Any]) -> None:
+    """断卦结果必须写明「本盘用的是哪一天的日辰月令」。
+
+    这是断卦能否被信任的前提：旺衰完全由日辰与月令决定。
+    若响应里不说明用的是哪一天，**补录隔夜的卦**会拿到一套依据全错的结论，
+    而结论本身看起来完全正常 —— 没有任何迹象。
+    所以 `detail.basis` 不是可选装饰，而是这个接口的契约。
+    """
+    detail = responses["DuanResponse"]["detail"]
+    assert "basis" in detail, "断卦响应缺少 detail.basis，倾向无法回溯"
+
+    basis = detail["basis"]
+    assert set(basis) >= {
+        "cast_date", "day_pillar", "month_pillar", "topic", "gender", "yongshen",
+    }, f"basis 字段不全：{sorted(basis)}"
+    assert basis["cast_date"] == "2026-09-17", "回传的起卦日与请求不符"
+    assert basis["topic"] == "事业", "回传的占问类别与请求不符"
+    assert basis["day_pillar"] and basis["month_pillar"], "日辰 / 月令不得为空"
+    assert basis["yongshen"], "指定了占问类别，就必须取到用神（否则是静默降级）"
+
+
+def test_duan_liuyao_includes_full_zhuang_result(responses: dict[str, Any]) -> None:
+    """`detail.divination` 必须带**完整装卦结果**，而不是只有卦名。
+
+    只给一个「偏吉」而不给六亲 / 世应 / 旬空 / 旺衰，等于让用户无条件相信一个黑盒。
+    更要紧的是：装卦层是断卦的**唯一依据**，缺了它，倾向就无法被复核 ——
+    而"无法复核的结论"正是本项目 RULE-001 要防的东西。
+    """
+    div = responses["DuanResponse"]["detail"].get("divination")
+    assert isinstance(div, dict) and div, "断卦响应里没有装卦结果"
+
+    facts = div.get("facts")
+    assert isinstance(facts, dict) and facts, "装卦结果缺少 facts 层"
+    assert set(facts) >= {
+        "gua", "day_pillar", "month_pillar", "palace", "palace_stage",
+        "shi_position", "ying_position", "xun_kong", "yao_details",
+    }, f"装卦 facts 字段不全：{sorted(facts)}"
+
+    # 六爻六爻 —— 少于六条说明纳甲装卦没跑完
+    assert len(facts["yao_details"]) == 6, (
+        f"装卦应有 6 爻，实得 {len(facts['yao_details'])}"
+    )
+    one = facts["yao_details"][0]
+    assert set(one) >= {"position", "liu_qin", "liu_shen", "month_state"}, (
+        f"单爻明细字段不全：{sorted(one)}"
+    )
+
+
+# ==========================================================================
+# 断卦：前端着色契约（跨层漂移守卫）
+# ==========================================================================
+
+_DUAN_CARD_TS = Path(__file__).resolve().parents[2] / "apps/mobile/src/components/DuanCard.tsx"
+
+
+def _frontend_graded_verdicts() -> set[str]:
+    """从 `DuanCard.tsx` 的 `verdictTone` 里抽出前端判为**吉或凶**的词。
+
+    直接从源码抽，而不是在测试里另抄一份常量 —— 抄的那份不会随实现更新，
+    于是"漂移检测"就变成了两个我在互相对答案。
+    """
+    assert _DUAN_CARD_TS.exists(), f"未找到前端断卦卡片：{_DUAN_CARD_TS}"
+    src = _DUAN_CARD_TS.read_text(encoding="utf-8")
+    # 实现里的写法是 `if (verdict === '偏吉') return 'good';`
+    return set(re.findall(r"verdict === '([^']+)'", src))
+
+
+def test_frontend_verdict_whitelist_matches_kernel() -> None:
+    """前端判为吉 / 凶的词，必须**恰好等于**内核定义的吉凶词。
+
+    为什么值得单独钉：前端给 verdict 上色用的是**白名单** ——
+    不在表里的一律按中性渲染。于是有两种方向相反的漂移，而且**都不会报错**：
+
+    - 前端多认一个词 → 某个中性结论被染成吉 / 凶（把「身弱」画成凶兆）
+    - 内核改了吉凶词而前端没跟 → 真正的吉凶被画成中性（「偏凶」看起来像「平」）
+
+    第二种尤其危险：它不会让任何测试失败，只表现为颜色不对，
+    而颜色不对最容易被当成"设计如此"而放过。
+    """
+    from fortune_core.duangua import (
+        VERDICT_FAVORABLE,
+        VERDICT_NEUTRAL,
+        VERDICT_UNFAVORABLE,
+    )
+
+    graded = _frontend_graded_verdicts()
+    assert graded == {VERDICT_FAVORABLE, VERDICT_UNFAVORABLE}, (
+        f"前端判为吉凶的词 {sorted(graded)} 与内核的 "
+        f"{{{VERDICT_FAVORABLE!r}, {VERDICT_UNFAVORABLE!r}}} 不一致。\n"
+        "→ 改了内核的吉凶词，或改了 DuanCard.verdictTone 的白名单，请同步另一端。"
+    )
+
+    # 中性词不得被前端当成吉凶
+    assert VERDICT_NEUTRAL not in graded
+    assert not (graded & {"身强", "身弱"}), (
+        "「身强 / 身弱」是**日主状态**，与吉凶无关；"
+        "把它们染成朱红等于把一个中性事实渲染成凶兆"
+    )
+
+
+def test_duan_bazi_verdict_is_a_status_not_a_fortune(responses: dict[str, Any]) -> None:
+    """八字断卦的 verdict 必须是「身强 / 身弱」这类**状态词**，而不是吉凶词。
+
+    这条直接对应界面上最容易被做错的一处：八字 verdict 走的是
+    `verdictLabel="日主状态"` + 中性色。若后端哪天把八字 verdict 改成
+    「偏吉 / 偏凶」，前端会**照常按吉凶上色** —— 因为它只看词。
+    那时"日主状态"这个标签配上吉凶色，就是在用术语包装一个命定论结论。
+    """
+    from fortune_core.duangua import VERDICT_FAVORABLE, VERDICT_UNFAVORABLE
+
+    verdict = responses["DuanBaziResponse"]["verdict"]
+    assert verdict in {"身强", "身弱"}, (
+        f"八字断卦的 verdict 是 {verdict!r}，期望「身强 / 身弱」。\n"
+        "→ 若确实要改成吉凶倾向，必须同步前端："
+        "apps/mobile/app/(tabs)/chart.tsx 的 verdictLabel 与 DuanCard 的着色。"
+    )
+    assert verdict not in {VERDICT_FAVORABLE, VERDICT_UNFAVORABLE}
