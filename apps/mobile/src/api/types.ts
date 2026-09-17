@@ -541,3 +541,131 @@ export interface DuanLiuyaoRequest extends LiuyaoInput {
    */
   cast_date?: string | null;
 }
+
+// ==========================================================================
+// 三式 · 奇门遁甲
+// ==========================================================================
+
+/**
+ * 定局结果 —— 「这一时刻落在哪一局」的完整推导链。
+ *
+ * 把 `jieqi` / `days_after_jieqi` / `yuan` 一并返回而不是只给 `jushu`：
+ * 用户看到「阴遁六局」时，下一个问题永远是"凭什么"，这三个字段就是答案。
+ */
+export interface QimenDingju {
+  solar_datetime: string;
+  /** 所处节气 */
+  jieqi: string;
+  /** 该节气的**交节时刻**（精确到秒）—— 定局的真正分界点 */
+  jieqi_time: string;
+  /** 交节后第几天（当日算第 1 天） */
+  days_after_jieqi: number;
+  /** 1=上元 2=中元 3=下元 */
+  yuan: number;
+  yuan_label: string;
+  yang_dun: boolean;
+  dun_name: string;
+  jushu: number;
+  /** 中文局数，如「阴遁六局」 */
+  jushu_label: string;
+}
+
+export interface QimenPillars {
+  year: string;
+  month: string;
+  day: string;
+  hour: string;
+}
+
+/**
+ * 单宫。
+ *
+ * `door` / `god` 允许为 null：**中五宫不布门、不布神**（寄坤二宫），
+ * 所以五宫有地盘干与天盘干、却没有门与神。前端必须容忍这件事 ——
+ * 把 null 当成"数据没取到"去补默认值，就是把寄宫规则写进了界面（RULE-005）。
+ */
+export interface QimenPalace {
+  /** 洛书宫序 1~9 */
+  gong: number;
+  /** 八卦名（中宫为「中」） */
+  gua: string;
+  /** 方位：北 / 东北 / 东 … */
+  direction: string;
+  element: string;
+  /** 地盘干（三奇六仪原位） */
+  di_gan: string;
+  /** 天盘干（转动后） */
+  tian_gan: string | null;
+  star: string;
+  /** 九星固有吉凶——**是星自己的属性，不是对所问之事的结论** */
+  star_jixiong: '吉' | '凶' | '平';
+  door: string | null;
+  door_jixiong: '吉' | '凶' | '平' | null;
+  god: string | null;
+  is_xun_kong: boolean;
+  is_yima: boolean;
+}
+
+/**
+ * 一张奇门盘。
+ *
+ * 注意这是**扁平结构**（不像八字/六爻那样有 facts + tradition 两层）：
+ * 奇门当前只有确定性的盘面事实，没有「传统分析」层。
+ */
+export interface QimenChart {
+  dingju: QimenDingju;
+  pillars: QimenPillars;
+  /** 旬首（六甲之一） */
+  xunshou: string;
+  /** 值符所带之仪（三奇六仪之一） */
+  zhifu_yi: string;
+  /** 值符原宫 */
+  zhifu_gong: number;
+  zhifu_star: string;
+  zhishi_door: string;
+  zhishi_gong: number;
+  /** 值符**转动后**所在之宫（随天盘，非原宫） */
+  zhifu_gong_now: number;
+  /** 旬空二支 */
+  xun_kong: string[];
+  /** 驿马支 */
+  yima: string;
+  /** 九宫，按宫序 1~9 排好；前端只需按洛书位置摆放，不需再推导 */
+  palaces: QimenPalace[];
+  school: string;
+  school_name: string;
+  /** 本版**未覆盖项**，界面应如实展示，不得省略 */
+  uncertainties: string[];
+}
+
+export interface QimenSchool {
+  id: string;
+  name: string;
+  note: string;
+}
+
+/**
+ * 排盘界面需要的静态元数据。
+ *
+ * `jushu_table` 由接口返回而**不是前端自己算**：局数表是领域数据（RULE-005），
+ * 前端硬编码一份必然与内核漂移，而漂移的表现是「界面显示的局数与实排不符」——
+ * 不报错、只是静默不一致。
+ */
+export interface QimenMetaResponse {
+  schools: QimenSchool[];
+  /** 节气 -> [上元, 中元, 下元] 局数 */
+  jushu_table: Record<string, number[]>;
+  yang_dun_jieqi: string[];
+  yin_dun_jieqi: string[];
+  uncertainties: string[];
+}
+
+export interface QimenCastRequest {
+  /**
+   * 本地时刻（ISO 8601）。奇门以**时辰**起局 ——
+   * 同一日不同时辰可能不同局，只给日期排不出盘。
+   */
+  dt: string;
+  school?: string;
+  day_boundary?: 'zi' | 'early_zi';
+}

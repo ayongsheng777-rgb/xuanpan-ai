@@ -25,9 +25,14 @@
  */
 
 import {
+  SHICHEN,
   fromISODate,
+  hourOfShichen,
   isToday,
+  momentOf,
   rangeFrom,
+  shichenOfHour,
+  shichenRangeLabel,
   shiftDays,
   todayISODate,
   toISODate,
@@ -154,6 +159,54 @@ const guards = {
   invalid_date: guard(() => toISODate(new Date('nonsense'))),
 };
 
+// ==========================================================================
+// 7. 时辰（十二时辰）—— 奇门以时辰起局，映射错了整个盘就错了
+// ==========================================================================
+
+/**
+ * 逐小时导出「该小时属于哪个时辰」，以及双向换算的往返结果。
+ *
+ * 这里刻意把**每个小时**都过一遍而不是抽样：子时的边界（23 与 0）
+ * 与其余时辰的公式不同，抽样很容易漏掉 h=0 或 h=23 那两条。
+ */
+const shichen = {
+  names: SHICHEN,
+  /** 时辰索引 -> 代表小时 / 区间说明 */
+  index_to_hour: SHICHEN.map((name, i) => ({
+    index: i,
+    name,
+    hour: hourOfShichen(i),
+    range: shichenRangeLabel(i),
+    /** 往返：代表小时再换算回时辰索引，必须回到自身 */
+    roundtrip: shichenOfHour(hourOfShichen(i)),
+  })),
+  /** 每小时 -> 时辰索引 */
+  hour_to_index: Array.from({ length: 24 }, (_, h) => ({
+    hour: h,
+    index: shichenOfHour(h),
+    name: SHICHEN[shichenOfHour(h)],
+    /** 该小时是否就是所属时辰的代表小时 */
+    is_representative: hourOfShichen(shichenOfHour(h)) === h,
+  })),
+  /** 时刻串样例（后端要的形式） */
+  moments: [
+    { date: '2026-09-17', shichen: 0, moment: momentOf('2026-09-17', 0) },
+    { date: '2026-09-17', shichen: 6, moment: momentOf('2026-09-17', 6) },
+    { date: '2026-09-17', shichen: 11, moment: momentOf('2026-09-17', 11) },
+  ],
+  /** 越界输入必须抛，不得静默取模 */
+  guards: {
+    shichen_negative: guard(() => hourOfShichen(-1)),
+    shichen_too_big: guard(() => hourOfShichen(12)),
+    shichen_fraction: guard(() => hourOfShichen(1.5)),
+    hour_negative: guard(() => shichenOfHour(-1)),
+    hour_too_big: guard(() => shichenOfHour(24)),
+    hour_fraction: guard(() => shichenOfHour(3.5)),
+    bad_date: guard(() => momentOf('2026-02-30', 0)),
+    bad_date_shape: guard(() => momentOf('2026/09/17', 0)),
+  },
+};
+
 const report = {
   tz_offset_minutes,
   tz_name,
@@ -167,6 +220,7 @@ const report = {
   is_today_self: isToday(todayISODate()),
   is_today_other: isToday('1999-01-01'),
   guards,
+  shichen,
 };
 
 process.stdout.write(JSON.stringify(report));

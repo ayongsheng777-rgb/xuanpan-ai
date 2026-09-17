@@ -54,6 +54,9 @@ import type {
   QianInput,
   QianSet,
   QuestionCategoriesResponse,
+  QimenCastRequest,
+  QimenChart,
+  QimenMetaResponse,
   RecognitionSnapshot,
   ReportMeta,
   ReportRequest,
@@ -338,6 +341,26 @@ export class ApiClient {
 
   duanBazi = (input: BaziInput): Promise<DuanResponse> =>
     this.json('/api/v1/duan/bazi', 'POST', input);
+
+  // ------------------------------------------------------------------ 三式 · 奇门
+
+  /**
+   * 奇门排盘的静态元数据（局数表 / 流派 / 未覆盖项）。
+   *
+   * 界面的「这一局是怎么来的」面板读它，**不自己维护一份局数表** ——
+   * 局数表是领域数据（RULE-005），前端存一份必然与内核漂移，
+   * 而漂移的表现是「界面显示的局数与实排不符」，不报错、只静默不一致。
+   */
+  qimenMeta = (): Promise<QimenMetaResponse> => this.request('/api/v1/qimen/meta');
+
+  /**
+   * 奇门排盘。
+   *
+   * `dt` 必须是**本地时刻**且含时分 —— 奇门以时辰起局，
+   * 只给日期排不出盘（内核不会替你猜时辰）。
+   */
+  qimenPan = (input: QimenCastRequest): Promise<QimenChart> =>
+    this.json('/api/v1/qimen/pan', 'POST', input);
 
   // ------------------------------------------------------------------ 报告
 
