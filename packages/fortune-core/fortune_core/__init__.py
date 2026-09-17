@@ -47,6 +47,14 @@ from .mountain24 import (
 from .naming import NameAnalysis, analyze_name
 from .qian import QianResult, draw_qian
 from .schools import DEFAULT_SCHOOL, get_school, list_schools
+from .zeri import (
+    ZeriDay,
+    ZeriResult,
+    evaluate_day,
+    list_zeri_events,
+    list_zeri_schools,
+    select_auspicious_days,
+)
 
 __all__ = [
     "__version__",
@@ -70,6 +78,9 @@ __all__ = [
     # 上下文 / 流派
     "FortuneContext", "build_context",
     "DEFAULT_SCHOOL", "get_school", "list_schools",
+    # 择日决策
+    "ZeriDay", "ZeriResult", "evaluate_day", "select_auspicious_days",
+    "list_zeri_events", "list_zeri_schools",
     # 异常
     "FortuneError", "InvalidInputError", "OrientationConflictError",
     "DomainDataMissingError", "SchoolNotFoundError",
