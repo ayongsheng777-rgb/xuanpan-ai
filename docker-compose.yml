@@ -49,6 +49,10 @@ services:
       XUANPAN_DB_PATH: /app/data/xuanpan.db
       XUANPAN_MAX_UPLOAD_MB: "${XUANPAN_MAX_UPLOAD_MB:-12}"
       XUANPAN_KEEP_PHOTOS: "${XUANPAN_KEEP_PHOTOS:-false}"
+      # 原图落盘目录（仅 KEEP_PHOTOS=true 时有意义）。
+      # 留空 = /app/data/uploads，本就落在挂卷范围内，故默认值可直接用；
+      # 但若不在 compose 里透传，容器内就**改不了**这个目录。
+      XUANPAN_PHOTO_DIR: "${XUANPAN_PHOTO_DIR:-}"
       XUANPAN_AI_MODE: "${XUANPAN_AI_MODE:-auto}"
       XUANPAN_CORS_ORIGINS: "${XUANPAN_CORS_ORIGINS:-*}"
       # 管理台（/admin）令牌。留空 = 管理界面关闭（安全默认）。
