@@ -79,7 +79,12 @@ MOBILE_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 ANDROID_DIR="$MOBILE_DIR/android"
 
 # ---- 可覆盖的构建参数 -------------------------------------------------------
-API_BASE_URL="${API_BASE_URL:-http://192.168.57.10:8360}"
+# 默认用 ddns-go 维护的域名而非局域网 IP：
+#   oc.ayong.qzz.io 由本机 ddns-go 每 300s 刷新（AAAA → 本机「以太网」IPv6），
+#   手机连 Wi-Fi（同链路直连）与连移动数据（走公网 IPv6）两种场景都可用；
+#   局域网 IP 只在同网段有效，且随 DHCP 租约/网卡变化。
+#   需要临时指回局域网地址时用 API_BASE_URL=... 覆盖即可。
+API_BASE_URL="${API_BASE_URL:-http://oc.ayong.qzz.io:8360}"
 ARCH="${ARCH:-arm64-v8a}"
 NO_NDK_PATCH="${NO_NDK_PATCH:-0}"
 
@@ -259,20 +264,63 @@ cat > "$ANDROID_DIR/local.properties" <<EOF
 sdk.dir=$(echo "$ANDROID_HOME" | sed 's|\\|/|g')
 EOF
 
-# ---- 6. 构建 ----------------------------------------------------------------
+# ---- 6. JS bundle 与后端地址的一致性 ----------------------------------------
+# 坑：Gradle 的 createBundleReleaseJsAndAssets 任务**不把环境变量算作任务输入**。
+# 只改 API_BASE_URL 重跑构建时，该任务被判 UP-TO-DATE 并复用上一次的 bundle，
+# 于是 APK 里嵌的还是旧地址，而构建日志一路绿灯（实测 630 up-to-date / 1m25s 就
+# 报 BUILD SUCCESSFUL）。若不校验 APK 内容，会直接把指向旧地址的包装出去。
+# 解法：记录上次注入的地址，一旦变化就清掉 bundle 产物强制重打包。
+# 需要无条件重打包时用 FORCE_BUNDLE=1。
+BUNDLE_STAMP="$ANDROID_DIR/.xuanpan-api-base-url"
+BUNDLE_TASK_DIR="$ANDROID_DIR/app/build/generated/assets/createBundleReleaseJsAndAssets"
+BUNDLE_MERGED="$ANDROID_DIR/app/build/intermediates/assets/release/mergeReleaseAssets/index.android.bundle"
+BUNDLE_SOURCEMAP="$ANDROID_DIR/app/build/generated/sourcemaps/react"
+
+LAST_URL=""
+[ -f "$BUNDLE_STAMP" ] && LAST_URL="$(cat "$BUNDLE_STAMP" 2>/dev/null || true)"
+
+if [ "$LAST_URL" != "$API_BASE_URL" ] || [ "${FORCE_BUNDLE:-0}" = "1" ]; then
+  log "后端地址变更，清理旧 JS bundle（强制重打包）"
+  echo "  上次注入: ${LAST_URL:-（无记录，视为变更）}"
+  echo "  本次注入: $API_BASE_URL"
+  [ -d "$BUNDLE_TASK_DIR" ] && rm -rf "$BUNDLE_TASK_DIR"
+  [ -f "$BUNDLE_MERGED" ] && rm -f "$BUNDLE_MERGED"
+  [ -d "$BUNDLE_SOURCEMAP" ] && rm -rf "$BUNDLE_SOURCEMAP"
+  echo "  已清理 bundle 产物"
+else
+  echo "  后端地址未变（$API_BASE_URL），复用已有 JS bundle"
+fi
+printf '%s' "$API_BASE_URL" > "$BUNDLE_STAMP"
+
+# ---- 7. 构建 ----------------------------------------------------------------
 log "开始构建（$(date '+%H:%M:%S')）"
 cd "$ANDROID_DIR"
 export EXPO_PUBLIC_API_BASE_URL="$API_BASE_URL"
 export XUANPAN_API_BASE_URL="$API_BASE_URL"
 bash ./gradlew assembleRelease -PreactNativeArchitectures="$ARCH" --console=plain
 
-# ---- 7. 汇总 ----------------------------------------------------------------
+# ---- 8. 汇总与自检 ----------------------------------------------------------
 log "构建完成（$(date '+%H:%M:%S')）"
 APK="$ANDROID_DIR/app/build/outputs/apk/release/app-release.apk"
 if [ -f "$APK" ]; then
   echo "  产物: $APK"
   echo "  大小: $(du -h "$APK" | cut -f1)"
   echo "  内嵌后端地址: $API_BASE_URL"
+
+  # 自检：确认 bundle 里确实写着本次的地址。
+  # 「BUILD SUCCESSFUL」不等于「地址正确」—— 第 6 步那个缓存坑产出的包同样报成功，
+  # 里面却嵌着上一版的地址。这里直接读 bundle 内容做断言，失败就退出非零。
+  BUNDLE_FILE="$BUNDLE_TASK_DIR/index.android.bundle"
+  if [ -f "$BUNDLE_FILE" ]; then
+    if grep -qF -- "$API_BASE_URL" "$BUNDLE_FILE"; then
+      echo "  ✅ 自检通过：JS bundle 内含 $API_BASE_URL"
+    else
+      echo "  ❌ 自检失败：JS bundle 内未找到 $API_BASE_URL" >&2
+      echo "     bundle 文件: $BUNDLE_FILE" >&2
+      echo "     处理: FORCE_BUNDLE=1 重跑本脚本" >&2
+      exit 1
+    fi
+  fi
 else
   echo "  未找到产物，请检查上面的构建输出" >&2
   exit 1
