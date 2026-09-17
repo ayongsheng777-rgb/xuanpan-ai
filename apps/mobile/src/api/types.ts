@@ -374,3 +374,170 @@ export interface CompassConfirmRequest {
   school?: string;
   note?: string | null;
 }
+
+// ==========================================================================
+// 日历域与断卦
+// ==========================================================================
+//
+// 对应后端 `/api/v1/almanac`、`/zeri`、`/duan`。
+//
+// 这三组**不属于会话体系**：不落库、不进 `FortuneContext`、也没有报告。
+// 因此它们**不复用 `LayerPreview`** —— 那个类型的外层键是模块名，
+// 硬套会让「取 facts.bazi」这类路径在黄历上变成无意义的猜测。
+//
+// 字段逐一声明而非 `Record<string, unknown>`：后者会让「字段名写错」
+// 一路活到运行时，表现为界面某一格静默变空（tsc 完全不会报）。
+// `tests/mobile/test_types_contract.py` 正是为防这类漂移而存在。
+
+/** 单日黄历事实层。与内核 `AlmanacResult.to_facts()` 一一对应。 */
+export interface AlmanacFacts {
+  solar_date: string;
+  lunar: string;
+  gan_zhi: { year: string; month: string; day: string };
+  jian_chu: string;
+  xiu: { name: string; luck: string };
+  tian_shen: { name: string; type: string; luck: string; is_huang_dao: boolean };
+  chong: { zhi: string; desc: string; shengxiao: string; sha_direction: string };
+  yi: string[];
+  ji: string[];
+  ji_shen: string[];
+  xiong_sha: string[];
+  peng_zu: { gan: string; zhi: string };
+  /**
+   * 建除十二神的交叉校验结果。
+   * 空数组 = 全部通过；交节日会留一条口径说明（属已知差异，不是错误）。
+   */
+  rule_consistency: string[];
+}
+
+export interface AlmanacTradition {
+  summary: string;
+  note: string;
+  uncertainties: string[];
+}
+
+export interface AlmanacDay {
+  facts: AlmanacFacts;
+  tradition: AlmanacTradition;
+}
+
+export interface AlmanacRange {
+  start: string;
+  end: string;
+  days: AlmanacDay[];
+}
+
+export interface ZeriEvent {
+  event: string;
+  label: string;
+  yi: string[];
+  ji: string[];
+  note: string;
+}
+
+export interface ZeriSchool {
+  id: string;
+  name: string;
+  description?: string;
+  /**
+   * 显式未覆盖项（三煞 / 太岁 / 五黄 / 当事人八字喜忌等）。
+   * UI 必须展示为「本版不覆盖」，而不是省略 —— 用户有权知道
+   * 这份吉日建议**没有考虑什么**。
+   */
+  unverified?: string[];
+}
+
+export interface ZeriEventsResponse {
+  events: ZeriEvent[];
+  schools: ZeriSchool[];
+}
+
+/** 择日单日评价。`veto` 非空即表示该日被否决。 */
+export interface ZeriDay {
+  solar_date: string;
+  weekday: string;
+  lunar: string;
+  day_gan_zhi: string;
+  jian_chu: string;
+  xiu: { name: string; luck: string };
+  tian_shen: { name: string; type: string };
+  chong_shengxiao: string;
+  sha_direction: string;
+  score: number;
+  grade: string;
+  usable: boolean;
+  matched_yi: string[];
+  matched_ji: string[];
+  veto: string[];
+  veto_kinds: string[];
+  reasons: string[];
+}
+
+export interface ZeriDayResponse {
+  day: ZeriDay;
+  event_label: string;
+  school: string;
+  school_name: string;
+  event_note: string;
+}
+
+export interface ZeriSelectRequest {
+  event: string;
+  start: string;
+  end: string;
+  school?: string;
+  shengxiao?: string | null;
+  limit?: number;
+  include_unfavorable?: boolean;
+}
+
+export interface ZeriResultFacts {
+  event: string;
+  event_label: string;
+  range: { start: string; end: string; days_scanned: number };
+  candidate_count: number;
+  excluded_count: number;
+  /** 各否决项的命中天数。**同一日可命中多项，故各项之和大于 excluded_count** */
+  excluded_reasons: Record<string, number>;
+  candidates: ZeriDay[];
+}
+
+export interface ZeriResultTradition {
+  school: string;
+  school_name: string;
+  summary: string;
+  note: string;
+  uncertainties: string[];
+}
+
+export interface ZeriResultResponse {
+  facts: ZeriResultFacts;
+  tradition: ZeriResultTradition;
+}
+
+/**
+ * 吉凶倾向。
+ *
+ * 四个**所有断卦共有**的字段放在顶层，各术式的差异细节（六爻的用神/世爻、
+ * 八字的大运逐运倾向）放 `detail` —— 前端可先统一渲染
+ * 「倾向 + 依据 + 流派标注」，再按术式补细节，不必写两套解析。
+ */
+export interface DuanResponse {
+  verdict: string;
+  reasons: string[];
+  school: string;
+  uncertainties: string[];
+  detail: Record<string, unknown>;
+}
+
+export interface DuanLiuyaoRequest extends LiuyaoInput {
+  /** 占问类别，决定用神取用。取值见 /meta/question-categories */
+  topic?: string | null;
+  /** 婚姻类占问需传：男占妻看妻财、女占夫看官鬼 */
+  gender?: 'male' | 'female' | null;
+  /**
+   * 起卦日（决定日辰与月令）。
+   * **补录隔夜的卦必须填**，否则会按今天的日辰算旺衰 —— 结论看似正常、依据全错。
+   */
+  cast_date?: string | null;
+}

@@ -36,12 +36,16 @@ import Constants from 'expo-constants';
 
 import type {
   AiProvidersResponse,
+  AlmanacDay,
+  AlmanacRange,
   AskRequest,
   BaziInput,
   CapabilitiesResponse,
   CompassConfirmRequest,
   CompassInput,
   DeletedResponse,
+  DuanLiuyaoRequest,
+  DuanResponse,
   InputPatch,
   LayerPreview,
   LiuyaoInput,
@@ -60,6 +64,10 @@ import type {
   SessionListResponse,
   Turn,
   VisionProvidersResponse,
+  ZeriDayResponse,
+  ZeriEventsResponse,
+  ZeriResultResponse,
+  ZeriSelectRequest,
 } from './types';
 
 // ==========================================================================
@@ -283,6 +291,53 @@ export class ApiClient {
 
   calcNaming = (input: NamingInput): Promise<LayerPreview> =>
     this.json('/api/v1/calc/naming', 'POST', input);
+
+  // ------------------------------------------------------------------ 日历域
+
+  /**
+   * 单日黄历。
+   *
+   * `date` 省略则由**服务端**定"今天"。不让客户端自己算日期：
+   * 客户端时区与服务器时区不一致时，同一时刻会得到不同的"今天"，
+   * 而用户看到的日期与后端算的黄历就会对不上。
+   */
+  almanacDay = (date?: string): Promise<AlmanacDay> =>
+    this.request(`/api/v1/almanac/day${date ? `?date=${encodeURIComponent(date)}` : ''}`);
+
+  almanacRange = (start: string, end: string): Promise<AlmanacRange> =>
+    this.request(
+      `/api/v1/almanac/range?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`,
+    );
+
+  zeriEvents = (): Promise<ZeriEventsResponse> => this.request('/api/v1/zeri/events');
+
+  zeriEvaluate = (
+    event: string,
+    date: string,
+    options: { shengxiao?: string | null; school?: string } = {},
+  ): Promise<ZeriDayResponse> => {
+    const params = new URLSearchParams({ event, date });
+    if (options.shengxiao) params.set('shengxiao', options.shengxiao);
+    if (options.school) params.set('school', options.school);
+    return this.request(`/api/v1/zeri/evaluate?${params.toString()}`);
+  };
+
+  zeriSelect = (input: ZeriSelectRequest): Promise<ZeriResultResponse> =>
+    this.json('/api/v1/zeri/select', 'POST', input);
+
+  // ------------------------------------------------------------------ 断卦
+
+  /**
+   * 六爻断卦（起卦 → 装卦 → 断，三步齐全）。
+   *
+   * `topic` 决定取哪个六亲为用神 —— 不传就只能给整体卦象倾向，
+   * 界面上应当提示用户补选，而不是把"没取用神"的中平当成结论展示。
+   */
+  duanLiuyao = (input: DuanLiuyaoRequest): Promise<DuanResponse> =>
+    this.json('/api/v1/duan/liuyao', 'POST', input);
+
+  duanBazi = (input: BaziInput): Promise<DuanResponse> =>
+    this.json('/api/v1/duan/bazi', 'POST', input);
 
   // ------------------------------------------------------------------ 报告
 
