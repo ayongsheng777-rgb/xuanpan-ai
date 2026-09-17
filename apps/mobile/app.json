@@ -6,8 +6,10 @@
     "orientation": "portrait",
     "scheme": "xuanpan",
     "userInterfaceStyle": "light",
-    "newArchEnabled": true,
+    "newArchEnabled": false,
+    "icon": "./assets/icon.png",
     "splash": {
+      "image": "./assets/splash.png",
       "resizeMode": "contain",
       "backgroundColor": "#E5D7C7"
     },
@@ -22,6 +24,10 @@
     "android": {
       "package": "com.xuanpan.ai",
       "edgeToEdgeEnabled": true,
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#013A6C"
+      },
       "permissions": [
         "CAMERA",
         "READ_MEDIA_IMAGES"
@@ -46,7 +52,15 @@
         }
       ],
       "expo-asset",
-      "expo-font"
+      "expo-font",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": true
+          }
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": false

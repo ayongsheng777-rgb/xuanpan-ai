@@ -348,13 +348,26 @@ export type { RecognitionSnapshot };
 // ==========================================================================
 
 /**
- * 从 Expo 配置读后端地址。
+ * 从构建期注入或 Expo 配置读后端地址。
  *
  * 默认 `http://127.0.0.1:8360`（**不是 8352** —— 该端口被本机 SysCenter 占用）。
- * 真机调试时改为局域网 IP，例如 `http://192.168.1.10:8360`。
- * 地址属于"环境"而非"密钥"，写在 app.json 的 extra 里是合适的。
+ * 真机调试时改为局域网 IP，例如 `http://192.168.57.10:8360`。
+ *
+ * 三级优先级，越靠前越"离构建现场越近"：
+ *
+ * 1. `EXPO_PUBLIC_API_BASE_URL` —— babel-preset-expo 打包时内联为字面量。
+ *    真机包走这条：地址随构建命令给出，不必改任何受版本控制的文件。
+ * 2. `app.json` 的 `extra.apiBaseUrl`（可被 `app.config.js` 覆盖）。
+ * 3. 兜底常量，与 app.json 里的值保持一致。
+ *
+ * 为什么不只留第 2 条：`extra` 要经 expo-constants 从原生侧取回，
+ * 链路长且失败时**静默退回默认值** —— 用户看到的只是"连不上"，
+ * 而看不出是地址根本没进包。第 1 条是官方文档化的内联机制，行为确定。
  */
 export function resolveBaseUrl(): string {
+  const injected = process.env.EXPO_PUBLIC_API_BASE_URL;
+  if (injected) return injected.replace(/\/+$/, '');
+
   // 静态导入而非 require()：本工程 tsconfig 的 `types` 只放行 react-native，
   // Node 的 `require` 全局并不在其中，用 require 会报 "Cannot find name"。
   const cfg = Constants.expoConfig;
