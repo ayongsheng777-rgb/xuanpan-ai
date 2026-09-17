@@ -57,10 +57,63 @@ export default function DivineScreen(): React.JSX.Element {
       {mode === 'liuyao' ? <LiuyaoPanel onOpenReport={(id) => router.push(`/report/${id}`)} /> : null}
       {mode === 'qian' ? <QianPanel onOpenReport={(id) => router.push(`/report/${id}`)} /> : null}
 
+      {/* 三式不在本页内联，而是单独一页：它要选到「时辰」才能起局，
+          且有九宫盘这种需要整屏宽度的内容。这里只给出入口。
+          放「更多术式」而不是并进上面的分段控件 —— 分段控件表示
+          「同一页的几种视图」，而三式是另一页，混在一起会让人以为
+          点下去只是换了个面板。 */}
+      <Card title="更多术式">
+        <MoreEntry
+          icon="grid-outline"
+          label="三式排盘"
+          desc="奇门遁甲 · 大六壬 · 太乙神数，按时刻起局"
+          onPress={() => router.push('/sanshi')}
+        />
+        <Divider style={styles.moreDivider} />
+        <MoreEntry
+          icon="today-outline"
+          label="黄历择日"
+          desc="查某天的宜忌，或反过来为某件事挑日子"
+          onPress={() => router.push('/almanac')}
+        />
+      </Card>
+
       <AppText size="xs" color="muted" center style={styles.disclaimer}>
         以上内容属于传统文化娱乐/学习参考
       </AppText>
     </Screen>
+  );
+}
+
+/** 「更多术式」里的一行入口：图标 + 名称 + 一句话说明 + 箭头 */
+function MoreEntry({
+  icon,
+  label,
+  desc,
+  onPress,
+}: {
+  icon: keyof typeof Ionicons.glyphMap;
+  label: string;
+  desc: string;
+  onPress: () => void;
+}): React.JSX.Element {
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      style={({ pressed }) => [styles.moreEntry, pressed && styles.moreEntryPressed]}
+    >
+      <Ionicons name={icon} size={20} color={colors.primary} />
+      <View style={styles.moreText}>
+        <AppText size="md" weight="medium" color="primary">
+          {label}
+        </AppText>
+        <AppText size="xs" color="muted">
+          {desc}
+        </AppText>
+      </View>
+      <Ionicons name="chevron-forward" size={18} color={colors.muted} />
+    </Pressable>
   );
 }
 
@@ -529,6 +582,17 @@ function DuanBasis({ duan }: { duan: DuanResponse }): React.JSX.Element | null {
 const styles = StyleSheet.create({
   spacer: { height: space[3] },
   cardIntro: { marginBottom: space[3], lineHeight: 20 },
+
+  // ---- 更多术式入口 ----
+  moreEntry: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space[3],
+    paddingVertical: space[3],
+  },
+  moreEntryPressed: { opacity: 0.6 },
+  moreText: { flex: 1, gap: space[1] },
+  moreDivider: { marginVertical: 0 },
 
   // ---- 断卦控制区 ----
   chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: space[2], marginTop: space[2] },

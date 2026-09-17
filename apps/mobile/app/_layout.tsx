@@ -35,6 +35,10 @@ export default function RootLayout(): React.JSX.Element {
           options={{ title: '黄历择日', headerRight: helpHeaderRight('almanac') }}
         />
         <Stack.Screen
+          name="sanshi"
+          options={{ title: '三式排盘', headerRight: helpHeaderRight('sanshi') }}
+        />
+        <Stack.Screen
           name="confirm/[sessionId]"
           options={{ title: '确认坐向', headerRight: helpHeaderRight('confirm') }}
         />

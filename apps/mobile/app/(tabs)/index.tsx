@@ -88,6 +88,7 @@ export default function CompassHomeScreen(): React.JSX.Element {
         <QuickEntry label="六爻" icon="git-branch-outline" onPress={() => router.push('/divine')} />
         <QuickEntry label="灵签" icon="book-outline" onPress={() => router.push('/divine')} />
         <QuickEntry label="黄历" icon="today-outline" onPress={() => router.push('/almanac')} />
+        <QuickEntry label="三式" icon="grid-outline" onPress={() => router.push('/sanshi')} />
       </View>
 
       <Card title="今日状态">
