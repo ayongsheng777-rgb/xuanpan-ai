@@ -19,6 +19,7 @@ PACKAGE_ROOTS = [
     ROOT / "services" / "vision",
     ROOT / "services" / "ai",
     ROOT / "services" / "api",
+    ROOT / "services" / "mcp",
 ]
 
 for path in reversed(PACKAGE_ROOTS):
