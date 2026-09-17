@@ -14,6 +14,7 @@ import React from 'react';
 import { StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { helpHeaderRight } from '@/components/HelpButton';
 import { colors, font, layout, space } from '@/theme/tokens';
 
 type IconName = keyof typeof Ionicons.glyphMap;
@@ -68,6 +69,7 @@ export default function TabsLayout(): React.JSX.Element {
         options={{
           title: '命盘',
           headerTitle: '命盘',
+          headerRight: helpHeaderRight('chart'),
           tabBarIcon: tabIcon('planet', 'planet-outline'),
         }}
       />
@@ -76,6 +78,7 @@ export default function TabsLayout(): React.JSX.Element {
         options={{
           title: '占测',
           headerTitle: '占测',
+          headerRight: helpHeaderRight('divine'),
           tabBarIcon: tabIcon('sparkles', 'sparkles-outline'),
         }}
       />
@@ -84,6 +87,7 @@ export default function TabsLayout(): React.JSX.Element {
         options={{
           title: '历史',
           headerTitle: '历史',
+          headerRight: helpHeaderRight('history'),
           tabBarIcon: tabIcon('time', 'time-outline'),
         }}
       />
@@ -92,6 +96,7 @@ export default function TabsLayout(): React.JSX.Element {
         options={{
           title: '我的',
           headerTitle: '我的',
+          headerRight: helpHeaderRight('mine'),
           tabBarIcon: tabIcon('person', 'person-outline'),
         }}
       />

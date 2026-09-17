@@ -11,6 +11,7 @@ import { StatusBar } from 'expo-status-bar';
 import React from 'react';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
+import { helpHeaderRight } from '@/components/HelpButton';
 import { colors, font } from '@/theme/tokens';
 
 export default function RootLayout(): React.JSX.Element {
@@ -28,10 +29,19 @@ export default function RootLayout(): React.JSX.Element {
         }}
       >
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-        <Stack.Screen name="scan" options={{ title: '罗盘识向' }} />
-        <Stack.Screen name="confirm/[sessionId]" options={{ title: '确认坐向' }} />
-        <Stack.Screen name="report/[sessionId]" options={{ title: 'AI 解读报告' }} />
-        <Stack.Screen name="session/[sessionId]" options={{ title: '会话详情' }} />
+        <Stack.Screen name="scan" options={{ title: '罗盘识向', headerRight: helpHeaderRight('scan') }} />
+        <Stack.Screen
+          name="confirm/[sessionId]"
+          options={{ title: '确认坐向', headerRight: helpHeaderRight('confirm') }}
+        />
+        <Stack.Screen
+          name="report/[sessionId]"
+          options={{ title: 'AI 解读报告', headerRight: helpHeaderRight('report') }}
+        />
+        <Stack.Screen
+          name="session/[sessionId]"
+          options={{ title: '会话详情', headerRight: helpHeaderRight('session') }}
+        />
       </Stack>
     </SafeAreaProvider>
   );

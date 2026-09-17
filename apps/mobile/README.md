@@ -30,7 +30,8 @@ apps/mobile/
 │   ├── api/
 │   │   ├── types.ts             # 与 services/api/xuanpan_api/schemas.py 一一对应
 │   │   └── client.ts            # 带超时、错误分类、密钥零持有的 HTTP 客户端
-│   ├── components/              # AppText / Card / Banner / Screen / CompassDial / CompassAdjuster …
+│   ├── components/              # AppText / Card / Banner / Screen / CompassDial / CompassAdjuster / HelpButton …
+│   ├── content/help.ts          # 各页「操作与运作讲解」文案（须与页面实现同步维护）
 │   ├── lib/
 │   │   ├── ring24.ts            # 二十四山环形几何：角度 ↔ 山、扇形路径（纯函数，已跨语言校验）
 │   │   ├── compassDial.ts       # 罗盘盘式：层次 / 刻度 / 配色角色 / 旋转（纯函数，已跨语言校验）

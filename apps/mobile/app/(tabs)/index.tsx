@@ -18,6 +18,7 @@ import { AppText } from '@/components/AppText';
 import { Banner } from '@/components/Banner';
 import { Button, Card, EmptyState } from '@/components/Card';
 import { CompassDial } from '@/components/CompassDial';
+import { HelpButton } from '@/components/HelpButton';
 import { Screen } from '@/components/Screen';
 import { useAsync } from '@/lib/useAsync';
 import { alpha, colors, radius, space } from '@/theme/tokens';
@@ -48,14 +49,17 @@ export default function CompassHomeScreen(): React.JSX.Element {
             确定性计算 · AI 解读
           </AppText>
         </View>
-        <Pressable
-          onPress={() => router.push('/mine')}
-          accessibilityLabel="设置"
-          hitSlop={10}
-          style={styles.gear}
-        >
-          <Ionicons name="settings-outline" size={22} color={colors.textSecondary} />
-        </Pressable>
+        <View style={styles.headerActions}>
+          <HelpButton topic="compass-home" />
+          <Pressable
+            onPress={() => router.push('/mine')}
+            accessibilityLabel="设置"
+            hitSlop={10}
+            style={styles.gear}
+          >
+            <Ionicons name="settings-outline" size={22} color={colors.textSecondary} />
+          </Pressable>
+        </View>
       </View>
 
       {error ? <BackendHint message={error} onRetry={reload} /> : null}
@@ -161,6 +165,7 @@ function QuickEntry({
 const styles = StyleSheet.create({
   headerRow: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between' },
   subtitle: { marginTop: 2 },
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: space[1] },
   gear: { padding: space[2], borderRadius: radius.pill, backgroundColor: colors.surface },
   hero: { alignItems: 'center', marginTop: space[5], marginBottom: space[4] },
   tagline: { marginTop: space[3] },
