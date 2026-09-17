@@ -44,6 +44,17 @@ web-build/
 .npm/
 .metro-health-check*
 
+# ---- Expo prebuild 派生目录 ----
+# app.json / app.config.js 是唯一配置源，android/ 与 ios/ 由
+# `npx expo prebuild` 生成，属派生产物（同 dist/ 的性质）。
+# 提交它们等于把同一份配置存两处：改了 app.json 却忘了重新 prebuild，
+# 就会得到一个「配置写了但没生效」的原生工程，且极难察觉。
+# 需要自定义原生代码时，改用 config plugin 而不是直接改这里。
+apps/mobile/android/
+apps/mobile/ios/
+# prebuild 生成的本地 SDK 路径，含机器专属信息
+apps/mobile/android/local.properties
+
 # ---- 日志 ----
 *.log
 logs/
@@ -78,3 +89,9 @@ data/*.db-shm
 data/uploads/
 data/cache/
 data/tmp/
+
+# ---- 测试样张 ----
+# 由 scripts/gen_sample_photos.py 生成，可随时重建。
+# 它们是合成图，只用于验证「APP ↔ 后端」链路，本身没有版本价值；
+# 真正需要留档的是生成脚本与 Gate 1 的实测报告。
+samples/
