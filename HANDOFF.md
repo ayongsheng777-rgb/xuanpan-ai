@@ -37,6 +37,12 @@
 | 择日决策 | ✅ **已完成**（2026-09-17） | `b3831eb` 核心层 + `45c45a0` MCP 工具 |
 | 三式（奇门/六壬/太乙） | ⚪ **未开始**，等待实施 | — |
 
+> 🔴 **一个容易踩的心智陷阱**：「内核做完了」≠「用户用得上」。
+> 2026-09-17 下午做过一轮专项排查（§2.3）：`almanac` / `zeri` / `duangua`
+> 三个能力内核里有、MCP 有，但**HTTP 没有路由、App 里 0 处引用** ——
+> 能力存在，用户碰不到。接手后若要评估"某能力是否真的交付了"，
+> 必须查**三条链路各通不通**：内核 → HTTP/MCP → App 界面。
+
 ### 2.1 择日决策 ✅ 已完成（无需重做）
 
 **已交付**：`packages/fortune-core/fortune_core/zeri.py`
@@ -61,6 +67,37 @@ MCP 工具 `xuanpan_zeri`）。
 - 这是**算法攻坚**，不是简单复用。先读权威术数教材/开源参考，**先给方案 + 排盘对照表再动手**（AGENTS.md §3 工作流）
 - 每个核心算法必须配单元测试（RULE-007），用已知公历时刻的权威排盘结果做对照锚点
 - 明确区分「已确认的排盘事实」与「流派差异」（如奇门置闰/拆补、六壬昼夜贵神等，各家口径不一，必须模块化 RULE-006）
+
+### 2.3 最后一公里：查询域 HTTP + 管理台 + 前端接线 ✅ 已完成（2026-09-17 晚）
+
+阿勇原话：「解决所有问题，**后端带管理界面，前端 APP 能实战**」。
+
+**问题**：`almanac` / `zeri` / `duangua` 三个能力只经 MCP 暴露 ——
+HTTP 层无路由、App 里 0 处引用。本轮把三条链路打通：
+
+| 层 | 交付 | commit |
+|---|---|---|
+| 内核 | （上一轮已完成） | `b3831eb` / `a3ca381` |
+| HTTP | `/api/v1/almanac/{day,range}`、`/zeri/{events,evaluate,select}`、`/duan/{liuyao,bazi}` | `a6eb3e5` |
+| 管理台 | `/admin` 单文件页面 + `/api/v1/admin/*`（令牌鉴权，安全默认关） | `7ef24bb` |
+| 前端 | 黄历/择日页、六爻断卦、大运倾向、共用断卦展示层 | `f09b298` / `fdd0a5d` / `22e8028` |
+
+**接手时只需知道**：
+
+- 管理台默认**关闭**（`XUANPAN_ADMIN_TOKEN` 为空 → 403 + 配置指引）。
+  会话含出生日期等隐私数据，不设默认口令。页面与数据分离：令牌只存
+  sessionStorage，并用 `replaceState` 从 URL 抹掉。
+- `/zeri/select` 的区间上界 **3660 天在内核**（`MAX_RANGE_DAYS`），不在路由层 ——
+  这样 MCP 与 HTTP 自动共享同一个界，不会出现"两个入口限制不一样"。
+  （`/almanac/range` 的 31 天上界则确实在路由层，两个端点口径不同，别混淆。）
+- `FortuneError` **不继承 `ValueError`**。`app.py` 里注册了全局处理器把它转 400；
+  删掉它，本该是"你传错了"的错误会全变成 500。
+- 前端日期换算只有一处实现：`apps/mobile/src/lib/date.ts`。
+  **不要在任何页面里写 `toISOString().slice(0,10)`** —— 东八区凌晨会退一天，
+  且只在一天的前 1/3 出现。回归守卫 `tests/mobile/test_local_date.py`。
+- 八字断卦的 verdict 是「身强/身弱」，属**状态**而非吉凶，
+  前端必须走中性色（`DuanCard.verdictTone` 的白名单只认「偏吉/偏凶」）。
+  跨层守卫会解析 `DuanCard.tsx` 与内核常量对撞。
 
 ---
 
@@ -92,7 +129,21 @@ packages/fortune-core/fortune_core/
   ├── compass.py / mountain24.py / fenjin120.py  # 罗盘二十四山/一百二十分金
   ├── schools.py   # 流派定义（RULE-006 模块化）
   └── context.py / exceptions.py / constants.py
+
+services/api/xuanpan_api/
+  ├── routers/     # calc / sessions / report / scan / meta ＋ almanac / zeri / duan / admin
+  ├── static/admin.html   # 管理台（单文件、零依赖、**无 CDN** —— 容器没有外网）
+  └── schemas.py / storage.py / config.py / app.py
 services/mcp/server.py   # 9 个 MCP 工具
+
+apps/mobile/
+  ├── app/(tabs)/  # 底部 5 栏：index(罗盘) / chart(命盘) / divine(占测) / history / mine
+  ├── app/         # 根 Stack：scan / almanac / confirm/[id] / report/[id] / session/[id]
+  └── src/
+      ├── api/         # client.ts + types.ts（**手写**，与后端 schemas 对应）
+      ├── components/  # DuanCard(断卦展示) / Chip+Tag / CompassDial / Card / …
+      ├── lib/date.ts  # 本地日期**唯一实现点**（别在页面里另写一份）
+      └── content/help.ts  # 每页右上角讲解文案
 ```
 
 ---
@@ -127,7 +178,7 @@ services/mcp/server.py   # 9 个 MCP 工具
 
 ```bash
 # $PY = C:/Users/anyong/.workbuddy/binaries/python/envs/default/Scripts/python.exe（managed venv）
-# 全量测试（当前 834 passed）
+# 全量测试（当前 940 passed）
 "$PY" -m pytest
 
 # 分层
@@ -137,7 +188,23 @@ services/mcp/server.py   # 9 个 MCP 工具
 "$PY" -m pytest tests/api tests/ai tests/mobile
 ```
 
-> ⚠️ 环境坑：WorkBuddy 的 `[safe-delete]` 会拦截 pytest 临时目录清理，可能**吞掉 `N passed` 汇总行并强制 exit≠0**。遇到「测试全绿但 exit=1」时，按模块分别跑并核对每个模块的 exit code，别误判成失败。详见 MEMORY.md / 日志。
+> 🔴 **全量跑完拿不到「940 passed」那一行，是已知现象，不是测试失败。**
+> WorkBuddy 的 `[safe-delete]` 在 teardown 清理 pytest 临时目录（实测 399 个文件 > 阈值 50）
+> 时会**直接拦停进程**，汇总行来不及打印、并把 exit code 变成 1。
+> 现象是：点阵走到 `[100%]`、一个 `F` 都没有，紧跟着一行 `[SAFE_DELETE_BULK_CONFIRM_REQUIRED]`。
+>
+> **取真实数字的办法**（也是判断"是不是真失败"的办法）：分模块跑，逐个核对 exit code。
+> 命令行**不要传 `-q`** —— `pyproject` 的 addopts 已含 `-q`，再传会变成 `-qq` 从而**吞掉汇总行**。
+>
+> ```bash
+> for m in packages/fortune-core/tests tests/vision tests/ai tests/api tests/mobile \
+>          tests/test_mcp_server.py tests/test_doctests.py; do
+>   printf '%-32s %s\n' "$m" "$("$PY" -m pytest "$m" -p no:warnings --tb=short 2>&1 \
+>     | grep -E 'passed|failed' | tail -1)"
+> done
+> ```
+> 分模块合计 = 全量数，且每个模块都能看到明确的 `N passed in Xs`。
+> 想拿总数又不跑测试：`"$PY" -m pytest --collect-only -p no:warnings | tail -3`。
 
 > ⚠️ 本机有系统代理（`HTTP_PROXY` 指向 127.0.0.1），用 httpx/requests 连本机服务必须 `trust_env=False`。
 
@@ -166,10 +233,26 @@ PYTHONPATH=packages/fortune-core "$PY" services/mcp/server.py   # stdio 模式�
 
 1. **真实罗盘照片取证**（Gate 1 唯一卡点，需阿勇提供照片）：`real_photos/` + `labels.csv`，跑 `scripts/gate1_eval.py photos`
 2. 修 R8 假阳性（识别山名错误 15/96）—— 先建假阳性回归基线
-3. 真机 UI 走查（「3 秒内确认」只能在真机测）
+3. **真机 UI 走查** —— 本轮之后**比之前更必要**，理由见下
 4. SKILL.md 打包（让仓库同时是 MCP Server + Agent Skill，可抄 suanming-mcp 的 Agent 入口）
 5. 神煞吉凶分级（建议留给 AI 层，内核只给 FACT）
 6. 建 remote 仓库
+
+### 7.1 🔴 本轮未验证项（接手时别当成"已经验过了"）
+
+离线能验的都已验（`tsc` 零错、`expo export` 出包、接口契约、真实 HTTP 的 62 项断言、
+两处变异验证）。但下面这些**只能在真机/模拟器上确认**，本轮**没有做**：
+
+| 未验证项 | 为什么离线验不了 |
+|---|---|
+| `/almanac` 路由是否真的跳得过去 | 类型检查不校验路由；`expo export` 只证明文件进了包 |
+| 黄历 / 择日页布局是否溢出、长文案是否折行得当 | 没有渲染器，只能真机看 |
+| 六爻断卦的类别 chip 在窄屏是否换行得体 | 同上 |
+| 大运倾向的两列网格在小屏是否挤在一起 | 同上 |
+| 「3 秒内确认」的真实体感 | 只有真机能测 |
+| 键盘弹起是否遮挡输入框 | 同上 |
+
+> 这些**不是"大概没问题"** —— 而是**确实没测**。接手做真机走查时按这张表逐项过。
 
 ---
 

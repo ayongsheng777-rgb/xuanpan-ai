@@ -87,6 +87,41 @@
 
 **测试基线演进**：626 → 723 → 754 → 765 → 786 → **834**，全程无回归。
 
+### 批次 5 —— 最后一公里：让能力真正到得了用户手上（2026-09-17 晚）
+
+前三/四个批次把能力做进了**内核**。但 2026-09-17 晚做的一次专项排查发现：
+`almanac` / `zeri` / `duangua` 三个能力**只有 MCP 一个出口** ——
+HTTP 层没有任何路由，App 里 0 处引用。
+
+> **能力存在，用户碰不到。** 这类"做完了但没交付"的状态最容易被误读成
+> "功能已完成" —— 内核有、测试有、MCP 有，唯独用户没有。
+
+阿勇原话：「解决所有问题，**后端带管理界面，前端 APP 能实战**」。本批次打通三条链路：
+
+| 层 | 子项 | commit | 内容 |
+|---|---|---|---|
+| HTTP | 查询域路由 | `a6eb3e5` | `/almanac/{day,range}`、`/zeri/{events,evaluate,select}`、`/duan/{liuyao,bazi}` |
+| HTTP | 管理台 | `7ef24bb` | `/admin` 单文件零依赖页面 + `/api/v1/admin/*`，令牌鉴权、安全默认关闭 |
+| HTTP | 配置穷尽守卫 | `c6cfeaf` | `.env.example` 完整性测试 —— 它当场检出了 `XUANPAN_PHOTO_DIR` 未透传 |
+| 前端 | 接口层 | `a54842a` | `types.ts` + `client.ts`：12 个 interface、7 个方法 |
+| 前端 | 黄历 / 择日页 | `f09b298` | `app/almanac.tsx`（双模式）+ 首页入口 + `lib/date.ts` |
+| 前端 | 六爻断卦 | `fdd0a5d` | `DuanCard` 共用展示层 + 占测页接断卦 |
+| 前端 | 大运倾向 | `22e8028` | 命盘页接 `duanBazi`，把静态大运表变成可读运程 |
+| 测试 | 回归守卫 | `788b68b` | 契约覆盖 +12 接口；本地日期回归（含假绿自检） |
+
+**测试基线演进**：834 → **940**，全程无回归。
+
+**这个批次留下的三条通用教训**（与具体术式无关，值得带到后续工作）：
+
+1. **评估"某能力是否交付"要查三条链路**：内核 → HTTP/MCP → App 界面。
+   只查前两条会得出过于乐观的结论。
+2. **`verdict` 这类等级词必须区分语义**：六爻的「偏吉/偏凶」是吉凶，
+   八字的「身强/身弱」是状态。界面按词着色而不按语义着色，
+   就会把中性的盘面事实渲染成凶兆（RULE-008 的界面侧）。
+   防法是让测试**解析前端源码**与内核常量对撞，而不是两边各写一份常量。
+3. **日期换算必须全项目一处实现**：东八区凌晨取 `toISOString()` 会退一天，
+   且只在一天的前 1/3 出现 —— 人工点页面几乎不可能发现。
+
 ---
 
 ## 3. 剩余缺口地图（按优先级）
@@ -96,6 +131,9 @@
 `duangua.py` 已落地：`duan_liuyao()` 综合用神旺衰/世应/旬空/动爻给出「偏吉/中平/偏凶」；
 `duan_bazi()` 复用日主旺衰/喜用神给出各步大运倾向。三条铁律：只组合判断不重算、
 输出「倾向」非「断语」、显式标注流派（school + uncertainties）。
+
+**出口**：`/api/v1/duan/liuyao`、`/api/v1/duan/bazi`（批次 5，commit `a6eb3e5`）；
+App 侧占测页与命盘页均已接入（`fdd0a5d` / `22e8028`）。
 
 - **未做**：动爻化进、回头生克、合冲刑害的完整组合规则引擎（当前是「旺衰 + 旬空 + 动爻 + 日辰」的概括）
 
@@ -144,28 +182,42 @@
   2. 「同词既宜又忌」的真冲突实测 **0 例** → 「忌优先」veto 无歧义；
      但**未**把「忌行丧 / 忌分居」计入嫁娶否决 —— 实测会误杀 37 天（占婚嫁吉日 14%）
 - **MCP 暴露**：第 9 个工具 `xuanpan_zeri`（commit `45c45a0`）
+- **HTTP 出口**：`/api/v1/zeri/{events,evaluate,select}`（commit `a6eb3e5`）；
+  App 侧「黄历 · 择日」页（commit `f09b298`）
+- **区间上界 `MAX_RANGE_DAYS = 3660`（约 10 年）刻意放在内核**，不在路由层 ——
+  这样 MCP 与 HTTP 自动共享同一个界，不会出现"从两个入口进来限制不一样"。
+  （`/almanac/range` 的 31 天上界确实在路由层，**两个端点口径不同，别混淆**。
+  实测：1202 天 0.99s、3653 天 2.86s、6682 天直接 400。）
 - **测试**：新增 42 + 6 例，全部通过变异验证（故意改坏实现 6 处 + docstring 漂移 1 处，均被捕获）
 
 ---
 
 ## 4. 剩余批次（供阿勇定方向）
 
-已落地：MCP 暴露层 / 康熙笔画字库 / 断卦层 / **择日决策**。剩余按性价比排序：
+已落地：MCP 暴露层 / 康熙笔画字库 / 断卦层 / 择日决策 / **HTTP 出口 + 管理台 + 前端接线**。
+剩余按性价比排序：
 
 | 优先级 | 事项 | 成本 | 杠杆 |
 |---|---|---|---|
-| 1 | **SKILL.md 打包**（让仓库同时是 MCP Server + Agent Skill） | 低 | 高：抄 suanming-mcp 的 Agent 入口 |
-| 2 | 神煞吉凶分级（§3.2） | 低 | 中（不建议做：宜留给 AI 层） |
-| 3 | 择日进阶规则（三煞 / 太岁 / 五黄 / 按人八字择日） | 中 | 中：择日决策已可用的自然延伸 |
-| 4 | 三式（§3.5） | 极高 | 长线，挂起 |
+| 1 | **真机 UI 走查**（批次 5 新增的页面与交互**全部未在真机上点过**） | 低 | 高：唯一能发现"布局溢出 / 路由跳不过去"的手段 |
+| 2 | **SKILL.md 打包**（让仓库同时是 MCP Server + Agent Skill） | 低 | 高：抄 suanming-mcp 的 Agent 入口 |
+| 3 | 神煞吉凶分级（§3.2） | 低 | 中（不建议做：宜留给 AI 层） |
+| 4 | 择日进阶规则（三煞 / 太岁 / 五黄 / 按人八字择日） | 中 | 中：择日决策已可用的自然延伸 |
+| 5 | 三式（§3.5） | 极高 | 长线，挂起 |
+
+> ⚠️ 优先级 1 之所以排在 SKILL.md 之前：SKILL.md 是"再开一个入口"，
+> 而真机走查是"确认已开的入口真的能用"。**先确认，再扩张。**
 
 ---
 
 ## 5. 验证与复现
 
 ```bash
-# 全量测试（当前 834 passed）
+# 全量测试（当前 940 passed）
 python -m pytest
+
+# 取总数（不执行，秒级）
+python -m pytest --collect-only -p no:warnings | tail -3
 
 # 单项复现
 python -m pytest packages/fortune-core/tests/test_liuyao_zhuang.py      # 六爻装卦
@@ -174,7 +226,14 @@ python -m pytest packages/fortune-core/tests/test_almanac.py            # 黄历
 python -m pytest packages/fortune-core/tests/test_duangua.py            # 断卦层
 python -m pytest packages/fortune-core/tests/test_zeri.py               # 择日决策
 python -m pytest tests/test_mcp_server.py                               # MCP 暴露层
+python -m pytest tests/api/test_query_routes.py                         # 查询域 HTTP
+python -m pytest tests/mobile/test_local_date.py                        # 本地日期（真跑 TS）
 
 # 择日规则表完整性校验（词目真实性 + 死规则 + 同词宜忌冲突）
 python scripts/verify_zeri_table.py --check-veto
 ```
+
+> 🔴 全量跑完拿不到汇总行是**已知现象**，不是失败：
+> `[safe-delete]` 在 teardown 清理 pytest 临时目录时会拦停进程。
+> 详见 `HANDOFF.md` §5 的说明与分模块取数脚本。
+> 另：命令行**不要传 `-q`**，`pyproject` 的 addopts 已含 `-q`，会叠成 `-qq` 吞掉汇总行。
