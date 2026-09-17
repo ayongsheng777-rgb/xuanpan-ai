@@ -68,6 +68,48 @@ export const semantic = {
 
 export const colors = { ...brand, ...neutral, ...semantic } as const;
 
+/**
+ * 深色仪器色域 —— **仅用于罗盘域页面**（罗盘首页 / 手动调节 / 传感器测量）。
+ *
+ * 来源：V2 演示图（8 屏）+ V2 规范 §37「深色专业仪器风」。
+ * 与既有暖色中性阶**双轨并存**：命盘/占测/历史/我的等页面仍用浅色，
+ * 待真机走查两轨效果后由阿勇决定是否全局深色化
+ * （见《V2 评估与实施路线》冲突 2 裁决）。
+ *
+ * 取色原则：深藏青底（仪器感）+ 金（罗盘刻度）+ 朱红（磁针/北向）。
+ * 不引入五色之外的新色相，只是把它们放到深色底上重新分配明暗。
+ */
+export const instrument = {
+  /** 页面最底层背景（深藏青） */
+  bg: '#0A1626',
+  /** 卡片 / 分区背景（比底略亮一档） */
+  surface: '#12223A',
+  /** 次级分区（输入框、进度槽） */
+  surfaceAlt: '#1B3050',
+  /** 细边框 */
+  border: '#24395C',
+  /** 罗盘盘体底色（深墨青，区别于页面底） */
+  dialBody: '#0D1B2E',
+  /** 罗盘盘体金环/刻度 */
+  dialGold: brand.gold,
+  /** 磁针红（北向）—— 与五色朱红同源，深底下略提亮 */
+  needle: '#E05548',
+  /** 主文字 */
+  text: '#F2EDE4',
+  /** 次级文字 */
+  textSecondary: '#9AA8BC',
+  /** 弱化 / 占位 */
+  muted: '#5C6C84',
+  /** 强调金（读数大字、激活态） */
+  accent: brand.gold,
+  /** 状态：良好（墨绿提亮到深底可读） */
+  ok: '#5FB89A',
+  /** 状态：警告 */
+  warn: '#D9A441',
+  /** 状态：异常（朱红提亮） */
+  danger: '#E05548',
+} as const;
+
 /** 半透明层（避免在组件里手写 rgba） */
 export const alpha = {
   primarySoft: 'rgba(1, 58, 108, 0.08)',
@@ -177,7 +219,7 @@ export const layout = {
 } as const;
 
 export const theme = {
-  brand, neutral, semantic, colors, alpha, space, radius, font, elevation, layout,
+  brand, neutral, semantic, colors, alpha, instrument, space, radius, font, elevation, layout,
 } as const;
 
 export type Colors = typeof colors;
