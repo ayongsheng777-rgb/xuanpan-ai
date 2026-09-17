@@ -60,6 +60,7 @@ from fortune_core import (
 from fortune_core.liuyao import zhuang_gua
 from fortune_core.liuren import LiurenChart, cast_liuren
 from fortune_core.qimen import QimenChart, cast_qimen
+from fortune_core.taiyi import TaiyiChart, cast_taiyi
 from lunar_python import Solar
 
 APP_VERSION = "0.1.0"
@@ -430,6 +431,45 @@ def xuanpan_liuren(datetime_str: str = "", school: str = "default") -> dict[str,
     """
     dt = _parse_local_dt(datetime_str)
     chart: LiurenChart = cast_liuren(dt, school=school)
+    return _facts_dict(chart)
+
+
+@server.tool(structured_output=True)
+@_domain_errors_as_tool_error
+def xuanpan_taiyi(year: int | None = None, school: str = "default") -> dict[str, Any]:
+    """太乙神数起局（三式之三）：年局 —— 太乙落宫 + 三目 + 主客定三算 + 八门。
+
+    参数:
+        year: 公元年份，如 2026。不填取当前年份。
+            ⚠️ 只接受**年份**，不接受日期或时刻 —— 太乙年局的最小单位就是年。
+            这与大六壬「必须给到时辰」刚好相反，两者不可互相套用：
+            传 datetime 会让人以为太乙年局随时辰而变。
+        school: 流派。默认 default（金镜式积年 10153917）；
+            taojin 为淘金歌积年 10153977。两者相差 60（一甲子），
+            会让太乙落宫、文昌、局数、值事门**全部不同** ——
+            向用户说明时必须点明用的是哪一派，否则数字对不上任何一本书。
+
+    返回: 结构化 dict：
+        epoch      —— 五元六纪：第几元 / 元内第几局（如「壬子元第 31 局」）/ 第几纪
+        taiyi      —— 太乙落宫（宫号 / 卦 / 方位 / 入宫第几年 / 理天·理地·理人）
+        wenchang   —— 文昌天目所在十六神位
+        jishen     —— 计神所在支
+        shiji      —— 始击客目所在十六神位
+        dingmu     —— 定目所在十六神位
+        sansuan    —— 主算 / 客算 / 定算：算数 + 大将/参将落宫 + 长短 + 三才 + 和数/孤数
+        bamen      —— 值事门 + 八门落宫（含门自身的吉凶属性）
+        warnings   —— 命中边界情形时的提示（如「间神与太乙同宫」），需人工核对
+        uncertainties —— **本版未覆盖项**，务必如实向用户转述
+
+    说明: 🔴 太乙宫号与洛书**逐宫错位**（乾1 离2 艮3 震4 兑6 坤7 坎8 巽9），
+        不要套用奇门的九宫。全部结果由确定性内核算出（RULE-001）。
+        **本版只做年局**，太乙另有月局 / 日局 / 时局，未实现。
+        三算的长短、和数、孤数、三才，以及八门吉凶，都是**属性**（FACT）——
+        内核不给「利主 / 利客」这类结论，格局（掩迫囚击关格）与断法属上层解读
+        （RULE-008）。请勿把三算数字直接说成吉凶。
+    """
+    y = year if year is not None else _dt.datetime.now().year
+    chart: TaiyiChart = cast_taiyi(y, school=school)
     return _facts_dict(chart)
 
 

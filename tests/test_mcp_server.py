@@ -5,7 +5,7 @@ MCP server 的入口是 `server.py` 的 stdio 进程，客户端通过 JSON-RPC 
 直接 import server 调 call_tool 会绕过「进程启动 + 握手 + 消息编解码」这些真实链路。
 本测试用 mcp 的 stdio_client 启动真实子进程，验证：
 1. server 能启动并完成 initialize 握手
-2. 11 个工具全部注册
+2. 12 个工具全部注册
 3. 每个工具经 stdio 调用返回 structured_content（非自然语言摘要）
 4. 结构化输出内含 facts/tradition 两层（RULE-002 分层）
 
@@ -15,6 +15,7 @@ MCP server 的入口是 `server.py` 的 stdio 进程，客户端通过 JSON-RPC 
 from __future__ import annotations
 
 import asyncio
+import datetime as _dt
 import os
 import sys
 from pathlib import Path
@@ -74,14 +75,14 @@ async def _call(session: ClientSession, name: str, args: dict[str, Any]) -> Any:
     raise AssertionError(f"工具 {name} 无 structuredContent 也无文本输出")
 
 
-async def test_server_lists_eleven_tools() -> None:
+async def test_server_lists_twelve_tools() -> None:
     async with _connect() as session:
         tools = await session.list_tools()
         names = {t.name for t in tools.tools}
         assert names == {
             "xuanpan_bazi", "xuanpan_liuyao", "xuanpan_duan_liuyao", "xuanpan_duan_bazi",
             "xuanpan_almanac", "xuanpan_zeri", "xuanpan_name", "xuanpan_qian", "xuanpan_compass",
-            "xuanpan_qimen", "xuanpan_liuren",
+            "xuanpan_qimen", "xuanpan_liuren", "xuanpan_taiyi",
         }
 
 
@@ -181,6 +182,118 @@ async def test_liuren_unknown_school_is_readable_error() -> None:
             b.text for b in result.content if getattr(b, "type", "") == "text"
         )
         assert "未知的六壬流派" in text, text
+
+
+async def test_taiyi_structured_content() -> None:
+    """太乙年局：积年 / 五元六纪 / 太乙落宫 / 三目 / 三算 / 八门都必须回给调用方。
+
+    锚点 1972（壬子年）为阳遁首局：太乙起乾一宫、文昌在申（武德）、计神在寅、
+    始击在坤（大武），主算 7 / 客算 13 / 定算 13。
+    注意本例 `shiji` 与 `dingmu` 恰好同落坤，**不是字段重复**。
+
+    形状说明：`TaiyiChart` 与奇门/六壬一样是**扁平** dict（`taiyi` / `epoch` /
+    `sansuan` / `bamen` 都在顶层），因为年局盘当前是纯事实 —— 三算长短、和数孤数、
+    八门吉凶都只是属性，格局（掩迫囚击关格）与「利主利客」属上层解读（RULE-008）。
+    """
+    async with _connect() as session:
+        sc = await _call(session, "xuanpan_taiyi", {"year": 1972})
+        assert sc["year_ganzhi"] == "壬子"
+        assert sc["epoch"]["ju_label"] == "壬子元第 1 局"
+        assert sc["taiyi"]["palace"] == 1
+        assert sc["taiyi"]["gua"] == "乾"
+        assert sc["taiyi"]["li"] == "理天"
+        assert sc["wenchang"]["pos"] == "申"
+        assert sc["wenchang"]["name"] == "武德"
+        assert sc["jishen"]["zhi"] == "寅"
+        assert sc["shiji"]["pos"] == "坤"
+        assert [s["value"] for s in sc["sansuan"]] == [7, 13, 13]
+        assert [s["name"] for s in sc["sansuan"]] == ["主算", "客算", "定算"]
+        assert len(sc["bamen"]["layout"]) == 8
+        # 未覆盖项必须转述给调用方，不得在工具层吞掉
+        assert any("月局" in u for u in sc["uncertainties"])
+
+
+async def test_taiyi_palace_table_is_not_luoshu() -> None:
+    """太乙宫号与洛书**逐宫错位** —— 这条一旦回归，整盘会静默转 45°。
+
+    洛书（奇门口径）：坎1 坤2 震3 巽4 中5 乾6 兑7 艮8 离9
+    太乙（本盘口径）：乾1 离2 艮3 震4 中5 兑6 坤7 坎8 巽9
+    「乾」在两者中分别是 1 与 6 —— 取它做判据，复用奇门表必然失败。
+    """
+    async with _connect() as session:
+        sc = await _call(session, "xuanpan_taiyi", {"year": 2004})
+        # 2004 太乙落艮三宫；若误用洛书，艮会被写成 8
+        assert sc["taiyi"]["palace"] == 3
+        assert sc["taiyi"]["gua"] == "艮"
+        by_gua = {row["gua"]: row["palace"] for row in sc["bamen"]["layout"]}
+        assert by_gua["乾"] == 1, "乾在太乙表里是 1，不是洛书的 6"
+        assert by_gua["兑"] == 6, "兑在太乙表里是 6，不是洛书的 7"
+
+
+async def test_taiyi_never_enters_center_palace() -> None:
+    """太乙「不入中宫」—— 一个完整行宫周期（24 年）逐年核验。
+
+    3 年移一宫、24 年一周、跳过中五宫 —— 若行宫循环里混入中宫，
+    整条序列会错位，所以这条不只是「值不等于 5」，还要求八正宫全部走到。
+    """
+    async with _connect() as session:
+        seen = set()
+        for y in range(2000, 2024):
+            sc = await _call(session, "xuanpan_taiyi", {"year": y})
+            p = sc["taiyi"]["palace"]
+            assert p != 5, f"{y} 年太乙落入中五宫，违反「太乙不入中宫」"
+            assert p in (1, 2, 3, 4, 6, 7, 8, 9)
+            seen.add(p)
+        assert seen == {1, 2, 3, 4, 6, 7, 8, 9}, "24 年一周，八正宫应全部走到"
+
+
+async def test_taiyi_school_switch_changes_whole_board() -> None:
+    """两派积年相差 60（一甲子），但**整盘**都会变 —— 必须自报用的是哪一派。
+
+    积年差 60 与行宫周期 24 / 文昌周期 18 都不可整除，所以落宫与天目必然移动。
+    这条守住的是 RULE-006：流派可替换，且替换结果必须显式回给调用方。
+    """
+    async with _connect() as session:
+        a = await _call(session, "xuanpan_taiyi", {"year": 1972, "school": "default"})
+        b = await _call(session, "xuanpan_taiyi", {"year": 1972, "school": "taojin"})
+        assert a["school"] == "default" and b["school"] == "taojin"
+        assert a["jiyan_base"] == 10153917 and b["jiyan_base"] == 10153977
+        assert b["jiyan"] - a["jiyan"] == 60
+        assert a["taiyi"]["palace"] != b["taiyi"]["palace"]
+        assert a["wenchang"]["pos"] != b["wenchang"]["pos"]
+
+
+async def test_taiyi_defaults_to_current_year() -> None:
+    """不传年份取当前年 —— 太乙年局的最小单位就是年，不接受时刻。"""
+    async with _connect() as session:
+        sc = await _call(session, "xuanpan_taiyi", {})
+        assert sc["year"] == _dt.datetime.now().year
+
+
+async def test_taiyi_unknown_school_is_readable_error() -> None:
+    """未知流派应给出可读原因与可选值（SchoolNotFoundError 是 FortuneError 子类）。"""
+    async with _connect() as session:
+        result = await session.call_tool(
+            "xuanpan_taiyi", {"year": 2000, "school": "不存在的流派"}
+        )
+        assert result.is_error
+        text = " ".join(
+            b.text for b in result.content if getattr(b, "type", "") == "text"
+        )
+        assert "未知的太乙流派" in text, text
+        assert "default" in text and "taojin" in text, text
+
+
+async def test_taiyi_bad_input_raises_readable_tool_error() -> None:
+    """非法年份（字符串）应是可读的 ToolError，而不是笼统的「Error executing tool」。"""
+    async with _connect() as session:
+        result = await session.call_tool("xuanpan_taiyi", {"year": "不是年份"})
+        assert result.is_error
+        text = " ".join(
+            b.text for b in result.content if getattr(b, "type", "") == "text"
+        )
+        assert "year" in text or "整数" in text, text
+
 
 async def test_bazi_structured_content() -> None:
     async with _connect() as session:
