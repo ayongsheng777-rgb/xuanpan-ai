@@ -59,11 +59,16 @@
 
 `--brand-primary` `#013A6C` ｜ `--brand-gold` `#DAB37D` ｜ `--brand-sand` `#E5D7C7` ｜ `--brand-jade` `#3C7066` ｜ `--brand-cinnabar` `#B93E35`
 
-## 现状（2026-09-17 14:00）
+## 现状（2026-09-17 15:15）
 
-- **Phase 0~3 全部落地**，**765 测全绿**（术数追赶后基线：626 → 765）
-- 术数能力已补齐：六爻装卦层、八字大运/流年/神煞/长生十二宫、黄历/择日
+- **Phase 0~3 全部落地**，**~786 测全绿**（术数追赶后基线：626 → 765 → 786）
+- 术数能力已补齐：六爻装卦层、八字大运/流年/神煞/长生十二宫、黄历/择日、
+  **断卦层（`duangua.py`：六爻/八字吉凶倾向 + 流派标注）**
   （详见 `docs/玄盘 AI — 术数能力追赶路线图.md`）
+- **康熙笔画字库已扩至 20794 字**（`verified:true`，权威源 shunshi-kangxi-core，
+  修正 28 处简繁混用错误；「玄盘」「阿哲」等常用字全部可算）
+- **MCP 暴露层已交付**（`services/mcp/server.py`，8 个工具，回 structuredContent，
+  纯 stdio 不弹浏览器；测试走真实 stdio 子进程）
 - 移动端罗盘盘面仿真（`CompassDial`/`CompassAdjuster`）+ 每页右上角讲解入口（`HelpButton`）
 - 端到端冒烟、容器化、移动端闭环均已交付；`[未验证]` 真机 UI 走查未做
 - 无 remote 仓库
@@ -85,14 +90,14 @@
 4. 真机 UI 走查 —— 「3 秒内确认」只能在真机测
 5. 尚无 remote 仓库
 
-### 术数追赶下一步（2026-09-17 定方向，未执行）
+### 术数追赶下一步（2026-09-17 已收官前三步，剩余如下）
 
-按性价比（详见路线图 §4）：
+前三步已全部落地（MCP 暴露层 / 康熙笔画字库 / 断卦层，commit `1f53880`/`17ecfd4`/`a3ca381`）。
+剩余按性价比：
 
-1. **MCP 暴露层**（最高杠杆，内核已纯函数只差壳；须回 `structuredContent`、不弹浏览器）
-2. **康熙笔画字库扩充**（502 → 3000+，修复「连玄盘都算不了」）
-3. **断卦层**（六爻/八字共用，专业分水岭；须标注流派不确定性）
-4. 择日决策、神煞吉凶（建议留给 AI 层）、三式（长线挂起）
+1. **择日决策、神煞吉凶**（建议留给 AI 层：内核只给 FACT，吉凶解读由 AI 依流派生成）
+2. **三式**（奇门/六壬/太乙）—— 长线挂起，价值高但算法难
+3. **SKILL.md 打包范式**（让仓库同时是 MCP Server + Agent Skill，抄 suanming-mcp 的 Agent 入口）
 
 ## 外部项目已评估（勿重复调研）
 
@@ -105,9 +110,10 @@
 
 ## 已知自身数据缺口
 
-- 🔴 **`data/kangxi_strokes.json` 仅 502 字且 `verified: false`**，连「玄」「盘」「阿」「哲」都缺；
-  缺字时 `analyze_name` 抛 `DomainDataMissingError`（**行为正确，不静默取错值**），但可用性受限。
-  目标：扩到 3000+ 常用姓名用字并与权威字书逐条比对后把 `verified` 置 true
+- ✅ **`data/kangxi_strokes.json` 已扩至 20794 字且 `verified: true`**（2026-09-17 完成，见上）。
+  数据源 `data/kangxi_kx_source.json`（288KB，来自 shunshi-kangxi-core@0.1.1 MIT）。
+  缺字（扩展区生僻字）仍由 `analyze_name` 抛 `DomainDataMissingError`（不静默取错值）。
+  复算工具 `scripts/cmp_suanming_mcp.py` 与 `scripts/gen_strokes_table.py` 已就位。
 
 ## 术数能力落地要点（2026-09-17，避免重复造轮子）
 
