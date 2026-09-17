@@ -13,11 +13,12 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 
 from .config import Settings
 from .deps import get_settings
@@ -75,7 +76,37 @@ def _mount_routers(app: FastAPI) -> None:
 
     @app.get("/", include_in_schema=False)
     def index() -> dict[str, str]:
-        return {"service": "玄盘 AI", "docs": "/docs", "api": "/api/v1"}
+        return {
+            "service": "玄盘 AI",
+            "docs": "/docs",
+            "api": "/api/v1",
+            "admin": "/admin",
+        }
+
+    @app.get("/admin", include_in_schema=False, response_class=HTMLResponse)
+    def admin_page() -> HTMLResponse:
+        """管理台页面。
+
+        **页面本身不含任何数据、也不需要令牌** —— 它只是一张空壳，
+        真正的数据一律经 `/api/v1/admin/*` 取，鉴权在那里。
+        这样拆的理由：若连页面都要令牌，用户会陷进一个死循环 ——
+        「打不开页面 → 不知道要配什么 → 更打不开」。空壳页面正是那个入口。
+
+        文件缺失时返回 503 并说明原因（而不是 500）：这种情况几乎总是
+        镜像构建漏了 `COPY services/`，属于部署问题，说清楚比给个堆栈有用。
+        """
+        page = Path(__file__).resolve().parent / "static" / "admin.html"
+        if not page.exists():
+            return HTMLResponse(
+                content=(
+                    "<h1>管理台资源缺失</h1>"
+                    f"<p>找不到 {page}。</p>"
+                    "<p>若运行在容器中，请确认镜像构建时 <code>COPY services/</code> 覆盖了 "
+                    "<code>services/api/xuanpan_api/static/</code>。</p>"
+                ),
+                status_code=503,
+            )
+        return HTMLResponse(content=page.read_text(encoding="utf-8"))
 
 
 def _build_ai_router(cfg: Settings):  # type: ignore[no-untyped-def]

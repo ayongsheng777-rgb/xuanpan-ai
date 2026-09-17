@@ -177,6 +177,23 @@ class Store:
             row = conn.execute("SELECT COUNT(*) AS n FROM sessions").fetchone()
         return int(row["n"]) if row else 0
 
+    def stats(self) -> dict[str, int]:
+        """各表行数概览。
+
+        供管理界面显示体量。**刻意不做任何业务判断**（如"报告率是否健康"）——
+        那属于上层的事，存储层只回答"有几行"。
+        """
+        with self.connect() as conn:
+            return {
+                name: int(conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0])
+                # 表名是**本模块的常量**，不含用户输入，故 f-string 拼入安全。
+                for name, table in (
+                    ("sessions", "sessions"),
+                    ("reports", "reports"),
+                    ("turns", "turns"),
+                )
+            }
+
     def update_session(
         self,
         session_id: str,

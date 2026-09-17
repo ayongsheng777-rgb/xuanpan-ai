@@ -7,15 +7,18 @@
 - **查询域**（`almanac` / `zeri` / `duan`）：无状态查询，不落库、不进
   `FortuneContext`、也没有报告。`duan` 虽是「解读」，但它解读的是**本次请求里
   传进来的排盘结果**，不依赖会话。
+- **运维域**（`admin`）：自带令牌鉴权。它与会话域**读同一份数据**，
+  但**不共用端点** —— 会话域是给 App 用的、没有鉴权，
+  管理界面若直接调它就等于没有保护（知道 URL 即可绕过）。
 
-`meta` 为两组共用。
+`meta` 为各组共用。
 """
 
 from __future__ import annotations
 
 from fastapi import APIRouter
 
-from . import almanac, calc, duan, meta, report, scan, sessions, zeri
+from . import admin, almanac, calc, duan, meta, report, scan, sessions, zeri
 
 #：所有业务路由的统一挂载点（前缀 /api/v1 在 app 层加）
 API_V1 = APIRouter(prefix="/api/v1")
@@ -27,5 +30,6 @@ API_V1.include_router(zeri.router)
 API_V1.include_router(duan.router)
 API_V1.include_router(sessions.router)
 API_V1.include_router(report.router)
+API_V1.include_router(admin.router)
 
 __all__ = ["API_V1"]

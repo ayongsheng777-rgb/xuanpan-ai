@@ -1,0 +1,694 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>玄盘 AI · 管理台</title>
+<!--
+  单文件、零依赖、零构建。
+
+  为什么不用框架 / CDN：
+  · 容器内没有外网（构建期靠国内镜像，运行期不出网），CDN 引用必然白屏；
+  · 这个页面只在局域网/本机给运维用，引入一整套构建链的收益抵不上维护成本。
+
+  令牌存放策略：
+  · 只存 sessionStorage（关掉标签页即失效），**不写 localStorage** ——
+    管理台会在共用电脑上临时打开，长期驻留的令牌是白送的机会；
+  · 从 URL 读取后立刻 replaceState 清掉，避免残留在浏览器历史与 Referer 里。
+-->
+<style>
+  :root {
+    --brand-primary: #013A6C;
+    --brand-gold:    #DAB37D;
+    --brand-sand:    #E5D7C7;
+    --brand-jade:    #3C7066;
+    --brand-cinnabar:#B93E35;
+
+    --bg:      #F7F5F2;
+    --surface: #FFFFFF;
+    --border:  #E3DED6;
+    --text:    #1F2937;
+    --muted:   #6B7280;
+    --radius:  10px;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif;
+  }
+  code, pre, .mono { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; }
+
+  header {
+    background: var(--brand-primary); color: #fff;
+    padding: 14px 20px; display: flex; align-items: center; gap: 14px;
+  }
+  header h1 { font-size: 16px; margin: 0; font-weight: 600; letter-spacing: .5px; }
+  header .badge {
+    font-size: 12px; padding: 2px 8px; border-radius: 999px;
+    background: rgba(255,255,255,.15); color: var(--brand-gold);
+  }
+  header .spacer { flex: 1; }
+  header button.link {
+    background: none; border: 1px solid rgba(255,255,255,.35); color: #fff;
+    padding: 4px 12px; border-radius: 999px; cursor: pointer; font-size: 12px;
+  }
+  header button.link:hover { background: rgba(255,255,255,.12); }
+
+  nav {
+    background: var(--surface); border-bottom: 1px solid var(--border);
+    padding: 0 20px; display: flex; gap: 4px; position: sticky; top: 0; z-index: 10;
+  }
+  nav button {
+    background: none; border: none; border-bottom: 2px solid transparent;
+    padding: 12px 16px; cursor: pointer; color: var(--muted);
+    font-size: 14px; font-weight: 500;
+  }
+  nav button:hover { color: var(--brand-primary); }
+  nav button.active { color: var(--brand-primary); border-bottom-color: var(--brand-gold); }
+
+  main { padding: 20px; max-width: 1180px; margin: 0 auto; }
+  .grid { display: grid; gap: 14px; }
+  .grid.cols-2 { grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
+  .grid.cols-4 { grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
+
+  .card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 16px;
+  }
+  .card h2 {
+    font-size: 13px; margin: 0 0 12px; color: var(--muted);
+    text-transform: uppercase; letter-spacing: .8px; font-weight: 600;
+  }
+  .card h3 { font-size: 14px; margin: 16px 0 8px; color: var(--brand-primary); }
+  .card h3:first-child { margin-top: 0; }
+
+  .stat { text-align: center; }
+  .stat .n { font-size: 26px; font-weight: 700; color: var(--brand-primary); line-height: 1.2; }
+  .stat .k { font-size: 12px; color: var(--muted); margin-top: 2px; }
+
+  .kv { display: flex; justify-content: space-between; gap: 12px; padding: 5px 0; font-size: 13px; border-bottom: 1px dashed var(--border); }
+  .kv:last-child { border-bottom: none; }
+  .kv .k { color: var(--muted); flex-shrink: 0; }
+  .kv .v { text-align: right; word-break: break-all; }
+
+  .pill { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px; font-weight: 500; }
+  .pill.ok   { background: rgba(60,112,102,.12); color: var(--brand-jade); }
+  .pill.bad  { background: rgba(185,62,53,.10); color: var(--brand-cinnabar); }
+  .pill.warn { background: rgba(218,179,125,.24); color: #8a6a33; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .5px; }
+  tbody tr:hover { background: #FAF8F6; }
+  tbody tr.selected { background: rgba(218,179,125,.16); }
+  td.mono { font-size: 12px; color: var(--muted); }
+
+  button.btn {
+    background: var(--brand-primary); color: #fff; border: none;
+    padding: 7px 14px; border-radius: 6px; cursor: pointer; font-size: 13px;
+  }
+  button.btn:hover { filter: brightness(1.12); }
+  button.btn:disabled { opacity: .5; cursor: not-allowed; }
+  button.btn.ghost { background: transparent; color: var(--brand-primary); border: 1px solid var(--border); }
+  button.btn.danger { background: var(--brand-cinnabar); }
+  button.btn.sm { padding: 4px 10px; font-size: 12px; }
+
+  input, select {
+    border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px;
+    font-size: 13px; background: #fff; color: var(--text); font-family: inherit;
+  }
+  input:focus, select:focus { outline: 2px solid var(--brand-gold); outline-offset: -1px; }
+  label { font-size: 12px; color: var(--muted); display: block; margin-bottom: 4px; }
+  .field { margin-bottom: 10px; }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; }
+  .row > * { flex: 1 1 150px; }
+  .row > .shrink { flex: 0 0 auto; }
+
+  pre.out {
+    background: #FBF9F7; border: 1px solid var(--border); border-radius: 8px;
+    padding: 12px; font-size: 12px; line-height: 1.55; overflow: auto;
+    max-height: 460px; margin: 12px 0 0; white-space: pre-wrap; word-break: break-all;
+  }
+  .hint { color: var(--muted); font-size: 12px; }
+  .banner {
+    border-radius: var(--radius); padding: 12px 14px; margin-bottom: 14px; font-size: 13px;
+    border: 1px solid;
+  }
+  .banner.error { background: rgba(185,62,53,.06); border-color: rgba(185,62,53,.3); color: #7a2b26; }
+  .banner.info  { background: rgba(1,58,108,.05);  border-color: rgba(1,58,108,.2);  color: var(--brand-primary); }
+  .banner pre { margin: 8px 0 0; white-space: pre-wrap; font-size: 12px; }
+
+  .gates { min-height: 60vh; display: flex; align-items: center; justify-content: center; padding: 20px; }
+  .gates .card { max-width: 620px; width: 100%; }
+  .hidden { display: none !important; }
+  .right { text-align: right; }
+  .mt { margin-top: 12px; }
+  .empty { padding: 28px; text-align: center; color: var(--muted); font-size: 13px; }
+</style>
+</head>
+<body>
+
+<!-- ── 未登录 / 未启用 ─────────────────────────────────────────── -->
+<div id="gate" class="gates">
+  <div class="card">
+    <h2>玄盘 AI · 管理台</h2>
+    <div id="gateMsg" class="banner info">
+      需要管理令牌才能查看。令牌由服务端环境变量 <code>XUANPAN_ADMIN_TOKEN</code> 指定。
+    </div>
+    <div class="field">
+      <label for="tokenInput">管理令牌</label>
+      <input id="tokenInput" type="password" placeholder="粘贴 XUANPAN_ADMIN_TOKEN 的值" style="width:100%">
+    </div>
+    <button class="btn" id="loginBtn">进入</button>
+    <p class="hint mt">
+      令牌只保存在本标签页的 sessionStorage，关闭标签即失效；不会被写进地址栏或历史记录。
+    </p>
+  </div>
+</div>
+
+<!-- ── 主界面 ──────────────────────────────────────────────────── -->
+<div id="app" class="hidden">
+  <header>
+    <h1>玄盘 AI · 管理台</h1>
+    <span class="badge" id="verBadge">v0.1.0</span>
+    <span class="badge" id="modeBadge"></span>
+    <div class="spacer"></div>
+    <button class="link" id="refreshBtn">刷新</button>
+    <button class="link" id="logoutBtn">退出</button>
+  </header>
+
+  <nav>
+    <button data-view="overview" class="active">概览</button>
+    <button data-view="sessions">会话记录</button>
+    <button data-view="lab">能力调试台</button>
+  </nav>
+
+  <main>
+    <!-- 概览 -->
+    <section id="view-overview">
+      <div id="overviewError"></div>
+      <div class="grid cols-4" id="statCards"></div>
+      <div class="grid cols-2 mt" id="overviewCards"></div>
+    </section>
+
+    <!-- 会话 -->
+    <section id="view-sessions" class="hidden">
+      <div class="card">
+        <h2>会话记录</h2>
+        <div class="row">
+          <div class="shrink"><button class="btn ghost sm" id="sessReload">重新读取</button></div>
+          <div class="shrink hint" id="sessCount"></div>
+        </div>
+        <div id="sessTable" class="mt"></div>
+      </div>
+      <div id="sessDetail" class="mt"></div>
+    </section>
+
+    <!-- 调试台 -->
+    <section id="view-lab" class="hidden">
+      <div class="banner info">
+        这里是**只读试算台**：直接调用公开的 <code>/api/v1/almanac</code>、<code>/zeri</code>、<code>/duan</code>
+        接口，用来看清服务端实际算出了什么。不做任何写操作。
+      </div>
+
+      <div class="grid cols-2">
+        <div class="card">
+          <h2>黄历</h2>
+          <div class="row">
+            <div><label>日期（留空 = 今天）</label><input id="almDate" type="date"></div>
+            <div class="shrink"><button class="btn" id="almRun">查询</button></div>
+          </div>
+          <pre class="out hidden" id="almOut"></pre>
+        </div>
+
+        <div class="card">
+          <h2>择日筛选</h2>
+          <div class="row">
+            <div><label>事件</label><select id="zeriEvent"></select></div>
+            <div><label>当事人属相（可选）</label><select id="zeriZodiac"></select></div>
+          </div>
+          <div class="row mt">
+            <div><label>起始</label><input id="zeriStart" type="date"></div>
+            <div><label>结束</label><input id="zeriEnd" type="date"></div>
+            <div class="shrink"><button class="btn" id="zeriRun">筛选</button></div>
+          </div>
+          <pre class="out hidden" id="zeriOut"></pre>
+        </div>
+
+        <div class="card">
+          <h2>六爻断卦</h2>
+          <div class="row">
+            <div><label>六爻数值（自下而上，逗号分隔）</label><input id="lyYao" value="7,8,9,6,7,8"></div>
+          </div>
+          <div class="row mt">
+            <div><label>占问类别</label><select id="lyTopic"></select></div>
+            <div><label>起卦日</label><input id="lyDate" type="date"></div>
+            <div class="shrink"><button class="btn" id="lyRun">断卦</button></div>
+          </div>
+          <pre class="out hidden" id="lyOut"></pre>
+        </div>
+
+        <div class="card">
+          <h2>八字</h2>
+          <div class="row">
+            <div><label>年</label><input id="bzY" value="1981"></div>
+            <div><label>月</label><input id="bzM" value="9"></div>
+            <div><label>日</label><input id="bzD" value="14"></div>
+            <div><label>时</label><input id="bzH" value="10"></div>
+            <div class="shrink"><button class="btn" id="bzRun">排盘并断卦</button></div>
+          </div>
+          <pre class="out hidden" id="bzOut"></pre>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<script>
+'use strict';
+
+// ==========================================================================
+// 令牌
+// ==========================================================================
+const TOKEN_KEY = 'xuanpan_admin_token';
+let token = '';
+
+function readToken() {
+  // 优先 URL 参数（首次点链接进来），读完立刻从地址栏抹掉。
+  const url = new URL(location.href);
+  const fromUrl = url.searchParams.get('token');
+  if (fromUrl) {
+    sessionStorage.setItem(TOKEN_KEY, fromUrl);
+    url.searchParams.delete('token');
+    history.replaceState(null, '', url.pathname + url.search + url.hash);
+    return fromUrl;
+  }
+  return sessionStorage.getItem(TOKEN_KEY) || '';
+}
+
+function clearToken() {
+  sessionStorage.removeItem(TOKEN_KEY);
+  token = '';
+}
+
+// ==========================================================================
+// API
+// ==========================================================================
+class ApiError extends Error {
+  constructor(status, detail) { super(detail); this.status = status; this.detail = detail; }
+}
+
+async function api(path, options) {
+  const res = await fetch(path, {
+    ...(options || {}),
+    headers: { 'X-Xuanpan-Admin-Token': token, ...((options && options.headers) || {}) },
+  });
+  const text = await res.text();
+  let body = null;
+  try { body = text ? JSON.parse(text) : null; } catch (e) { body = null; }
+  if (!res.ok) {
+    throw new ApiError(res.status, (body && body.detail) || ('请求失败 HTTP ' + res.status));
+  }
+  return body;
+}
+
+// 公开接口（试算台用）—— 不需要管理令牌
+async function publicApi(path, options) {
+  const res = await fetch(path, {
+    ...(options || {}),
+    headers: { 'Content-Type': 'application/json', ...((options && options.headers) || {}) },
+  });
+  const text = await res.text();
+  let body = null;
+  try { body = text ? JSON.parse(text) : null; } catch (e) { body = null; }
+  if (!res.ok) throw new ApiError(res.status, (body && body.detail) || ('请求失败 HTTP ' + res.status));
+  return body;
+}
+
+// ==========================================================================
+// 工具
+// ==========================================================================
+const $ = (id) => document.getElementById(id);
+
+function esc(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+function show(el) { el.classList.remove('hidden'); }
+function hide(el) { el.classList.add('hidden'); }
+
+function kv(k, v) {
+  return '<div class="kv"><span class="k">' + esc(k) + '</span><span class="v">' + v + '</span></div>';
+}
+function yesNo(ok) {
+  return ok ? '<span class="pill ok">可用</span>' : '<span class="pill bad">不可用</span>';
+}
+function fmtBytes(n) {
+  if (n < 0) return '（无法读取）';
+  if (n < 1024) return n + ' B';
+  if (n < 1048576) return (n / 1024).toFixed(1) + ' KB';
+  return (n / 1048576).toFixed(1) + ' MB';
+}
+
+const ZODIAC = ['鼠','牛','虎','兔','龙','蛇','马','羊','猴','鸡','狗','猪'];
+
+// ==========================================================================
+// 登录
+// ==========================================================================
+async function tryLogin(candidate) {
+  token = candidate;
+  try {
+    await api('/api/v1/admin/overview');
+    sessionStorage.setItem(TOKEN_KEY, token);
+    hide($('gate')); show($('app'));
+    await loadAll();
+    return true;
+  } catch (err) {
+    if (err.status === 403) {
+      // 服务端未配置令牌 —— detail 里已经带了完整的配置指引，原样展示
+      $('gateMsg').className = 'banner error';
+      $('gateMsg').innerHTML = '<strong>管理界面未启用</strong><pre>' + esc(err.detail) + '</pre>';
+      hide($('tokenInput').parentElement);
+      $('loginBtn').classList.add('hidden');
+    } else {
+      $('gateMsg').className = 'banner error';
+      $('gateMsg').textContent = err.status === 401 ? '令牌不正确，请重新输入。' : err.detail;
+    }
+    return false;
+  }
+}
+
+// ==========================================================================
+// 概览
+// ==========================================================================
+async function loadOverview() {
+  const box = $('overviewError');
+  box.innerHTML = '';
+  let data;
+  try {
+    data = await api('/api/v1/admin/overview');
+  } catch (err) {
+    box.innerHTML = '<div class="banner error">' + esc(err.detail) + '</div>';
+    return;
+  }
+
+  $('modeBadge').textContent = 'ai_mode=' + data.config.ai_mode;
+
+  const c = data.counts;
+  $('statCards').innerHTML = [
+    ['会话', c.sessions], ['报告', c.reports], ['对话轮次', c.turns],
+  ].map(function (x) {
+    return '<div class="card stat"><div class="n">' + x[1] + '</div><div class="k">' + x[0] + '</div></div>';
+  }).join('') + '<div class="card stat"><div class="n" style="font-size:18px">' + fmtBytes(data.storage.size_bytes) + '</div><div class="k">数据库体积</div></div>';
+
+  const rt = data.rule_tables;
+  let rtHtml = '';
+  for (const name of Object.keys(rt)) {
+    const t = rt[name];
+    rtHtml += '<h3>' + esc(name) + ' ' + yesNo(t.available) + '</h3>';
+    if (t.error) {
+      rtHtml += kv('错误', '<span class="pill bad">' + esc(t.error) + '</span>');
+    } else {
+      if (t.events !== undefined) rtHtml += kv('事件数', t.events);
+      if (t.schools) rtHtml += kv('流派', esc(t.schools.join('、')));
+      if (t.chars !== undefined) rtHtml += kv('字数', t.chars);
+      if (t.verified !== undefined) {
+        rtHtml += kv('权威性', t.verified ? '<span class="pill ok">verified</span>'
+                                          : '<span class="pill warn">未经校验</span>');
+      }
+    }
+  }
+
+  const cap = data.capabilities;
+  const cfg = data.config;
+
+  $('overviewCards').innerHTML =
+    '<div class="card"><h2>规则表就绪状态</h2>' + rtHtml + '</div>' +
+    '<div class="card"><h2>能力与配置</h2>' +
+      kv('AI 解释层', yesNo(cap.ai_provider_available)) +
+      kv('罗盘识别', yesNo(cap.vision_provider_available)) +
+      kv('保留原图（keep_photos）', cfg.keep_photos ? '<span class="pill warn">是</span>' : '否') +
+      kv('上传上限', cfg.max_upload_mb + ' MB') +
+      kv('CORS 来源', esc(cfg.cors_origins.join(', '))) +
+      kv('数据库路径', '<span class="mono">' + esc(data.storage.db_path) + '</span>') +
+      '<h3>注意</h3><div class="hint">' + esc(data.note) + '</div>' +
+    '</div>';
+}
+
+// ==========================================================================
+// 会话
+// ==========================================================================
+let currentSessionId = null;
+
+async function loadSessions() {
+  const box = $('sessTable');
+  box.innerHTML = '<div class="empty">读取中…</div>';
+  let data;
+  try {
+    data = await api('/api/v1/admin/sessions?limit=100');
+  } catch (err) {
+    box.innerHTML = '<div class="banner error">' + esc(err.detail) + '</div>';
+    return;
+  }
+  $('sessCount').textContent = '共 ' + data.total + ' 条（显示最近 ' + data.items.length + ' 条）';
+
+  if (!data.items.length) {
+    box.innerHTML = '<div class="empty">还没有会话记录。App 里保存过盘面后这里会出现。</div>';
+    return;
+  }
+
+  const rows = data.items.map(function (s) {
+    const mods = [];
+    if (s.has_compass) mods.push('罗盘');
+    if (s.has_bazi) mods.push('八字');
+    if (s.has_liuyao) mods.push('六爻');
+    if (s.has_qian) mods.push('灵签');
+    if (s.has_naming) mods.push('姓名');
+    return '<tr data-id="' + esc(s.session_id) + '" class="' + (s.session_id === currentSessionId ? 'selected' : '') + '">' +
+      '<td class="mono">' + esc(s.session_id) + '</td>' +
+      '<td>' + esc(s.title || '（无标题）') + '</td>' +
+      '<td>' + esc(mods.join('、') || '—') + '</td>' +
+      '<td>' + esc(s.question_category || '—') + '</td>' +
+      '<td>' + s.report_count + '</td>' +
+      '<td class="mono">' + esc((s.updated_at || '').replace('T', ' ').slice(0, 19)) + '</td>' +
+      '</tr>';
+  }).join('');
+
+  box.innerHTML = '<table><thead><tr>' +
+    '<th>会话 ID</th><th>标题</th><th>已录入</th><th>问题类别</th><th>报告</th><th>更新时间</th>' +
+    '</tr></thead><tbody>' + rows + '</tbody></table>';
+
+  box.querySelectorAll('tbody tr').forEach(function (tr) {
+    tr.style.cursor = 'pointer';
+    tr.addEventListener('click', function () { openSession(tr.dataset.id); });
+  });
+}
+
+async function openSession(id) {
+  currentSessionId = id;
+  const box = $('sessDetail');
+  box.innerHTML = '<div class="card"><div class="empty">读取中…</div></div>';
+  let data;
+  try {
+    data = await api('/api/v1/admin/sessions/' + encodeURIComponent(id));
+  } catch (err) {
+    box.innerHTML = '<div class="banner error">' + esc(err.detail) + '</div>';
+    return;
+  }
+
+  const s = data.session;
+  const inputs = [];
+  ['compass_input', 'bazi_input', 'liuyao_input', 'qian_input', 'naming_input'].forEach(function (k) {
+    if (s[k]) inputs.push(kv(k, '<span class="mono">' + esc(JSON.stringify(s[k])) + '</span>'));
+  });
+
+  const repHtml = data.reports.length
+    ? data.reports.map(function (r) {
+        return '<div class="kv"><span class="k mono">' + esc(r.report_id) + '</span>' +
+               '<span class="v">' + esc((r.created_at || '').slice(0, 19)) +
+               ' <button class="btn ghost sm" data-rep="' + esc(r.report_id) + '">查看</button></span></div>';
+      }).join('')
+    : '<div class="hint">该会话还没有报告。</div>';
+
+  const turnHtml = data.turns.length
+    ? data.turns.map(function (t) {
+        return '<div class="kv"><span class="k">' + esc(t.role === 'user' ? '问' : '答') + '</span>' +
+               '<span class="v" style="text-align:left">' + esc((t.content || '').slice(0, 160)) + '</span></div>';
+      }).join('')
+    : '<div class="hint">没有多轮对话。</div>';
+
+  box.innerHTML =
+    '<div class="card">' +
+      '<h2>会话详情</h2>' +
+      '<div class="row"><div class="shrink"><button class="btn danger sm" id="delBtn">删除此会话</button></div>' +
+      '<div class="shrink hint">删除不可恢复，会连同报告与对话一起清除。</div></div>' +
+      '<div class="mt">' +
+        kv('会话 ID', '<span class="mono">' + esc(s.session_id) + '</span>') +
+        kv('创建', esc((s.created_at || '').slice(0, 19))) +
+        kv('更新', esc((s.updated_at || '').slice(0, 19))) +
+        kv('标题', esc(s.title || '—')) +
+        kv('问题', esc(s.question_text || '—')) +
+        (inputs.length ? '<h3>已录入的输入</h3>' + inputs.join('') : '') +
+      '</div>' +
+      '<h3>报告（' + data.reports.length + '）</h3>' + repHtml +
+      '<h3>多轮对话（' + data.turns.length + '）</h3>' + turnHtml +
+    '</div>' +
+    '<pre class="out hidden" id="repOut"></pre>';
+
+  $('delBtn').addEventListener('click', async function () {
+    if (!confirm('确定删除会话 ' + id + ' ？此操作不可恢复（含报告与对话）。')) return;
+    try {
+      await api('/api/v1/admin/sessions/' + encodeURIComponent(id), { method: 'DELETE' });
+      currentSessionId = null;
+      $('sessDetail').innerHTML = '<div class="banner info">已删除 ' + esc(id) + '</div>';
+      await loadSessions();
+    } catch (err) {
+      alert('删除失败：' + err.detail);
+    }
+  });
+
+  box.querySelectorAll('[data-rep]').forEach(function (b) {
+    b.addEventListener('click', async function () {
+      try {
+        const r = await api('/api/v1/admin/reports/' + encodeURIComponent(b.dataset.rep));
+        const out = $('repOut');
+        out.textContent = JSON.stringify(r, null, 2);
+        show(out);
+      } catch (err) {
+        alert('读取失败：' + err.detail);
+      }
+    });
+  });
+}
+
+// ==========================================================================
+// 调试台
+// ==========================================================================
+async function initLab() {
+  const start = new Date();
+  const end = new Date(Date.now() + 60 * 864e5);
+  const iso = (d) => d.toISOString().slice(0, 10);
+  $('zeriStart').value = iso(start);
+  $('zeriEnd').value = iso(end);
+  $('lyDate').value = iso(start);
+
+  $('zeriZodiac').innerHTML = '<option value="">（不指定）</option>' +
+    ZODIAC.map(function (z) { return '<option value="' + z + '">' + z + '</option>'; }).join('');
+
+  try {
+    const ev = await publicApi('/api/v1/zeri/events');
+    $('zeriEvent').innerHTML = ev.events.map(function (e) {
+      return '<option value="' + esc(e.event) + '">' + esc(e.label) + '（' + esc(e.event) + '）</option>';
+    }).join('');
+  } catch (err) {
+    $('zeriEvent').innerHTML = '<option>读取失败</option>';
+  }
+
+  try {
+    const qc = await publicApi('/api/v1/meta/question-categories');
+    $('lyTopic').innerHTML = qc.categories.map(function (c) {
+      return '<option value="' + esc(c) + '">' + esc(c) + '</option>';
+    }).join('');
+  } catch (err) {
+    $('lyTopic').innerHTML = '<option value="财运">财运</option>';
+  }
+}
+
+function dump(el, obj) {
+  el.textContent = JSON.stringify(obj, null, 2);
+  show(el);
+}
+
+function bindLab() {
+  $('almRun').addEventListener('click', async function () {
+    const d = $('almDate').value;
+    const url = '/api/v1/almanac/day' + (d ? '?date=' + d : '');
+    try { dump($('almOut'), await publicApi(url)); }
+    catch (err) { $('almOut').textContent = '错误：' + err.detail; show($('almOut')); }
+  });
+
+  $('zeriRun').addEventListener('click', async function () {
+    const payload = {
+      event: $('zeriEvent').value,
+      start: $('zeriStart').value,
+      end: $('zeriEnd').value,
+      limit: 10,
+    };
+    if ($('zeriZodiac').value) payload.shengxiao = $('zeriZodiac').value;
+    try {
+      dump($('zeriOut'), await publicApi('/api/v1/zeri/select', {
+        method: 'POST', body: JSON.stringify(payload),
+      }));
+    } catch (err) { $('zeriOut').textContent = '错误：' + err.detail; show($('zeriOut')); }
+  });
+
+  $('lyRun').addEventListener('click', async function () {
+    const values = $('lyYao').value.split(',').map(function (x) { return parseInt(x.trim(), 10); });
+    const payload = { yao_values: values, method: 'yao' };
+    if ($('lyTopic').value) payload.topic = $('lyTopic').value;
+    if ($('lyDate').value) payload.cast_date = $('lyDate').value;
+    try {
+      dump($('lyOut'), await publicApi('/api/v1/duan/liuyao', {
+        method: 'POST', body: JSON.stringify(payload),
+      }));
+    } catch (err) { $('lyOut').textContent = '错误：' + err.detail; show($('lyOut')); }
+  });
+
+  $('bzRun').addEventListener('click', async function () {
+    const payload = {
+      year: parseInt($('bzY').value, 10),
+      month: parseInt($('bzM').value, 10),
+      day: parseInt($('bzD').value, 10),
+      hour: parseInt($('bzH').value, 10),
+      gender: 'male',
+    };
+    try {
+      const chart = await publicApi('/api/v1/calc/bazi', { method: 'POST', body: JSON.stringify(payload) });
+      const duan = await publicApi('/api/v1/duan/bazi', { method: 'POST', body: JSON.stringify(payload) });
+      dump($('bzOut'), { 排盘: chart, 断卦: duan });
+    } catch (err) { $('bzOut').textContent = '错误：' + err.detail; show($('bzOut')); }
+  });
+}
+
+// ==========================================================================
+// 视图切换与启动
+// ==========================================================================
+function switchView(name) {
+  document.querySelectorAll('nav button').forEach(function (b) {
+    b.classList.toggle('active', b.dataset.view === name);
+  });
+  ['overview', 'sessions', 'lab'].forEach(function (v) {
+    $('view-' + v).classList.toggle('hidden', v !== name);
+  });
+  if (name === 'sessions') loadSessions();
+}
+
+async function loadAll() {
+  await loadOverview();
+}
+
+document.querySelectorAll('nav button').forEach(function (b) {
+  b.addEventListener('click', function () { switchView(b.dataset.view); });
+});
+
+$('loginBtn').addEventListener('click', function () { tryLogin($('tokenInput').value.trim()); });
+$('tokenInput').addEventListener('keydown', function (e) {
+  if (e.key === 'Enter') tryLogin($('tokenInput').value.trim());
+});
+$('logoutBtn').addEventListener('click', function () {
+  clearToken();
+  location.reload();
+});
+$('refreshBtn').addEventListener('click', function () { loadAll(); });
+$('sessReload').addEventListener('click', function () { loadSessions(); });
+
+bindLab();
+initLab();
+
+// 启动：先试已有令牌（URL 或 sessionStorage），没有就停在登录页。
+const existing = readToken();
+if (existing) { tryLogin(existing); }
+</script>
+</body>
+</html>

@@ -67,6 +67,17 @@ class Settings:
     #：AI 路由模式与任务参数
     ai_mode: str = field(default_factory=lambda: os.environ.get("XUANPAN_AI_MODE", "auto").strip() or "auto")
 
+    #：管理界面令牌。**默认空字符串 = 管理界面关闭**。
+    #：
+    #：为什么是「默认关闭」而不是「默认开放」：管理界面会列出**全部会话记录**，
+    #：其中含用户生辰、坐向等隐私数据；而容器部署时端口通常是对外映射的。
+    #：宁要求使用者显式开一次，也不让它在一次 `docker compose up` 之后悄悄裸奔。
+    #：未配置时管理接口一律拒绝并给出配置指引，不会退化成"只读可见"——
+    #：只读同样泄露隐私，那只是把风险说小了一点。
+    admin_token: str = field(
+        default_factory=lambda: os.environ.get("XUANPAN_ADMIN_TOKEN", "").strip()
+    )
+
     #：CORS 允许来源（移动端调试期用；生产应由网关收敛）
     cors_origins: tuple[str, ...] = field(
         default_factory=lambda: tuple(

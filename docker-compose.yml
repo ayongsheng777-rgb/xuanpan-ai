@@ -51,6 +51,9 @@ services:
       XUANPAN_KEEP_PHOTOS: "${XUANPAN_KEEP_PHOTOS:-false}"
       XUANPAN_AI_MODE: "${XUANPAN_AI_MODE:-auto}"
       XUANPAN_CORS_ORIGINS: "${XUANPAN_CORS_ORIGINS:-*}"
+      # 管理台（/admin）令牌。留空 = 管理界面关闭（安全默认）。
+      # 生成：python -c "import secrets;print(secrets.token_urlsafe(32))"
+      XUANPAN_ADMIN_TOKEN: "${XUANPAN_ADMIN_TOKEN:-}"
       # 不配即空 → 路由链只剩本地模板（零成本）。见 .env.example 的成本声明。
       XUANPAN_LLM_BASE_URL: "${XUANPAN_LLM_BASE_URL:-}"
       XUANPAN_LLM_API_KEY: "${XUANPAN_LLM_API_KEY:-}"
