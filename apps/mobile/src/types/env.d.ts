@@ -16,5 +16,17 @@ declare var process: {
      * 就替换不掉了，运行期会得到 undefined —— 而且不报任何错。
      */
     readonly EXPO_PUBLIC_API_BASE_URL?: string;
+
+    /**
+     * 后端候选地址表，逗号分隔，**顺序即优先级**。构建期注入。
+     *
+     * 为什么需要多个：构建机常有多块网卡分属不同网段，而 APK 只能内联一个地址 ——
+     * 手机不在那个网段就连不上，现象只是"一直转圈"。APP 启动时并发探活这张表，
+     * 切到第一个真正可达的（见 client.ts 的 autoSelectBaseUrl）。
+     *
+     * 与上面同一条铁律：必须是静态成员访问形式，否则 babel 替换不掉，
+     * 运行期静默得到 undefined。
+     */
+    readonly EXPO_PUBLIC_API_BASE_URLS?: string;
   };
 };

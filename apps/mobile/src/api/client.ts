@@ -34,6 +34,12 @@
 
 import Constants from 'expo-constants';
 
+import {
+  mergeCandidateSources,
+  normalizeCandidateUrls,
+  pickFirstReachable,
+} from '../lib/apiCandidates';
+
 import type {
   AiProvidersResponse,
   AlmanacDay,
@@ -473,6 +479,84 @@ export function resolveBaseUrl(): string {
   // Node 的 `require` 全局并不在其中，用 require 会报 "Cannot find name"。
   const cfg = Constants.expoConfig;
   return cfg?.extra?.apiBaseUrl ?? DEFAULT_BASE_URL;
+}
+
+// 地址规范化与探活是两个纯函数，落在 lib/apiCandidates 里以便被真跑测试
+// （裸 node 无法 import 本文件 —— expo-constants 只在 RN 运行时存在）。
+// 这里再导出一次，调用方不必知道它们搬过家。
+export { normalizeCandidateUrls };
+
+/**
+ * 本次构建内可用的全部后端候选地址，**顺序即优先级**。
+ *
+ * 为什么要一张表而不是一个值：构建机常有多块网卡分属不同网段，每一块都能访问
+ * 后端，而 APK 只能内联一个 —— 手机不在那个网段就连不上，现象只是"一直转圈"。
+ * 实测本机同时存在 192.168.57.10 / 192.168.59.56 / 192.168.68.80 三个可用网段。
+ *
+ * 来源优先级与 `resolveBaseUrl` 同构：内联字面量 → extra → 兜底常量。
+ * 内联的那条是官方文档化机制，行为确定；extra 要经 expo-constants 从原生侧
+ * 取回，链路长，失败时**静默退回默认值**。
+ */
+export function candidateBaseUrls(): string[] {
+  const cfg = Constants.expoConfig;
+  // 来源顺序即优先级，合并与去重规则见 lib/apiCandidates。
+  // 本函数只负责「去哪取」，不负责「怎么合」—— 后者才是有分支、需要测试的部分。
+  return mergeCandidateSources([
+    process.env.EXPO_PUBLIC_API_BASE_URLS,
+    process.env.EXPO_PUBLIC_API_BASE_URL,
+    cfg?.extra?.apiBaseUrls,
+    cfg?.extra?.apiBaseUrl,
+    DEFAULT_BASE_URL,
+  ]);
+}
+
+/** 探活单个地址：能连上**且确实是玄盘后端**才算通过。 */
+async function probeOne(
+  url: string,
+  timeoutMs: number,
+  fetchImpl?: typeof fetch,
+): Promise<string> {
+  const probe = new ApiClient({ baseUrl: url, timeoutMs, fetchImpl });
+  const h = await probe.health();
+  // 光看"HTTP 200"不够：同一网段上别的服务也可能在该端口应答。
+  // /healthz 的响应体形状才是后端身份的判据。
+  if (!h || h.status !== 'ok') throw new Error(`非玄盘后端: ${url}`);
+  return url;
+}
+
+/**
+ * 并发探活候选表，返回第一个回应的可用地址；全都不通返回 null（不抛异常）。
+ *
+ * 并发与"取第一个成功"的取舍见 lib/apiCandidates 的 `pickFirstReachable`；
+ * 本函数只补上"怎样才算一个可用的玄盘后端"（`probeOne` 的响应体校验）。
+ */
+export async function probeCandidates(
+  candidates: string[],
+  opts: { timeoutMs?: number; fetchImpl?: typeof fetch } = {},
+): Promise<string | null> {
+  const timeoutMs = opts.timeoutMs ?? 2500;
+  return pickFirstReachable(candidates, (url) =>
+    probeOne(url, timeoutMs, opts.fetchImpl),
+  );
+}
+
+/**
+ * 启动时自动选线：探活候选表，切到第一个可达的地址。
+ *
+ * 全都不通时**保持原地址不动**并返回 null —— 不抛异常。启动期的网络失败是
+ * 常态（后端没起、手机不在同一网段），把它变成一个崩溃或红屏，会让用户
+ * 连"我的 → 网络线路"这个手改入口都进不去。
+ *
+ * 返回最终生效的地址（探活失败则为当前地址）。
+ */
+export async function autoSelectBaseUrl(
+  opts: { timeoutMs?: number; fetchImpl?: typeof fetch } = {},
+): Promise<string | null> {
+  const current = resolveBaseUrl();
+  const ordered = [current, ...candidateBaseUrls().filter((u) => u !== current)];
+  const picked = await probeCandidates(ordered, opts);
+  if (picked && picked !== current) setApiBaseUrl(picked);
+  return picked;
 }
 
 let _client: ApiClient | null = null;
