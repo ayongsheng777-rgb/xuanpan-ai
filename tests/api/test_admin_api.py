@@ -276,6 +276,7 @@ class TestAdminPage:
             "/api/v1/duan/liuyao",
             "/api/v1/calc/bazi",
             "/api/v1/qimen/pan",
+            "/api/v1/liuren/cast",
         ):
             assert re.search(rf"""['"]{re.escape(path)}['"]""", html), (
                 f"试算台缺少 {path} 的入口"
@@ -295,6 +296,8 @@ class TestAdminPage:
             "bzY", "bzM", "bzD", "bzH", "bzRun",
             # 奇门
             "qmDt", "qmSchool", "qmRun", "qmOut",
+            # 六壬
+            "lrDt", "lrSchool", "lrRun", "lrMeta", "lrOut",
         ):
             assert f'id="{element_id}"' in html, f"试算台缺少控件 {element_id}"
 
@@ -325,6 +328,11 @@ class TestPublicRoutesUnaffected:
         assert unlocked.get("/api/v1/zeri/events").status_code == 200
         assert unlocked.post("/api/v1/duan/liuyao", json={
             "yao_values": [7, 7, 7, 7, 7, 7], "cast_date": "2026-09-17",
+        }).status_code == 200
+        assert unlocked.get("/api/v1/qimen/meta").status_code == 200
+        assert unlocked.get("/api/v1/liuren/meta").status_code == 200
+        assert unlocked.post("/api/v1/liuren/cast", json={
+            "dt": "2026-09-17T10:00:00",
         }).status_code == 200
 
     def test_healthz_still_open(self, unlocked: TestClient) -> None:

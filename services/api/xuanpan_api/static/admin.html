@@ -276,6 +276,21 @@
           </div>
           <pre class="out hidden" id="qmOut"></pre>
         </div>
+
+        <div class="card">
+          <!-- 六壬以**月将加时**起课：同一个日子的不同时辰是完全不同的课，
+               所以输入必须是日期+时刻，不能只给日期。默认值由 initLab() 填。 -->
+          <h2>大六壬</h2>
+          <div class="row">
+            <div><label>时刻（本地）</label><input id="lrDt" type="datetime-local"></div>
+            <div><label>流派</label><select id="lrSchool"></select></div>
+            <div class="shrink"><button class="btn" id="lrRun">起课</button></div>
+          </div>
+          <div class="row mt">
+            <div><label>月将表 / 十干寄宫 / 九宗门（只读，来自接口）</label><pre class="out" id="lrMeta"></pre></div>
+          </div>
+          <pre class="out hidden" id="lrOut"></pre>
+        </div>
       </div>
     </section>
   </main>
@@ -634,6 +649,26 @@ async function initLab() {
     $('qmSchool').innerHTML = '<option value="chaibu">拆补法</option>';
     $('qmMeta').textContent = '局数表读取失败';
   }
+
+  $('lrDt').value = localDateTime(new Date());
+  try {
+    const lr = await publicApi('/api/v1/liuren/meta');
+    $('lrSchool').innerHTML = lr.schools.map(function (s) {
+      // note 进 title：流派差异是「为什么这个课和别人不一样」的答案。
+      return '<option value="' + esc(s.id) + '" title="' + esc(s.note) + '">' +
+        esc(s.name) + '</option>';
+    }).join('');
+    // 只展示三张最常被问到的表：月将表（中气换将）、十干寄宫、九宗门顺序。
+    // 全部领域表共十余张，一次铺开会淹没重点。
+    $('lrMeta').textContent = JSON.stringify({
+      '月将表（中气→将）': lr.yuejiang_table,
+      '十干寄宫': lr.jigong,
+      '九宗门（判定优先级）': lr.jiuzongmen,
+    }, null, 1);
+  } catch (err) {
+    $('lrSchool').innerHTML = '<option value="default">通行本</option>';
+    $('lrMeta').textContent = '六壬元数据读取失败';
+  }
 }
 
 function dump(el, obj) {
@@ -707,6 +742,23 @@ function bindLab() {
         method: 'POST', body: JSON.stringify(payload),
       }));
     } catch (err) { $('qmOut').textContent = '错误：' + err.detail; show($('qmOut')); }
+  });
+
+  $('lrRun').addEventListener('click', async function () {
+    const dt = $('lrDt').value;
+    // 空值时**不发请求**（与奇门同口径）：内核会把它当「当前时刻」，
+    // 而用户看到空框点按钮时，心里想的一定是"我没填"，不是"用现在"。
+    if (!dt) {
+      $('lrOut').textContent = '错误：请先选择时刻（六壬以月将加时起课，不能省略）';
+      show($('lrOut'));
+      return;
+    }
+    const payload = { dt: dt, school: $('lrSchool').value };
+    try {
+      dump($('lrOut'), await publicApi('/api/v1/liuren/cast', {
+        method: 'POST', body: JSON.stringify(payload),
+      }));
+    } catch (err) { $('lrOut').textContent = '错误：' + err.detail; show($('lrOut')); }
   });
 }
 
