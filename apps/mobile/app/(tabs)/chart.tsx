@@ -17,10 +17,12 @@ import React, { useCallback, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, TextInput, View } from 'react-native';
 
 import { getApiClient } from '@/api/client';
-import type { BaziInput, LayerPreview } from '@/api/types';
+import type { BaziInput, DuanResponse, LayerPreview } from '@/api/types';
 import { AppText } from '@/components/AppText';
 import { Banner } from '@/components/Banner';
-import { Button, Card, KeyValueRow } from '@/components/Card';
+import { Button, Card, Divider, KeyValueRow } from '@/components/Card';
+import { Tag } from '@/components/Chip';
+import { DuanCard, verdictTone } from '@/components/DuanCard';
 import { FactList } from '@/components/FactList';
 import { Screen } from '@/components/Screen';
 import { SegmentedTabs } from '@/components/SegmentedTabs';
@@ -44,8 +46,11 @@ export default function ChartScreen(): React.JSX.Element {
 
   const [preview, setPreview] = useState<LayerPreview | null>(null);
   const [savedSessionId, setSavedSessionId] = useState<string | null>(null);
+  /** 旺衰与运程倾向 —— 与排盘同批取回，见 onCalc 的说明 */
+  const [duanResult, setDuanResult] = useState<DuanResponse | null>(null);
 
   const calc = useSubmit(getApiClient().calcBazi);
+  const duan = useSubmit(getApiClient().duanBazi);
   const save = useSubmit(getApiClient().patchInputs);
   const createSession = useSubmit(getApiClient().createSession);
 
@@ -82,7 +87,16 @@ export default function ChartScreen(): React.JSX.Element {
       setPreview(result);
       setSavedSessionId(null);
     }
-  }, [buildInput, calc]);
+
+    // 旺衰与运程倾向**与排盘一起**取回：两者都是本地确定性计算、零成本，
+    // 而"排完盘还得再点一次，才知道这步运好不好"是没必要的额外一步 ——
+    // 大运倾向正是排盘之后用户最想看到的那个结论。
+    //
+    // 与排盘**互相独立**：断卦失败只让那张卡片不出现，不影响四柱与盘面事实。
+    // 若把两者绑成"全成全败"，一个次要能力的抖动会连带把主结果一起吞掉。
+    const d = await duan.run(input);
+    setDuanResult(d ?? null);
+  }, [buildInput, calc, duan]);
 
   /** 落库：先建会话再写入八字输入，两步都成功才算成功 */
   const onSave = useCallback(async () => {
@@ -195,6 +209,15 @@ export default function ChartScreen(): React.JSX.Element {
             </Banner>
           ) : null}
 
+          {/* 断卦 —— verdict 是「身强 / 身弱」，属**日主状态**而非吉凶，
+              故 verdictLabel 显式写明语义；着色也走中性档。
+              把它染成朱红等于把中性事实说成凶兆。 */}
+          {duanResult ? (
+            <DuanCard duan={duanResult} verdictLabel="日主状态" title="断卦 · 旺衰与运程倾向">
+              <BaziDuanDetail duan={duanResult} />
+            </DuanCard>
+          ) : null}
+
           {savedSessionId ? (
             <Card highlight>
               <AppText size="sm" weight="semibold" color="success">
@@ -222,6 +245,81 @@ export default function ChartScreen(): React.JSX.Element {
         以上内容属于传统文化娱乐/学习参考
       </AppText>
     </Screen>
+  );
+}
+
+// ==========================================================================
+// 断卦细节
+// ==========================================================================
+
+/** 从 detail 里取字符串数组；非数组或元素类型不符一律丢弃 */
+function strList(v: unknown): string[] {
+  return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [];
+}
+
+/** 从 detail 里取「干支 → 倾向」映射（保持后端给的次序） */
+function verdictMap(v: unknown): [string, string][] {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return [];
+  return Object.entries(v as Record<string, unknown>).filter(
+    (e): e is [string, string] => typeof e[1] === 'string',
+  );
+}
+
+/**
+ * 断卦细节：喜用 / 忌神 + 大运**逐运**倾向。
+ *
+ * 这是本页接入断卦的**唯一增量** —— 四柱、旺衰、喜用其实已经在「传统分析」里
+ * 由通用渲染器画出来了（`day_master_strength` + `summary`）。真正缺的是
+ * 「每一步大运分别偏吉还是偏凶」，也就是把一张静态的大运表变成能读的运程。
+ *
+ * 大运倾向是**相对日主喜忌**而言的，不等于"这十年一定如何"。
+ * 这一点在 DuanCard 的不确定性清单里已如实交代，此处只负责呈现。
+ */
+function BaziDuanDetail({ duan }: { duan: DuanResponse }): React.JSX.Element {
+  const favorable = strList(duan.detail['favorable']);
+  const unfavorable = strList(duan.detail['unfavorable']);
+  const daYun = verdictMap(duan.detail['da_yun_verdicts']);
+
+  return (
+    <>
+      <Divider style={styles.divider} />
+      <AppText size="xs" color="textSecondary">
+        喜用 · 忌神
+      </AppText>
+      {favorable.length || unfavorable.length ? (
+        <View style={styles.tagRow}>
+          {favorable.map((e) => (
+            <Tag key={`xi-${e}`} label={`喜 ${e}`} tone="good" />
+          ))}
+          {unfavorable.map((e) => (
+            <Tag key={`ji-${e}`} label={`忌 ${e}`} tone="bad" />
+          ))}
+        </View>
+      ) : (
+        <AppText size="sm" color="muted" style={styles.emptyNote}>
+          （未给出）
+        </AppText>
+      )}
+
+      {daYun.length ? (
+        <>
+          <Divider style={styles.divider} />
+          <AppText size="xs" color="textSecondary">
+            大运倾向（按喜用 / 忌神五行）
+          </AppText>
+          <View style={styles.daYunGrid}>
+            {daYun.map(([gz, v]) => (
+              <View key={gz} style={styles.daYunItem}>
+                <AppText size="sm" weight="medium">
+                  {gz}
+                </AppText>
+                <Tag label={v} tone={verdictTone(v)} />
+              </View>
+            ))}
+          </View>
+        </>
+      ) : null}
+    </>
   );
 }
 
@@ -288,4 +386,22 @@ const styles = StyleSheet.create({
   uncertainty: { marginTop: 2 },
   aiBtn: { marginTop: space[3] },
   disclaimer: { marginTop: space[5] },
+
+  // ---- 断卦细节 ----
+  divider: { marginVertical: space[3] },
+  tagRow: { flexDirection: 'row', flexWrap: 'wrap', gap: space[2], marginTop: space[2] },
+  emptyNote: { marginTop: space[2] },
+  daYunGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: space[2], marginTop: space[3] },
+  daYunItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    minWidth: 138,
+    paddingHorizontal: space[3],
+    paddingVertical: space[2],
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.sm,
+    backgroundColor: colors.bg,
+  },
 });
