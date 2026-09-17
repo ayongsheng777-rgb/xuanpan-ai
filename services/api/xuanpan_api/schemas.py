@@ -453,6 +453,58 @@ class LiurenMetaResponse(ApiModel):
     )
 
 
+class TaiyiCastRequest(ApiModel):
+    """太乙年局起局请求。
+
+    `year` 用整数年份 —— 太乙年局的**最小单位就是年**，不需要月日。
+    这与六壬「必须给到时辰」刚好相反，两者不可互相套用。
+    """
+
+    year: int = Field(description="公元年份，如 2026", ge=-4000, le=9999)
+    school: str = Field(default="default", description="流派，见 /taiyi/meta")
+
+
+class TaiyiMetaResponse(ApiModel):
+    """起局界面需要的静态元数据。
+
+    九宫表、十六神、八门这些是**领域数据**（RULE-005），必须由接口下发：
+    太乙宫号与洛书**逐宫错位**（乾1 离2 艮3 震4 兑6 坤7 坎8 巽9），
+    前端若照奇门的表自己摆一遍，整盘会偏移 45° 而不报错。
+    """
+
+    # 流派的 jiyan_base 是整数，故不能标成 dict[str, str] ——
+    # 标错会让 Pydantic 在校验期报 10 条错，而错误信息指向的是"值应为字符串"，
+    # 与真实原因（类型标注写窄了）隔了一层，容易查错方向。
+    schools: list[dict[str, Any]]
+    jiyan_base: int = Field(description="默认流派的积年基数")
+    palace_gua: dict[str, str] = Field(description="宫号 -> 卦（与洛书不同）")
+    palace_direction: dict[str, str] = Field(description="宫号 -> 方位")
+    palace_door_name: dict[str, str] = Field(description="宫号 -> 门名（天门/火门…）")
+    palace_fenye: dict[str, str] = Field(description="宫号 -> 古分野")
+    palace_qi: dict[str, str] = Field(description="宫号 -> 气性")
+    shen_names: dict[str, str] = Field(description="十六神位 -> 神名")
+    shen_palace: dict[str, int] = Field(description="八正神 -> 宫号（值为宫号，是整数）")
+    zheng_shen: list[str] = Field(description="八正神")
+    jian_shen: list[str] = Field(description="八间神")
+    wenchang_seq: list[str] = Field(description="文昌阳遁十八步序列（含重留）")
+    jishen_rule: str = Field(description="计神起法口诀")
+    bamen_order: list[str] = Field(description="八门轮转序")
+    bamen_benwei: dict[str, str] = Field(description="八门本位卦")
+    bamen_jixiong: dict[str, str] = Field(
+        description="门自身的吉凶属性（FACT，不是对所占之事的结论）"
+    )
+    taiyi_xun_gong: list[int] = Field(description="太乙行宫序 -> 宫号（不入中五）")
+    years_per_palace: int
+    cycle_years: int = Field(description="太乙行宫周期（年）")
+    wenchang_cycle_years: int
+    bamen_switch_years: int
+    bamen_cycle_years: int
+    wuyuan_names: list[str]
+    uncertainties: list[str] = Field(
+        default_factory=list, description="内核未覆盖项，界面应如实展示"
+    )
+
+
 __all__ = [
     "ApiModel", "SessionCreate", "CompassInput", "BaziInput", "LiuyaoInput",
     "QianInput", "NamingInput", "InputPatch", "CompassConfirm",
@@ -463,4 +515,5 @@ __all__ = [
     "DuanLiuyaoRequest", "DuanResponse",
     "QimenCastRequest", "QimenMetaResponse",
     "LiurenCastRequest", "LiurenMetaResponse",
+    "TaiyiCastRequest", "TaiyiMetaResponse",
 ]
