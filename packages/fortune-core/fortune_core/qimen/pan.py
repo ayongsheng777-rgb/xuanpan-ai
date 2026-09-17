@@ -24,7 +24,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime
 from typing import Any
 
-from ..constants import DIZHI, TIANGAN, jiazi_index
+from ..constants import DIZHI, jiazi_index
 from ..constants import xun_kong_of as _shared_xun_kong
 from ..constants import yima_of as _shared_yima
 from ..exceptions import InvalidInputError
