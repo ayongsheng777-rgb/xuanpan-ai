@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -255,6 +256,54 @@ class TestAdminPage:
         assert "localStorage.setItem" not in html
         assert "localStorage.getItem" not in html
         assert "replaceState" in html
+
+    def test_every_query_route_has_a_lab_entry(self, unlocked: TestClient) -> None:
+        """防漂移：每个查询域路由都必须在试算台有对应入口。
+
+        这条守的是「内核做完 ≠ 用户能用」那个坑 —— 后端加了能力但管理台没接线，
+        页面照常渲染、测试照常全绿，只是那个能力**从界面上不可达**。
+        所以这里直接用路由路径做断言：加了路由不加面板就会红。
+
+        断言必须带**引号边界**（`'/api/v1/qimen/pan'` 整体匹配）：
+        写成裸子串的话，`"/api/v1/qimen/pan" in html` 对
+        `/api/v1/qimen/panXYZ` 也成立 —— 路径拼错一位照样绿。
+        （这条是变异验证发现断言偏弱后补的。）
+        """
+        html = unlocked.get("/admin").text
+        for path in (
+            "/api/v1/almanac/day",
+            "/api/v1/zeri/select",
+            "/api/v1/duan/liuyao",
+            "/api/v1/calc/bazi",
+            "/api/v1/qimen/pan",
+        ):
+            assert re.search(rf"""['"]{re.escape(path)}['"]""", html), (
+                f"试算台缺少 {path} 的入口"
+            )
+
+    def test_lab_controls_exist_for_every_panel(self, unlocked: TestClient) -> None:
+        """面板的输入与按钮 id 必须齐全 —— 少一个就是点了没反应的死按钮。"""
+        html = unlocked.get("/admin").text
+        for element_id in (
+            # 黄历
+            "almDate", "almRun",
+            # 择日
+            "zeriEvent", "zeriStart", "zeriEnd", "zeriRun",
+            # 六爻
+            "lyYao", "lyTopic", "lyDate", "lyRun",
+            # 八字
+            "bzY", "bzM", "bzD", "bzH", "bzRun",
+            # 奇门
+            "qmDt", "qmSchool", "qmRun", "qmOut",
+        ):
+            assert f'id="{element_id}"' in html, f"试算台缺少控件 {element_id}"
+
+    def test_lab_ids_are_unique(self, unlocked: TestClient) -> None:
+        """重复 id 会让 getElementById 静默拿到错误元素 —— 不报错，只是行为诡异。"""
+        html = unlocked.get("/admin").text
+        ids = re.findall(r'\bid="([^"]+)"', html)
+        duplicated = {i for i in ids if ids.count(i) > 1}
+        assert not duplicated, f"存在重复 id：{sorted(duplicated)}"
 
 
 # ==========================================================================

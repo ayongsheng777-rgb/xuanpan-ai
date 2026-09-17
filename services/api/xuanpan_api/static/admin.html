@@ -208,7 +208,8 @@
     <!-- 调试台 -->
     <section id="view-lab" class="hidden">
       <div class="banner info">
-        这里是**只读试算台**：直接调用公开的 <code>/api/v1/almanac</code>、<code>/zeri</code>、<code>/duan</code>
+        这里是**只读试算台**：直接调用公开的 <code>/api/v1/almanac</code>、<code>/zeri</code>、<code>/duan</code>、
+        <code>/qimen</code>
         接口，用来看清服务端实际算出了什么。不做任何写操作。
       </div>
 
@@ -259,6 +260,21 @@
             <div class="shrink"><button class="btn" id="bzRun">排盘并断卦</button></div>
           </div>
           <pre class="out hidden" id="bzOut"></pre>
+        </div>
+
+        <div class="card">
+          <!-- 奇门以**时辰**起局：同一日不同时辰可能不同局，所以输入必须是
+               日期+时刻，不能只给日期。默认值由 initLab() 按本地时间填。 -->
+          <h2>奇门遁甲</h2>
+          <div class="row">
+            <div><label>时刻（本地）</label><input id="qmDt" type="datetime-local"></div>
+            <div><label>定局流派</label><select id="qmSchool"></select></div>
+            <div class="shrink"><button class="btn" id="qmRun">排盘</button></div>
+          </div>
+          <div class="row mt">
+            <div><label>局数表（只读，来自接口）</label><pre class="out" id="qmMeta"></pre></div>
+          </div>
+          <pre class="out hidden" id="qmOut"></pre>
         </div>
       </div>
     </section>
@@ -337,6 +353,17 @@ function esc(s) {
 }
 function show(el) { el.classList.remove('hidden'); }
 function hide(el) { el.classList.add('hidden'); }
+
+// 本地日期 / 时刻串。**不能用 toISOString()**：它先转 UTC，
+// 在 UTC+8 的 00:00~08:00 区间会退回**前一天**（本项目已实测复现），
+// 而且不报错 —— 用户只会看到查询结果对不上自己选的日期。
+const _p2 = (n) => String(n).padStart(2, '0');
+function localDate(d) {
+  return d.getFullYear() + '-' + _p2(d.getMonth() + 1) + '-' + _p2(d.getDate());
+}
+function localDateTime(d) {
+  return localDate(d) + 'T' + _p2(d.getHours()) + ':' + _p2(d.getMinutes());
+}
 
 function kv(k, v) {
   return '<div class="kv"><span class="k">' + esc(k) + '</span><span class="v">' + v + '</span></div>';
@@ -593,6 +620,21 @@ async function initLab() {
   } catch (err) {
     $('lyTopic').innerHTML = '<option value="财运">财运</option>';
   }
+
+  $('qmDt').value = localDateTime(new Date());
+  try {
+    const qm = await publicApi('/api/v1/qimen/meta');
+    $('qmSchool').innerHTML = qm.schools.map(function (s) {
+      // note 进 title：流派差异是「为什么这个盘和别人不一样」的答案，
+      // 不该只在源码里存在。
+      return '<option value="' + esc(s.id) + '" title="' + esc(s.note) + '">' +
+        esc(s.name) + '</option>';
+    }).join('');
+    $('qmMeta').textContent = JSON.stringify(qm.jushu_table, null, 1);
+  } catch (err) {
+    $('qmSchool').innerHTML = '<option value="chaibu">拆补法</option>';
+    $('qmMeta').textContent = '局数表读取失败';
+  }
 }
 
 function dump(el, obj) {
@@ -648,6 +690,24 @@ function bindLab() {
       const duan = await publicApi('/api/v1/duan/bazi', { method: 'POST', body: JSON.stringify(payload) });
       dump($('bzOut'), { 排盘: chart, 断卦: duan });
     } catch (err) { $('bzOut').textContent = '错误：' + err.detail; show($('bzOut')); }
+  });
+
+  $('qmRun').addEventListener('click', async function () {
+    const dt = $('qmDt').value;
+    // datetime-local 给的是 "YYYY-MM-DDTHH:MM"（本地时刻，无时区后缀）。
+    // 空值时**不发请求**：内核会把它当「当前时刻」，
+    // 而用户看到空框点按钮时，心里想的一定是"我没填"，不是"用现在"。
+    if (!dt) {
+      $('qmOut').textContent = '错误：请先选择时刻（奇门以时辰起局，不能省略）';
+      show($('qmOut'));
+      return;
+    }
+    const payload = { dt: dt, school: $('qmSchool').value };
+    try {
+      dump($('qmOut'), await publicApi('/api/v1/qimen/pan', {
+        method: 'POST', body: JSON.stringify(payload),
+      }));
+    } catch (err) { $('qmOut').textContent = '错误：' + err.detail; show($('qmOut')); }
   });
 }
 
