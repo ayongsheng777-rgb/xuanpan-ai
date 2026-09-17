@@ -329,6 +329,13 @@ class TestAnalyzeName:
             analyze_name("王𠮷")
         assert "𠮷" in str(exc.value)
 
+    def test_previously_missing_chars_now_resolve(self) -> None:
+        """★ 回归：V2 字库扩充后，「玄」「盘」「阿」「哲」「小」等旧版缺字必须能算。"""
+        a = analyze_name("玄盘")
+        assert a.strokes == {"玄": 5, "盘": 15}
+        assert analyze_name("阿哲").strokes == {"阿": 13, "哲": 10}
+        assert analyze_name("王小明").strokes == {"王": 4, "小": 3, "明": 8}
+
     def test_explicit_strokes_override(self) -> None:
         a = analyze_name("王明", strokes={"王": 4, "明": 8})
         assert a.strokes == {"王": 4, "明": 8}
