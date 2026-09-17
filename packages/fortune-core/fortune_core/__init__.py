@@ -18,6 +18,7 @@ from __future__ import annotations
 __version__ = "0.1.0"
 
 from .bazi import BaziChart, BirthInput, calculate_bazi
+from .almanac import AlmanacResult, calculate_almanac
 from .compass import CompassOrientation, calculate_orientation, element_relation
 from .context import FortuneContext, build_context
 from .exceptions import (
@@ -57,6 +58,8 @@ __all__ = [
     "FenjinCell", "fenjin_at", "fenjin_cells_of", "table_available",
     # 八字
     "BirthInput", "BaziChart", "calculate_bazi",
+    # 黄历 / 择日
+    "AlmanacResult", "calculate_almanac",
     # 六爻 / 灵签 / 姓名
     "LiuYaoResult", "cast_liuyao",
     "QianResult", "draw_qian",
