@@ -298,3 +298,108 @@ def test_guards_accept_valid_input(probe: dict) -> None:
     """
     g = probe["guards"]["valid"]
     assert not g["threw"], f"合法日期被拒绝：{g['error']}"
+
+
+# ==========================================================================
+# 七、时辰换算 —— 奇门以时辰起局，映射错了整个盘就错了
+# ==========================================================================
+
+
+def test_shichen_names_are_the_twelve_branches(probe: dict) -> None:
+    """十二时辰名必须就是十二地支，且从「子」起。"""
+    assert probe["shichen"]["names"] == [
+        "子", "丑", "寅", "卯", "辰", "巳", "午", "未", "申", "酉", "戌", "亥",
+    ]
+
+
+def test_shichen_representative_hour_roundtrips(probe: dict) -> None:
+    """代表小时 → 时辰索引 必须回到自身（十二个都要过）。
+
+    这条防的是「取代表小时时把某个时辰取到了相邻时辰的区间里」——
+    那样界面上选的是午时、送出去的却是未时，而后端算得完全正确，
+    错只错在前端这一跳。
+    """
+    bad = [row for row in probe["shichen"]["index_to_hour"] if row["roundtrip"] != row["index"]]
+    assert not bad, f"以下时辰的代表小时落回了别的时辰：{bad}"
+
+
+def test_zishi_representative_hour_is_23(probe: dict) -> None:
+    """子时取 23 时（晚子时），不是 0 时。
+
+    子时跨两日（23:00~00:59）。若取 0 时，用户在「2026-09-17」选子时，
+    后端收到的却是 09-17 凌晨 —— 而 09-17 的凌晨在干支上属**前一日**之子时，
+    起出来的盘与用户以为的那一时刻不是同一个。
+    """
+    zishi = probe["shichen"]["index_to_hour"][0]
+    assert zishi["name"] == "子"
+    assert zishi["hour"] == 23, f"子时应取 23 时，实取 {zishi['hour']}"
+
+
+def test_hour_to_shichen_matches_lunar_python(probe: dict) -> None:
+    """逐小时与 lunar-python 的时支交叉核验。
+
+    用**独立来源**（历法库）而不是我自己的表来核对 ——
+    否则只是让这张表自己和自己对答案。24 小时全过，含 0 时与 23 时这两个
+    子时的边界（它们的判法与其余时辰不同，最易写错）。
+    """
+    from lunar_python import Solar
+
+    rows = probe["shichen"]["hour_to_index"]
+    assert len(rows) == 24, f"应导出 24 个小时，实为 {len(rows)}"
+
+    for row in rows:
+        hour = int(row["hour"])
+        lunar = Solar.fromYmdHms(2026, 9, 17, hour, 30, 0).getLunar()
+        assert lunar.getTimeZhi() == row["name"], (
+            f"{hour}:30 前端判为「{row['name']}」时，lunar-python 的时支是「{lunar.getTimeZhi()}」"
+        )
+
+
+def test_each_shichen_covers_exactly_two_hours(probe: dict) -> None:
+    """十二时辰覆盖 24 小时，每个恰好 2 小时 —— 不重不漏。"""
+    counts: dict[str, int] = {}
+    for row in probe["shichen"]["hour_to_index"]:
+        name = str(row["name"])
+        counts[name] = counts.get(name, 0) + 1
+    assert len(counts) == 12, f"应覆盖 12 个时辰，实为 {len(counts)}"
+    assert set(counts.values()) == {2}, f"每个时辰应恰好覆盖 2 小时，实为 {counts}"
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        {"date": "2026-09-17", "shichen": 0, "moment": "2026-09-17T23:00:00"},
+        {"date": "2026-09-17", "shichen": 6, "moment": "2026-09-17T11:00:00"},
+        {"date": "2026-09-17", "shichen": 11, "moment": "2026-09-17T21:00:00"},
+    ],
+)
+def test_moment_string_is_local_and_bare(probe: dict, case: dict) -> None:
+    """时刻串必须是 `YYYY-MM-DDTHH:00:00` —— 本地时刻、**不带时区后缀**。
+
+    带上 `Z` 或 `+08:00` 就会被后端当作带时区的绝对时刻，
+    而后端约定的是「本地时刻」；两者在非东八区会差出一整天。
+    """
+    got = [m for m in probe["shichen"]["moments"] if m["shichen"] == case["shichen"]]
+    assert got, f"探针未导出时辰 {case['shichen']} 的时刻样例"
+    assert got[0]["moment"] == case["moment"]
+    assert not got[0]["moment"].endswith("Z")
+    assert "+" not in got[0]["moment"]
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        "shichen_negative", "shichen_too_big", "shichen_fraction",
+        "hour_negative", "hour_too_big", "hour_fraction",
+        "bad_date", "bad_date_shape",
+    ],
+)
+def test_shichen_guards_reject_out_of_range(probe: dict, key: str) -> None:
+    """越界输入必须抛错，不得静默取模。
+
+    静默取模的后果格外隐蔽：传 12 会被当成 0（子时），
+    于是用户拿到一张**属于另一个时辰**的盘，而界面没有任何异常。
+    """
+    g = probe["shichen"]["guards"][key]
+    assert g["threw"], f"{key} 应当抛错，实际返回了 {g['value']}"
+    assert g["error"] == "RangeError", f"{key} 抛的是 {g['error']}，期望 RangeError"

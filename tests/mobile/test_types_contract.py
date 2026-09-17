@@ -311,6 +311,24 @@ def responses(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Any]:
             },
         ).json()
 
+        # ---- 三式 · 奇门（同样不落库、不进会话体系）----
+        # 时刻**写死**：奇门以时辰起局，局数随时刻变；用"现在"会让
+        # 断言结果随运行时刻漂移，失败时说不清是算错还是时刻变了。
+        qimen_meta = client.get("/api/v1/qimen/meta").json()
+        out["QimenMetaResponse"] = qimen_meta
+        out["QimenSchool"] = qimen_meta["schools"][0]
+
+        chart = client.post(
+            "/api/v1/qimen/pan",
+            json={"dt": "2026-09-17T12:00:00", "school": "chaibu"},
+        ).json()
+        out["QimenChart"] = chart
+        out["QimenDingju"] = chart["dingju"]
+        out["QimenPillars"] = chart["pillars"]
+        # 取**中五宫**：它是唯一 `door` / `god` 为 null 的宫，
+        # 取首宫会漏掉"IE 端把 null 当成字段缺失"这种情况。
+        out["QimenPalace"] = next(p for p in chart["palaces"] if p["gong"] == 5)
+
     return out
 
 
@@ -335,6 +353,11 @@ _CHECKED: tuple[str, ...] = (
     "ZeriEventsResponse", "ZeriEvent", "ZeriSchool",
     "ZeriResultResponse", "ZeriResultFacts", "ZeriResultTradition", "ZeriDay",
     "DuanResponse",
+    # 三式 · 奇门 —— 与日历域同一类风险：手写类型、此前从未被前端核对过。
+    # 其中 `QimenPalace` 取自**中五宫**（该宫 door/god 为 null），
+    # 正是最容易把"字段值为 null"误当成"字段不存在"的地方。
+    "QimenMetaResponse", "QimenSchool",
+    "QimenChart", "QimenDingju", "QimenPillars", "QimenPalace",
 )
 
 
@@ -556,3 +579,179 @@ def test_duan_bazi_verdict_is_a_status_not_a_fortune(responses: dict[str, Any]) 
         "apps/mobile/app/(tabs)/chart.tsx 的 verdictLabel 与 DuanCard 的着色。"
     )
     assert verdict not in {VERDICT_FAVORABLE, VERDICT_UNFAVORABLE}
+
+
+# ==========================================================================
+# 三式 · 奇门
+# ==========================================================================
+
+
+def test_qimen_middle_palace_has_no_door_or_god(responses: dict[str, Any]) -> None:
+    """中五宫必须**没有**八门与八神 —— 这是规则，不是数据缺失。
+
+    奇门里中宫寄坤，不布门、不布神。前端据此把这两格显示为空；
+    如果后端某天"顺手补上"一个默认门/神，界面不会报错，
+    只会显示一个**不存在的门**，而用户无从分辨。
+    """
+    mid = responses["QimenPalace"]
+    assert mid["gong"] == 5, "本用例取的是中五宫，采集逻辑变了？"
+    assert mid["door"] is None, f"中五宫不应有门，实为 {mid['door']!r}"
+    assert mid["god"] is None, f"中五宫不应有神，实为 {mid['god']!r}"
+    # 地盘干与天盘干在中宫依然存在（寄宫不等于整格为空）
+    assert mid["di_gan"], "中五宫应当有地盘干"
+    assert mid["tian_gan"], "中五宫应当有天盘干"
+
+
+def test_qimen_chart_has_exactly_nine_palaces(responses: dict[str, Any]) -> None:
+    """九宫恰好九格、宫序 1~9 不重不漏。
+
+    前端按洛书把九宫摆进 3×3 网格；少一格会留下一个空洞，
+    多一格会挤掉一格 —— 两种都不会报错。
+    """
+    palaces = responses["QimenChart"]["palaces"]
+    assert len(palaces) == 9, f"应为九宫，实为 {len(palaces)}"
+    assert sorted(p["gong"] for p in palaces) == list(range(1, 10))
+
+
+def test_qimen_carries_uncertainties(responses: dict[str, Any]) -> None:
+    """`uncertainties` 不得为空 —— 界面靠它如实交代未覆盖项。
+
+    空的 uncertainties 不会让界面报错，只会让"本版不覆盖什么"这一节
+    直接从页面上消失，而用户以为看到的是全部。
+    """
+    chart = responses["QimenChart"]
+    assert chart["uncertainties"], "奇门盘必须携带 uncertainties"
+    meta = responses["QimenMetaResponse"]
+    assert meta["uncertainties"], "奇门 meta 必须携带 uncertainties"
+    # 两处必须是**同一份**（内核常量是唯一真源，不得各写一份）
+    assert chart["uncertainties"] == meta["uncertainties"], (
+        "排盘结果与 meta 的 uncertainties 不一致 —— 说明有两份文案在漂移"
+    )
+
+
+def test_qimen_meta_covers_all_twenty_four_jieqi(responses: dict[str, Any]) -> None:
+    """局数表覆盖全部二十四节气，且每项三元、局数在 1~9。
+
+    局数表是领域数据（RULE-005），缺一个节气会让那一天排不出盘；
+    而前端不自己维护副本，所以这张表的完整性只能在这里守。
+    """
+    meta = responses["QimenMetaResponse"]
+    table = meta["jushu_table"]
+    assert len(table) == 24, f"局数表应覆盖二十四节气，实为 {len(table)} 个"
+    assert len(meta["yang_dun_jieqi"]) == 12
+    assert len(meta["yin_dun_jieqi"]) == 12
+    assert sorted(meta["yang_dun_jieqi"] + meta["yin_dun_jieqi"]) == sorted(table)
+    for jieqi, triple in table.items():
+        assert len(triple) == 3, f"{jieqi} 应有上/中/下三元的局数，实为 {triple}"
+        assert all(1 <= n <= 9 for n in triple), f"{jieqi} 局数越界：{triple}"
+
+
+def test_qimen_dingju_chain_is_self_consistent(responses: dict[str, Any]) -> None:
+    """定局链路自洽：局数表[节气][三元-1] 必须等于实排局数。
+
+    这是把「定局」这条推导链的**最后一跳**拿真值核一遍 ——
+    前面几步（节气、天数、三元）都对了、最后查表查错，结果同样是一张错盘，
+    而且错得毫无征兆。
+    """
+    dingju = responses["QimenDingju"]
+    table = responses["QimenMetaResponse"]["jushu_table"]
+    assert dingju["jieqi"] in table, f"实排节气 {dingju['jieqi']!r} 不在局数表里"
+    expected = table[dingju["jieqi"]][dingju["yuan"] - 1]
+    assert dingju["jushu"] == expected, (
+        f"{dingju['jieqi']} 的{dingju['yuan_label']}应为 {expected} 局，"
+        f"实排 {dingju['jushu']} 局"
+    )
+    # 阴阳遁与节气归属必须一致（阳遁节气表 / 阴遁节气表）
+    meta = responses["QimenMetaResponse"]
+    in_yang = dingju["jieqi"] in meta["yang_dun_jieqi"]
+    assert dingju["yang_dun"] is in_yang, (
+        f"{dingju['jieqi']} 的阴阳遁标记与节气归属表不符"
+    )
+
+
+# ==========================================================================
+# 三式 · 奇门
+# ==========================================================================
+
+
+def test_qimen_middle_palace_has_no_door_or_god(responses: dict[str, Any]) -> None:
+    """中五宫必须**没有**八门与八神 —— 这是规则，不是数据缺失。
+
+    奇门里中宫寄坤，不布门、不布神。前端据此把这两格显示为空；
+    如果后端某天"顺手补上"一个默认门/神，界面不会报错，
+    只会显示一个**不存在的门**，而用户无从分辨。
+    """
+    mid = responses["QimenPalace"]
+    assert mid["gong"] == 5, "本用例取的是中五宫，采集逻辑变了？"
+    assert mid["door"] is None, f"中五宫不应有门，实为 {mid['door']!r}"
+    assert mid["god"] is None, f"中五宫不应有神，实为 {mid['god']!r}"
+    # 地盘干与天盘干在中宫依然存在（寄宫不等于整格为空）
+    assert mid["di_gan"], "中五宫应当有地盘干"
+    assert mid["tian_gan"], "中五宫应当有天盘干"
+
+
+def test_qimen_chart_has_exactly_nine_palaces(responses: dict[str, Any]) -> None:
+    """九宫恰好九格、宫序 1~9 不重不漏。
+
+    前端按洛书把九宫摆进 3×3 网格；少一格会留下一个空洞，
+    多一格会挤掉一格 —— 两种都不会报错。
+    """
+    palaces = responses["QimenChart"]["palaces"]
+    assert len(palaces) == 9, f"应为九宫，实为 {len(palaces)}"
+    assert sorted(p["gong"] for p in palaces) == list(range(1, 10))
+
+
+def test_qimen_carries_uncertainties(responses: dict[str, Any]) -> None:
+    """`uncertainties` 不得为空 —— 界面靠它如实交代未覆盖项。
+
+    空的 uncertainties 不会让界面报错，只会让"本版不覆盖什么"这一节
+    直接从页面上消失，而用户以为看到的是全部。
+    """
+    chart = responses["QimenChart"]
+    assert chart["uncertainties"], "奇门盘必须携带 uncertainties"
+    meta = responses["QimenMetaResponse"]
+    assert meta["uncertainties"], "奇门 meta 必须携带 uncertainties"
+    # 两处必须是**同一份**（内核常量是唯一真源，不得各写一份）
+    assert chart["uncertainties"] == meta["uncertainties"], (
+        "排盘结果与 meta 的 uncertainties 不一致 —— 说明有两份文案在漂移"
+    )
+
+
+def test_qimen_meta_covers_all_twenty_four_jieqi(responses: dict[str, Any]) -> None:
+    """局数表覆盖全部二十四节气，且每项三元、局数在 1~9。
+
+    局数表是领域数据（RULE-005），缺一个节气会让那一天排不出盘；
+    而前端不自己维护副本，所以这张表的完整性只能在这里守。
+    """
+    meta = responses["QimenMetaResponse"]
+    table = meta["jushu_table"]
+    assert len(table) == 24, f"局数表应覆盖二十四节气，实为 {len(table)} 个"
+    assert len(meta["yang_dun_jieqi"]) == 12
+    assert len(meta["yin_dun_jieqi"]) == 12
+    assert sorted(meta["yang_dun_jieqi"] + meta["yin_dun_jieqi"]) == sorted(table)
+    for jieqi, triple in table.items():
+        assert len(triple) == 3, f"{jieqi} 应有上/中/下三元的局数，实为 {triple}"
+        assert all(1 <= n <= 9 for n in triple), f"{jieqi} 局数越界：{triple}"
+
+
+def test_qimen_dingju_chain_is_self_consistent(responses: dict[str, Any]) -> None:
+    """定局链路自洽：局数表[节气][三元-1] 必须等于实排局数。
+
+    这是把「定局」这条推导链的**最后一跳**拿真值核一遍 ——
+    前面几步（节气、天数、三元）都对了、最后查表查错，结果同样是一张错盘，
+    而且错得毫无征兆。
+    """
+    dingju = responses["QimenDingju"]
+    table = responses["QimenMetaResponse"]["jushu_table"]
+    assert dingju["jieqi"] in table, f"实排节气 {dingju['jieqi']!r} 不在局数表里"
+    expected = table[dingju["jieqi"]][dingju["yuan"] - 1]
+    assert dingju["jushu"] == expected, (
+        f"{dingju['jieqi']} 的{dingju['yuan_label']}应为 {expected} 局，"
+        f"实排 {dingju['jushu']} 局"
+    )
+    # 阴阳遁与节气归属必须一致（阳遁节气表 / 阴遁节气表）
+    meta = responses["QimenMetaResponse"]
+    in_yang = dingju["jieqi"] in meta["yang_dun_jieqi"]
+    assert dingju["yang_dun"] is in_yang, (
+        f"{dingju['jieqi']} 的阴阳遁标记与节气归属表不符"
+    )
