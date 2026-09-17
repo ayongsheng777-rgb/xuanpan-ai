@@ -84,3 +84,18 @@
 3. 先建假阳性回归基线（当前 15/96），否则修 R8 时无法判断是否真变好
 4. 真机 UI 走查 —— 「3 秒内确认」只能在真机测
 5. 尚无 remote 仓库
+
+## 外部项目已评估（勿重复调研）
+
+- **suanming-mcp（玄机阁）** —— <https://github.com/Enoch666/suanming-mcp>，
+  commit `f08ec272b6928af8faa79300f50b4d740ffbbd1f`。**已于 2026-09-17 评估完毕，结论：术数计算层不可信，不做依赖、不移植算法。**
+  六爻卦序 63/64 错配、八字月柱 10/10 错、笔画表缺字时按 Unicode 码位静默编造。
+  详见 `docs/外部项目评估 — suanming-mcp（玄机阁）.md`；复算工具 `scripts/cmp_suanming_mcp.py`。
+  **三处可借鉴**：MCP 暴露层写法、`SKILL.md` 打包范式、水墨 HTML 渲染。
+  **它揭示的行业缺口**：所有开源项目都停在「排盘/起卦」，**装卦层（六爻纳甲六亲世应、八字大运流年）与三式（奇门/六壬/太乙）全空** —— 这是玄盘 RULE-001 最该吃下的差异化领域
+
+## 已知自身数据缺口
+
+- 🔴 **`data/kangxi_strokes.json` 仅 502 字且 `verified: false`**，连「玄」「盘」「阿」「哲」都缺；
+  缺字时 `analyze_name` 抛 `DomainDataMissingError`（**行为正确，不静默取错值**），但可用性受限。
+  目标：扩到 3000+ 常用姓名用字并与权威字书逐条比对后把 `verified` 置 true
