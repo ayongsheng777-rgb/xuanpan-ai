@@ -42,6 +42,7 @@ from fortune_core import (
     BirthInput,
     CompassOrientation,
     FortuneError,
+    InvalidInputError,
     LiuYaoResult,
     NameAnalysis,
     QianResult,
@@ -57,6 +58,7 @@ from fortune_core import (
     select_auspicious_days,
 )
 from fortune_core.liuyao import zhuang_gua
+from fortune_core.qimen import QimenChart, cast_qimen
 from lunar_python import Solar
 
 APP_VERSION = "0.1.0"
@@ -108,6 +110,33 @@ def _today_ganzhi() -> tuple[str, str]:
     now = _dt.datetime.now()
     lunar = Solar.fromYmd(now.year, now.month, now.day).getLunar()
     return lunar.getDayInGanZhi(), lunar.getMonthInGanZhi()
+
+
+def _parse_local_dt(raw: str | None) -> _dt.datetime:
+    """解析「本地时刻」字符串。
+
+    容忍三种写法（Agent 调用时经常只给日期）：
+    - "" / None        → 当前时刻
+    - "YYYY-MM-DD"     → 该日 12:00（正午，避开子时换日与早/晚子时之争）
+    - "YYYY-MM-DD HH:MM[:SS]"
+
+    只给日期时取 12:00 而不是 00:00：**00:00 在奇门里属子时**，
+    而子时存在早子/晚子换日争议，用正午可以绕开这个流派歧义。
+    """
+    text = (raw or "").strip()
+    if not text:
+        return _dt.datetime.now()
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d"):
+        try:
+            parsed = _dt.datetime.strptime(text, fmt)
+        except ValueError:
+            continue
+        if fmt == "%Y-%m-%d":
+            return parsed.replace(hour=12)
+        return parsed
+    raise InvalidInputError(
+        f"无法解析时刻 {text!r}；请用「YYYY-MM-DD HH:MM」或「YYYY-MM-DD」"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -341,6 +370,33 @@ def xuanpan_compass(
         confidence=confidence, confirmed_by_user=confirmed_by_user,
     )
     return _facts_dict(result)
+
+
+@server.tool(structured_output=True)
+@_domain_errors_as_tool_error
+def xuanpan_qimen(datetime_str: str = "", school: str = "chaibu") -> dict[str, Any]:
+    """奇门遁甲排盘（三式之一）：定局 + 地盘/天盘/九星/八门/八神。
+
+    参数:
+        datetime_str: 本地时刻。不填或传 "" 取当前时刻；支持
+            "YYYY-MM-DD HH:MM" 与 "YYYY-MM-DD"（后者取该日 12:00）。
+            奇门以**时辰**起局，故不接受只有日期之外的更粗粒度。
+        school: 定局流派，目前仅 chaibu（拆补法）。
+
+    返回: 结构化 dict：
+        dingju  —— 节气 / 三元 / 阴阳遁 / 局数（含中文标签如「阴遁六局」）
+        pillars —— 年 / 月 / 日 / 时四柱
+        xunshou / zhifu_yi / zhifu_gong / zhifu_star / zhishi_door —— 旬首与值符值使
+        palaces —— 九宫（每宫含地盘干 / 天盘干 / 九星 / 八门 / 八神 + 空亡/驿马标记）
+        xun_kong / yima —— 旬空与驿马
+        uncertainties —— **本版未覆盖项**，务必如实向用户转述
+
+    说明: 局数与盘面全部由确定性内核算出（RULE-001），不含随机数、不调用语言模型。
+        格局吉凶判断（十干克应等）不在内核范围，属上层解读，请勿把盘面当断语。
+    """
+    dt = _parse_local_dt(datetime_str)
+    chart: QimenChart = cast_qimen(dt, school=school)
+    return _facts_dict(chart)
 
 
 def main() -> None:

@@ -74,14 +74,51 @@ async def _call(session: ClientSession, name: str, args: dict[str, Any]) -> Any:
     raise AssertionError(f"工具 {name} 无 structuredContent 也无文本输出")
 
 
-async def test_server_lists_nine_tools() -> None:
+async def test_server_lists_ten_tools() -> None:
     async with _connect() as session:
         tools = await session.list_tools()
         names = {t.name for t in tools.tools}
         assert names == {
             "xuanpan_bazi", "xuanpan_liuyao", "xuanpan_duan_liuyao", "xuanpan_duan_bazi",
             "xuanpan_almanac", "xuanpan_zeri", "xuanpan_name", "xuanpan_qian", "xuanpan_compass",
+            "xuanpan_qimen",
         }
+
+
+async def test_qimen_structured_content() -> None:
+    """奇门盘：定局 / 九宫 / 未覆盖项都必须回给调用方。
+
+    形状说明：`QimenChart` 目前是**扁平** dict（`dingju` / `palaces` 在顶层），
+    不分 `facts` / `tradition` 两层 —— 因为奇门盘当前是纯事实，尚无
+    「传统分析」层（十干克应等格局判断属上层解读）。将来若接入格局，再补 tradition 层。
+    """
+    async with _connect() as session:
+        sc = await _call(session, "xuanpan_qimen", {"datetime_str": "2026-09-17 12:00"})
+        assert sc["dingju"]["jushu_label"] == "阴遁六局"
+        assert sc["dingju"]["jieqi"] == "白露"
+        assert sc["zhifu_star"] == "天心"
+        assert sc["zhishi_door"] == "开门"
+        assert len(sc["palaces"]) == 9
+        # 未覆盖项必须转述给调用方，不得在工具层吞掉
+        assert any("置闰" in u for u in sc["uncertainties"])
+
+
+async def test_qimen_date_only_defaults_to_noon() -> None:
+    """只给日期时取 12:00 —— 避开子时换日的流派歧义。"""
+    async with _connect() as session:
+        sc = await _call(session, "xuanpan_qimen", {"datetime_str": "2026-09-17"})
+        assert sc["pillars"]["hour"] == "庚午", "12:00 应为午时（甲日午时为庚午）"
+
+
+async def test_qimen_bad_input_raises_readable_tool_error() -> None:
+    """非法时刻应是可读的 ToolError，而不是笼统的「Error executing tool」。"""
+    async with _connect() as session:
+        result = await session.call_tool("xuanpan_qimen", {"datetime_str": "不是时间"})
+        assert result.is_error
+        text = " ".join(
+            b.text for b in result.content if getattr(b, "type", "") == "text"
+        )
+        assert "无法解析时刻" in text, text
 
 async def test_bazi_structured_content() -> None:
     async with _connect() as session:
