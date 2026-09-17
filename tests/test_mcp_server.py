@@ -5,7 +5,7 @@ MCP server 的入口是 `server.py` 的 stdio 进程，客户端通过 JSON-RPC 
 直接 import server 调 call_tool 会绕过「进程启动 + 握手 + 消息编解码」这些真实链路。
 本测试用 mcp 的 stdio_client 启动真实子进程，验证：
 1. server 能启动并完成 initialize 握手
-2. 6 个工具全部注册
+2. 9 个工具全部注册
 3. 每个工具经 stdio 调用返回 structured_content（非自然语言摘要）
 4. 结构化输出内含 facts/tradition 两层（RULE-002 分层）
 
@@ -74,13 +74,13 @@ async def _call(session: ClientSession, name: str, args: dict[str, Any]) -> Any:
     raise AssertionError(f"工具 {name} 无 structuredContent 也无文本输出")
 
 
-async def test_server_lists_eight_tools() -> None:
+async def test_server_lists_nine_tools() -> None:
     async with _connect() as session:
         tools = await session.list_tools()
         names = {t.name for t in tools.tools}
         assert names == {
             "xuanpan_bazi", "xuanpan_liuyao", "xuanpan_duan_liuyao", "xuanpan_duan_bazi",
-            "xuanpan_almanac", "xuanpan_name", "xuanpan_qian", "xuanpan_compass",
+            "xuanpan_almanac", "xuanpan_zeri", "xuanpan_name", "xuanpan_qian", "xuanpan_compass",
         }
 
 async def test_bazi_structured_content() -> None:
@@ -111,6 +111,94 @@ async def test_almanac_structured_content() -> None:
         assert sc["facts"]["jian_chu"] == "收"
         assert sc["facts"]["chong"]["zhi"] == "子"
         assert sc["facts"]["xiu"]["name"] == "角"
+
+async def test_zeri_structured_content() -> None:
+    """择日：区间筛选应回 facts/tradition 两层，且候选日带评分依据。"""
+    async with _connect() as session:
+        sc = await _call(session, "xuanpan_zeri",
+                         {"event": "jiaqu", "start": "2026-10-01", "end": "2026-12-31", "limit": 5})
+        # facts 层
+        assert sc["facts"]["event_label"] == "嫁娶"
+        assert sc["facts"]["range"]["days_scanned"] == 92
+        assert sc["facts"]["candidate_count"] == 5
+        best = sc["facts"]["candidates"][0]
+        assert best["solar_date"] == "2026-12-17"
+        assert best["grade"] == "吉"
+        assert best["reasons"], "候选日必须给出评分依据"
+        # tradition 层（RULE-006：流派与不确定性必须随结果返回）
+        assert sc["tradition"]["school"] == "default"
+        assert len(sc["tradition"]["uncertainties"]) >= 3
+
+
+async def test_zeri_default_range_starts_today() -> None:
+    """省略 start/end 时应以「今日起 90 天」为默认区间。"""
+    import datetime as _d
+
+    async with _connect() as session:
+        sc = await _call(session, "xuanpan_zeri", {"event": "kaiye"})
+        assert sc["facts"]["range"]["start"] == _d.date.today().isoformat()
+        assert sc["facts"]["range"]["days_scanned"] == 91  # 含首尾
+
+
+async def test_zeri_single_day_via_equal_range() -> None:
+    """start == end 时只评价一天；2024-06-05 诸事不宜 + 破日 → 候选为空但不报错。"""
+    async with _connect() as session:
+        sc = await _call(session, "xuanpan_zeri",
+                         {"event": "jiaqu", "start": "2024-06-05", "end": "2024-06-05"})
+        assert sc["facts"]["range"]["days_scanned"] == 1
+        assert sc["facts"]["candidate_count"] == 0
+        assert sc["facts"]["excluded_count"] == 1
+        assert sc["facts"]["excluded_reasons"]["诸事不宜"] == 1
+        # 必须是可读的「未筛出」说明，而不是空结果
+        assert "未筛出" in sc["tradition"]["summary"]
+
+
+async def test_zeri_detail_returns_veto_reasons() -> None:
+    """detail=True 应把否决原因一并返回，便于解释「为何这天不行」。"""
+    async with _connect() as session:
+        sc = await _call(session, "xuanpan_zeri",
+                         {"event": "jiaqu", "start": "2026-09-18", "end": "2026-09-18",
+                          "detail": True})
+        days = sc["facts"]["candidates"]
+        assert len(days) == 1
+        day = days[0]
+        assert day["usable"] is False
+        assert day["grade"] == "不宜"
+        assert any("嫁娶" in r for r in day["reasons"])
+
+
+async def test_zeri_invalid_event_returns_domain_error() -> None:
+    """非法事件 key 应回清晰领域错误，并列出可用事件；server 仍可用。"""
+    async with _connect() as session:
+        result = await session.call_tool("xuanpan_zeri", {"event": "not_an_event"})
+        assert result.is_error
+        text = "".join(c.text for c in result.content if c.type == "text")
+        assert "未注册的择日事件" in text and "jiaqu" in text
+        sc = await _call(session, "xuanpan_qian", {"seed": 1})
+        assert "number" in sc["facts"]
+
+
+def test_zeri_docstring_lists_all_event_keys() -> None:
+    """防漂移守卫：工具 docstring 列出的事件 key 必须与规则表完全一致。
+
+    docstring 是 Agent 发现能力的第一入口。规则表加了事件却忘更新 docstring，
+    Agent 就永远不知道新事件存在 —— 这种漂移不会报错，只会静默降低可用性。
+    """
+    import json
+    from fortune_core.zeri import ZERI_TABLE_PATH
+
+    assert SERVER.exists(), "server.py 路径失效"
+    source = SERVER.read_text(encoding="utf-8")
+    table = json.loads(ZERI_TABLE_PATH.read_text(encoding="utf-8"))
+    checked = 0
+    for key, ev in table["events"].items():
+        assert f"{key}({ev['label']})" in source, (
+            f"事件 {key}({ev['label']}) 未出现在 MCP 工具 docstring 中"
+        )
+        checked += 1
+    # 防止规则表读空导致本测试空过
+    assert checked == len(table["events"]) == 17
+
 
 async def test_name_structured_content() -> None:
     async with _connect() as session:

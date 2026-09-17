@@ -45,6 +45,7 @@ from fortune_core import (
     LiuYaoResult,
     NameAnalysis,
     QianResult,
+    ZeriResult,
     analyze_name,
     calculate_almanac,
     calculate_bazi,
@@ -53,6 +54,7 @@ from fortune_core import (
     draw_qian,
     duan_bazi,
     duan_liuyao,
+    select_auspicious_days,
 )
 from fortune_core.liuyao import zhuang_gua
 from lunar_python import Solar
@@ -63,7 +65,7 @@ server = MCPServer(
     name="xuanpan",
     title="玄盘 AI · 术数计算内核",
     description=(
-        "确定性术数计算（八字 / 六爻 / 黄历 / 姓名 / 灵签 / 罗盘坐向）。"
+        "确定性术数计算（八字 / 六爻 / 黄历 / 择日 / 姓名 / 灵签 / 罗盘坐向）。"
         "计算由代码完成，AI 只负责解释结果，不介入计算。"
     ),
     version=APP_VERSION,
@@ -240,6 +242,46 @@ def xuanpan_almanac(
     now = _dt.datetime.now()
     dt = _dt.date(year or now.year, month or now.month, day or now.day)
     result: AlmanacResult = calculate_almanac(dt)
+    return _facts_dict(result)
+
+
+@server.tool(structured_output=True)
+@_domain_errors_as_tool_error
+def xuanpan_zeri(
+    event: str,
+    start: str | None = None,
+    end: str | None = None,
+    limit: int = 10,
+    shengxiao: str | None = None,
+    detail: bool = False,
+) -> dict[str, Any]:
+    """择日：给定事件，在其日期区间内反推候选吉日（黄历只能正向查宜忌，本工具反向筛选）。
+
+    参数:
+        event: 事件 key。可选：
+            jiaqu(嫁娶)、dianli(订婚纳采)、kaiye(开业开市)、dongtu(动土起基)、
+            yiru(入宅移徙)、anzhuang(安床)、jisi(祭祀祈福)、chuxing(出行)、
+            qiuyi(求医问诊)、anzang(安葬)、kaiguang(开光)、xiuzhuang(修造装修)、
+            ruxue(入学)、furen(赴任就职)、zaizhong(栽种)、shangliang(上梁立柱)、
+            zuozao(作灶安灶)
+        start / end: 阳历 YYYY-MM-DD。不填 start 取今日，不填 end 取 start 起 90 天。
+            只问某一天是否相宜时，令 start == end。
+        limit: 最多返回候选数（按评分降序），<=0 表示不限。
+        shengxiao: 当事人属相（如「鼠」）；填写后自动排除冲该属相的日子。
+        detail: True 时把被否决的日子连同否决原因一并返回（可用于解释「为何这天不行」）。
+
+    返回: 结构化 dict（facts 层 = 候选吉日与评分依据；tradition 层 = 流派口径与不确定性）。
+        候选为空是合法结果（如「赴任」本就吉日稀少），不是错误。
+
+    说明: 结果为「吉/次吉/平/不宜」分级倾向，属通行黄历口径，不等同于宜忌断语。
+    """
+    today = _dt.date.today()
+    raw_start = start or today.isoformat()
+    raw_end = end or (today + _dt.timedelta(days=90)).isoformat()
+    result: ZeriResult = select_auspicious_days(
+        event, raw_start, raw_end,
+        limit=limit, shengxiao=shengxiao, include_unfavorable=detail,
+    )
     return _facts_dict(result)
 
 
