@@ -63,9 +63,12 @@
 # ============================================================================
 #   bash apps/mobile/scripts/build-apk.sh
 #   API_BASE_URL=http://192.168.1.20:8360 bash apps/mobile/scripts/build-apk.sh
+#   API_BASE_URLS=http://192.168.1.20:8360,http://192.168.1.30:8360 bash apps/mobile/scripts/build-apk.sh
 #   ARCH=arm64-v8a,armeabi-v7a bash apps/mobile/scripts/build-apk.sh
 #   CLEAN=1 bash apps/mobile/scripts/build-apk.sh      # 重建原生工程
 #   NO_NDK_PATCH=1 bash apps/mobile/scripts/build-apk.sh
+#
+# 不传地址参数时，自动枚举本机全部可用局域网 IPv4 作为候选（首选 = 第一个）。
 #
 # 产物：apps/mobile/android/app/build/outputs/apk/release/app-release.apk
 #
@@ -79,14 +82,58 @@ MOBILE_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 ANDROID_DIR="$MOBILE_DIR/android"
 
 # ---- 可覆盖的构建参数 -------------------------------------------------------
-# 默认用 ddns-go 维护的域名而非局域网 IP：
-#   oc.ayong.qzz.io 由本机 ddns-go 每 300s 刷新（AAAA → 本机「以太网」IPv6），
-#   手机连 Wi-Fi（同链路直连）与连移动数据（走公网 IPv6）两种场景都可用；
-#   局域网 IP 只在同网段有效，且随 DHCP 租约/网卡变化。
-#   需要临时指回局域网地址时用 API_BASE_URL=... 覆盖即可。
-API_BASE_URL="${API_BASE_URL:-http://oc.ayong.qzz.io:8360}"
+# 后端地址：支持"一个"（API_BASE_URL）或"一串"（API_BASE_URLS，逗号分隔）。
+#
+# 默认策略：**自动枚举本机全部可用局域网 IPv4**，域名作为末位兜底。
+#
+# 为什么不再只内联一个值：构建机有多块网卡分属不同网段（实测本机同时存在
+# 192.168.57.10 / 192.168.59.56 / 192.168.68.80），每一块都能访问后端，而 APK
+# 只能内联一条 —— 手机不在那个网段就连不上，现象只是"一直转圈"，看不出是地址问题。
+# 现在把候选全打进去，APP 启动时并发探活、切到第一个可达的（顺序即优先级）。
+#
+# ⚠️ oc.ayong.qzz.io 于 2026-09-17 实测**无法解析**（nslookup 无记录、ping 报
+#    "找不到主机"）。此前它是默认首选，意味着那时打出的包必然连不上。
+#    现在把它降到候选末位：ddns-go 恢复后仍可用，但不再让真机包默认指向死地址。
+API_BASE_URLS="${API_BASE_URLS:-}"
+API_BASE_URL="${API_BASE_URL:-}"
 ARCH="${ARCH:-arm64-v8a}"
 NO_NDK_PATCH="${NO_NDK_PATCH:-0}"
+API_PORT="${API_PORT:-8360}"
+DDNS_HOST="${DDNS_HOST:-oc.ayong.qzz.io}"
+
+# 枚举本机可用局域网 IPv4。
+# 只取 "IPv4" 行，避开子网掩码/网关那几行；排除回环、链路本地，
+# 以及 172.16-31（WSL 的 vEthernet 与 sing-tun 代理虚拟网卡都落在这一段，
+# 它们能访问后端，但手机不在这些网段上，打进去只会白占一个候选）。
+detect_lan_ipv4() {
+  ipconfig 2>/dev/null \
+    | iconv -f GBK -t UTF-8 2>/dev/null \
+    | grep 'IPv4' \
+    | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' \
+    | grep -vE '^(127\.|169\.254\.|172\.1[6-9]\.|172\.2[0-9]\.|172\.3[01]\.|0\.0\.0\.0)' \
+    | sort -u
+}
+
+if [ -n "$API_BASE_URLS" ]; then
+  CANDIDATES="$API_BASE_URLS"
+  echo "使用显式候选表 API_BASE_URLS"
+elif [ -n "$API_BASE_URL" ]; then
+  CANDIDATES="$API_BASE_URL"
+  echo "使用显式单地址 API_BASE_URL"
+else
+  CANDIDATES=""
+  for ip in $(detect_lan_ipv4 || true); do
+    CANDIDATES="${CANDIDATES:+$CANDIDATES,}http://$ip:$API_PORT"
+  done
+  if [ -z "$CANDIDATES" ]; then
+    echo "  ! 未枚举到任何局域网 IPv4" >&2
+  fi
+  CANDIDATES="${CANDIDATES:+$CANDIDATES,}http://$DDNS_HOST:$API_PORT"
+fi
+
+# 首选地址 = 候选表第一项。客户端 resolveBaseUrl 与 extra.apiBaseUrl 都用它，
+# 保证"首选"与"候选表"不会指向两个不同的后端。
+PRIMARY_URL="${CANDIDATES%%,*}"
 
 # Android SDK / JDK。
 #
@@ -113,8 +160,9 @@ command -v node >/dev/null 2>&1 \
   || { echo "node 不在 PATH 中" >&2; exit 1; }
 echo "  JDK        : $JAVA_HOME"
 echo "  Android SDK: $ANDROID_HOME"
-echo "  后端地址   : $API_BASE_URL"
 echo "  目标架构   : $ARCH"
+echo "  后端候选   : $CANDIDATES"
+echo "  首选地址   : $PRIMARY_URL"
 
 # ---- 1. 修复 Gradle 发行版（缺 .ok 标记时补解压）----------------------------
 # Gradle wrapper 判定"解压完成"的依据是同目录下的 <zip>.ok 文件。
@@ -220,7 +268,7 @@ log "生成原生工程（prebuild，CLEAN=${CLEAN:-0}）"
 cd "$MOBILE_DIR"
 PREBUILD_ARGS=(--platform android)
 [ "${CLEAN:-0}" = "1" ] && PREBUILD_ARGS+=(--clean)
-XUANPAN_API_BASE_URL="$API_BASE_URL" npx expo prebuild "${PREBUILD_ARGS[@]}"
+XUANPAN_API_BASE_URL="$PRIMARY_URL" XUANPAN_API_BASE_URLS="$CANDIDATES" npx expo prebuild "${PREBUILD_ARGS[@]}"
 
 # ---- 5. 重新应用 prebuild 会重置的配置 --------------------------------------
 # 这几项是第 3、4、5 号问题的解药，必须写在 gradle.properties 里。
@@ -279,24 +327,31 @@ BUNDLE_SOURCEMAP="$ANDROID_DIR/app/build/generated/sourcemaps/react"
 LAST_URL=""
 [ -f "$BUNDLE_STAMP" ] && LAST_URL="$(cat "$BUNDLE_STAMP" 2>/dev/null || true)"
 
-if [ "$LAST_URL" != "$API_BASE_URL" ] || [ "${FORCE_BUNDLE:-0}" = "1" ]; then
+if [ "$LAST_URL" != "$CANDIDATES" ] || [ "${FORCE_BUNDLE:-0}" = "1" ]; then
   log "后端地址变更，清理旧 JS bundle（强制重打包）"
   echo "  上次注入: ${LAST_URL:-（无记录，视为变更）}"
-  echo "  本次注入: $API_BASE_URL"
+  echo "  本次注入: $CANDIDATES"
   [ -d "$BUNDLE_TASK_DIR" ] && rm -rf "$BUNDLE_TASK_DIR"
   [ -f "$BUNDLE_MERGED" ] && rm -f "$BUNDLE_MERGED"
   [ -d "$BUNDLE_SOURCEMAP" ] && rm -rf "$BUNDLE_SOURCEMAP"
   echo "  已清理 bundle 产物"
 else
-  echo "  后端地址未变（$API_BASE_URL），复用已有 JS bundle"
+  echo "  后端地址未变（$CANDIDATES），复用已有 JS bundle"
 fi
-printf '%s' "$API_BASE_URL" > "$BUNDLE_STAMP"
+printf '%s' "$CANDIDATES" > "$BUNDLE_STAMP"
 
 # ---- 7. 构建 ----------------------------------------------------------------
 log "开始构建（$(date '+%H:%M:%S')）"
 cd "$ANDROID_DIR"
-export EXPO_PUBLIC_API_BASE_URL="$API_BASE_URL"
-export XUANPAN_API_BASE_URL="$API_BASE_URL"
+# 环境变量必须成对给全，两组机制不同：
+#   EXPO_PUBLIC_* —— babel-preset-expo 打包时**内联成字面量**，运行期真正读到的是它
+#   XUANPAN_*     —— 由 app.config.js 写进 extra，作为第二条来源（链路较长）
+# 漏掉 EXPO_PUBLIC_* 的后果不是报错，而是 bundle 里根本没有候选表，
+# 客户端静默退回 127.0.0.1 —— 真机上必然连不上，且看不出是构建期没注入。
+export EXPO_PUBLIC_API_BASE_URL="$PRIMARY_URL"
+export EXPO_PUBLIC_API_BASE_URLS="$CANDIDATES"
+export XUANPAN_API_BASE_URL="$PRIMARY_URL"
+export XUANPAN_API_BASE_URLS="$CANDIDATES"
 bash ./gradlew assembleRelease -PreactNativeArchitectures="$ARCH" --console=plain
 
 # ---- 8. 汇总与自检 ----------------------------------------------------------
@@ -305,17 +360,25 @@ APK="$ANDROID_DIR/app/build/outputs/apk/release/app-release.apk"
 if [ -f "$APK" ]; then
   echo "  产物: $APK"
   echo "  大小: $(du -h "$APK" | cut -f1)"
-  echo "  内嵌后端地址: $API_BASE_URL"
+  echo "  内嵌后端候选: $CANDIDATES"
 
-  # 自检：确认 bundle 里确实写着本次的地址。
+  # 自检：确认 bundle 里确实写着本次的**全部**候选地址。
   # 「BUILD SUCCESSFUL」不等于「地址正确」—— 第 6 步那个缓存坑产出的包同样报成功，
   # 里面却嵌着上一版的地址。这里直接读 bundle 内容做断言，失败就退出非零。
+  # 逐项校验而非只查首选：漏掉后续候选不会让首选失效，却会让"换网段就自动切"
+  # 这件事静默失效 —— 而那正是这次多候选机制的全部意义。
   BUNDLE_FILE="$BUNDLE_TASK_DIR/index.android.bundle"
   if [ -f "$BUNDLE_FILE" ]; then
-    if grep -qF -- "$API_BASE_URL" "$BUNDLE_FILE"; then
-      echo "  ✅ 自检通过：JS bundle 内含 $API_BASE_URL"
+    MISSING=""
+    IFS=',' read -ra _cands <<< "$CANDIDATES"
+    for u in "${_cands[@]}"; do
+      [ -z "$u" ] && continue
+      grep -qF -- "$u" "$BUNDLE_FILE" || MISSING="${MISSING:+$MISSING, }$u"
+    done
+    if [ -z "$MISSING" ]; then
+      echo "  ✅ 自检通过：JS bundle 内含全部候选地址"
     else
-      echo "  ❌ 自检失败：JS bundle 内未找到 $API_BASE_URL" >&2
+      echo "  ❌ 自检失败：JS bundle 内未找到 $MISSING" >&2
       echo "     bundle 文件: $BUNDLE_FILE" >&2
       echo "     处理: FORCE_BUNDLE=1 重跑本脚本" >&2
       exit 1
