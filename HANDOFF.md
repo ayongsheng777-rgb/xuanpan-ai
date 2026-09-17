@@ -127,7 +127,7 @@ services/mcp/server.py   # 9 个 MCP 工具
 
 ```bash
 # $PY = C:/Users/anyong/.workbuddy/binaries/python/envs/default/Scripts/python.exe（managed venv）
-# 全量测试（当前 828 passed）
+# 全量测试（当前 834 passed）
 "$PY" -m pytest
 
 # 分层
