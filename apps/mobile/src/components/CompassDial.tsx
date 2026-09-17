@@ -50,12 +50,119 @@ import {
   pointOnCircle,
   sectorPathOfIndex,
 } from '@/lib/ring24';
-import { alpha, brand, colors } from '@/theme/tokens';
+import { alpha, brand, colors, instrument } from '@/theme/tokens';
 
 /** 拖动与点击的判别阈值（像素）：位移小于它才算"点了一下" */
 const TAP_SLOP = 8;
 /** 相邻山格之间的视觉缝隙（度） */
 const SECTOR_GAP_DEG = 0.6;
+
+/**
+ * 盘面调色板 —— 双轨制（《V2 评估与实施路线》冲突 2 裁决）。
+ *
+ * light：既有暖色浅色盘（确认坐向等浅色页面继续用）；
+ * dark ：V2 演示图的深色仪器盘（罗盘域新页面用）。
+ * 两轨共用同一套几何（dialLayout），只有配色不同 ——
+ * 几何是事实，配色是视角，不能混为一谈。
+ */
+export interface DialPalette {
+  /** 盘体底色 */
+  body: string;
+  /** 金环/外框 */
+  rim: string;
+  /** 细分隔线 */
+  hairline: string;
+  /** 山格描边 */
+  sectorStroke: string;
+  /** 天池底 */
+  pool: string;
+  /** 坐山格填充 */
+  sittingFill: string;
+  /** 向山格填充 */
+  facingFill: string;
+  /** 四正淡底 */
+  cardinalSoft: string;
+  /** 四维淡底 */
+  cornerSoft: string;
+  /** 普通山格底 */
+  plainFill: string;
+  /** 坐山字色 */
+  sittingText: string;
+  /** 向山字色 */
+  facingText: string;
+  /** 四正字色（朱） */
+  cardinalText: string;
+  /** 四维字色 */
+  cornerText: string;
+  /** 普通山名字色 */
+  plainText: string;
+  /** 卦符色 */
+  trigram: string;
+  /** 磁针北（红） */
+  needleNorth: string;
+  /** 磁针南 */
+  needleSouth: string;
+  /** 天池中心点 */
+  poolDot: string;
+  /** 实测针 */
+  measured: string;
+  /** 刻度三色：主 / 中 / 细 */
+  tick0: string;
+  tick1: string;
+  tick2: string;
+}
+
+export const DIAL_LIGHT: DialPalette = {
+  body: colors.sand,
+  rim: brand.gold,
+  hairline: alpha.primaryBorder,
+  sectorStroke: alpha.goldSoft,
+  pool: colors.surface,
+  sittingFill: colors.primary,
+  facingFill: brand.gold,
+  cardinalSoft: alpha.cinnabarSoft,
+  cornerSoft: alpha.primarySoft,
+  plainFill: colors.sand,
+  sittingText: colors.onPrimary,
+  facingText: colors.primary,
+  cardinalText: colors.cinnabar,
+  cornerText: colors.primary,
+  plainText: colors.text,
+  trigram: colors.jade,
+  needleNorth: colors.cinnabar,
+  needleSouth: colors.primary,
+  poolDot: brand.gold,
+  measured: colors.cinnabar,
+  tick0: colors.cinnabar,
+  tick1: colors.primary,
+  tick2: colors.muted,
+};
+
+export const DIAL_DARK: DialPalette = {
+  body: instrument.dialBody,
+  rim: instrument.dialGold,
+  hairline: instrument.border,
+  sectorStroke: instrument.border,
+  pool: instrument.surface,
+  sittingFill: instrument.accent,
+  facingFill: instrument.surfaceAlt,
+  cardinalSoft: 'rgba(224, 85, 72, 0.16)',
+  cornerSoft: 'rgba(218, 179, 125, 0.14)',
+  plainFill: instrument.dialBody,
+  sittingText: instrument.bg,
+  facingText: instrument.accent,
+  cardinalText: instrument.needle,
+  cornerText: instrument.accent,
+  plainText: instrument.textSecondary,
+  trigram: instrument.accent,
+  needleNorth: instrument.needle,
+  needleSouth: instrument.textSecondary,
+  poolDot: instrument.dialGold,
+  measured: instrument.needle,
+  tick0: instrument.needle,
+  tick1: instrument.accent,
+  tick2: instrument.muted,
+};
 
 export interface CompassDialProps {
   /** 外径 */
@@ -72,6 +179,8 @@ export interface CompassDialProps {
   onRotate?: (rotation: number) => void;
   /** 点选山格时回调（传**盘面角**索引） */
   onSelectMountain?: (index: number) => void;
+  /** 配色轨：light=暖色浅色盘（默认，既有页面）/ dark=深色仪器盘（罗盘域） */
+  palette?: DialPalette;
 }
 
 export function CompassDial({
@@ -82,6 +191,7 @@ export function CompassDial({
   interactive = false,
   onRotate,
   onSelectMountain,
+  palette = DIAL_LIGHT,
 }: CompassDialProps): React.JSX.Element {
   // 实测宽高：容器与 SVG 不一致时拖动坐标会整体错位
   const [box, setBox] = useState<number>(size);
@@ -149,12 +259,12 @@ export function CompassDial({
     <View onLayout={onLayout} style={[styles.wrap, { width: size, height: size }]}>
       <Svg width={box} height={box}>
         {/* ---------- 底盘 ---------- */}
-        <Circle cx={center.x} cy={center.y} r={L.rim - 1} fill={colors.sand} />
+        <Circle cx={center.x} cy={center.y} r={L.rim - 1} fill={palette.body} />
         <Circle
           cx={center.x}
           cy={center.y}
           r={L.rim - 1}
-          stroke={brand.gold}
+          stroke={palette.rim}
           strokeWidth={2.5}
           fill="none"
         />
@@ -162,26 +272,26 @@ export function CompassDial({
           cx={center.x}
           cy={center.y}
           r={L.rim - 5}
-          stroke={alpha.primaryBorder}
+          stroke={palette.hairline}
           strokeWidth={0.8}
           fill="none"
         />
 
         {/* ---------- 随盘旋转的整体（山 / 八卦 / 刻度 / 十字线） ---------- */}
         <G transform={`rotate(${rotation} ${center.x} ${center.y})`}>
-          <MountainBand L={L} sitting={sitting} facing={facing} />
-          <TrigramBand L={L} />
-          <TickBand L={L} ticks={ticks} />
+          <MountainBand L={L} sitting={sitting} facing={facing} palette={palette} />
+          <TrigramBand L={L} palette={palette} />
+          <TickBand L={L} ticks={ticks} palette={palette} />
 
           {/* 天池外圈与十字红线（刻在盘体上，随盘转） */}
-          <Circle cx={center.x} cy={center.y} r={L.pool} fill={colors.surface} />
+          <Circle cx={center.x} cy={center.y} r={L.pool} fill={palette.pool} />
           <G opacity={0.7}>
             <Line
               x1={center.x}
               y1={center.y - L.pool}
               x2={center.x}
               y2={center.y + L.pool}
-              stroke={colors.cinnabar}
+              stroke={palette.measured}
               strokeWidth={0.7}
             />
             <Line
@@ -189,7 +299,7 @@ export function CompassDial({
               y1={center.y}
               x2={center.x + L.pool}
               y2={center.y}
-              stroke={colors.cinnabar}
+              stroke={palette.measured}
               strokeWidth={0.7}
             />
           </G>
@@ -197,19 +307,19 @@ export function CompassDial({
             cx={center.x}
             cy={center.y}
             r={L.pool}
-            stroke={brand.gold}
+            stroke={palette.rim}
             strokeWidth={1.2}
             fill="none"
           />
 
           {/* 实测角指针：只作视觉提示，不改写任何选择 */}
           {measuredDegree !== null ? (
-            <MeasuredNeedle L={L} degree={measuredDegree} />
+            <MeasuredNeedle L={L} degree={measuredDegree} palette={palette} />
           ) : null}
         </G>
 
         {/* ---------- 磁针（不随盘转：屏幕上方恒为真北） ---------- */}
-        <MagnetNeedle L={L} />
+        <MagnetNeedle L={L} palette={palette} />
       </Svg>
 
       {/* 手势层放在 SVG 之上、且透明 */}
@@ -233,10 +343,12 @@ function MountainBand({
   L,
   sitting,
   facing,
+  palette,
 }: {
   L: ReturnType<typeof dialLayout>;
   sitting: number | null;
   facing: number | null;
+  palette: DialPalette;
 }): React.JSX.Element {
   return (
     <G>
@@ -246,20 +358,20 @@ function MountainBand({
         const isFacing = i === facing;
         // 坐山最重、向山次重、四正淡朱、四维淡蓝、其余留白
         const fill = isSitting
-          ? colors.primary
+          ? palette.sittingFill
           : isFacing
-            ? brand.gold
+            ? palette.facingFill
             : role === 'cardinal'
-              ? alpha.cinnabarSoft
+              ? palette.cardinalSoft
               : role === 'corner'
-                ? alpha.primarySoft
-                : colors.sand;
+                ? palette.cornerSoft
+                : palette.plainFill;
         return (
           <Path
             key={`m-${i}`}
             d={sectorPathOfIndex(L.center, L.mountainInner, L.mountainOuter, i, SECTOR_GAP_DEG)}
             fill={fill}
-            stroke={alpha.goldSoft}
+            stroke={palette.sectorStroke}
             strokeWidth={0.8}
           />
         );
@@ -272,14 +384,14 @@ function MountainBand({
         const isSitting = i === sitting;
         const isFacing = i === facing;
         const fill = isSitting
-          ? colors.onPrimary
+          ? palette.sittingText
           : isFacing
-            ? colors.primary
+            ? palette.facingText
             : role === 'cardinal'
-              ? colors.cinnabar
+              ? palette.cardinalText
               : role === 'corner'
-                ? colors.primary
-                : colors.text;
+                ? palette.cornerText
+                : palette.plainText;
         return (
           <G key={`mt-${i}`} transform={`rotate(${deg} ${p.x} ${p.y})`}>
             <SvgText
@@ -304,14 +416,20 @@ function MountainBand({
 // 后天八卦环（自绘爻线，不依赖字体里的 ☰☱… ）
 // ==========================================================================
 
-function TrigramBand({ L }: { L: ReturnType<typeof dialLayout> }): React.JSX.Element {
+function TrigramBand({
+  L,
+  palette,
+}: {
+  L: ReturnType<typeof dialLayout>;
+  palette: DialPalette;
+}): React.JSX.Element {
   return (
     <G>
       <Circle
         cx={L.center.x}
         cy={L.center.y}
         r={L.trigramOuter}
-        stroke={alpha.primaryBorder}
+        stroke={palette.hairline}
         strokeWidth={0.8}
         fill="none"
       />
@@ -319,7 +437,7 @@ function TrigramBand({ L }: { L: ReturnType<typeof dialLayout> }): React.JSX.Ele
         cx={L.center.x}
         cy={L.center.y}
         r={L.trigramInner}
-        stroke={alpha.primaryBorder}
+        stroke={palette.hairline}
         strokeWidth={0.8}
         fill="none"
       />
@@ -331,7 +449,7 @@ function TrigramBand({ L }: { L: ReturnType<typeof dialLayout> }): React.JSX.Ele
               x={p.x}
               y={p.y}
               yao={t.yao}
-              color={colors.jade}
+              color={palette.trigram}
               width={L.trigramOuter * 0.14}
               gap={L.trigramOuter * 0.075}
               strokeWidth={1.6}
@@ -412,18 +530,22 @@ function TrigramYao({
 // 一百二十分金刻度环
 // ==========================================================================
 
-const TICK_STYLE: Record<TickLevel, { color: string; width: number }> = {
-  0: { color: colors.cinnabar, width: 1.6 },
-  1: { color: colors.primary, width: 1.1 },
-  2: { color: colors.muted, width: 0.7 },
+const TICK_STYLE_KEYS: Record<TickLevel, 'tick0' | 'tick1' | 'tick2'> = {
+  0: 'tick0',
+  1: 'tick1',
+  2: 'tick2',
 };
+
+const TICK_WIDTH: Record<TickLevel, number> = { 0: 1.6, 1: 1.1, 2: 0.7 };
 
 function TickBand({
   L,
   ticks,
+  palette,
 }: {
   L: ReturnType<typeof dialLayout>;
   ticks: ReturnType<typeof buildTicks>;
+  palette: DialPalette;
 }): React.JSX.Element {
   const span = L.tickOuter - L.tickInner;
   return (
@@ -432,7 +554,7 @@ function TickBand({
         cx={L.center.x}
         cy={L.center.y}
         r={L.tickOuter}
-        stroke={alpha.primaryBorder}
+        stroke={palette.hairline}
         strokeWidth={0.8}
         fill="none"
       />
@@ -440,12 +562,11 @@ function TickBand({
         cx={L.center.x}
         cy={L.center.y}
         r={L.tickInner}
-        stroke={alpha.primaryBorder}
+        stroke={palette.hairline}
         strokeWidth={0.8}
         fill="none"
       />
       {ticks.map((t) => {
-        const style = TICK_STYLE[t.level];
         const from = pointOnCircle(L.center, L.tickOuter, t.degree);
         const to = pointOnCircle(L.center, L.tickInner + span * (1 - TICK_LENGTH_RATIO[t.level]), t.degree);
         return (
@@ -455,8 +576,8 @@ function TickBand({
             y1={from.y}
             x2={to.x}
             y2={to.y}
-            stroke={style.color}
-            strokeWidth={style.width}
+            stroke={palette[TICK_STYLE_KEYS[t.level]]}
+            strokeWidth={TICK_WIDTH[t.level]}
             strokeLinecap="butt"
           />
         );
@@ -469,8 +590,14 @@ function TickBand({
 // 天池磁针 与 实测指针
 // ==========================================================================
 
-/** 磁针：红头指北（屏幕上方）、深蓝尾指南。**不随盘体旋转** */
-function MagnetNeedle({ L }: { L: ReturnType<typeof dialLayout> }): React.JSX.Element {
+/** 磁针：红头指北（屏幕上方）、蓝尾指南。**不随盘体旋转** */
+function MagnetNeedle({
+  L,
+  palette,
+}: {
+  L: ReturnType<typeof dialLayout>;
+  palette: DialPalette;
+}): React.JSX.Element {
   const { center } = L;
   const len = L.pool * 0.82;
   const halfW = L.pool * 0.16;
@@ -478,13 +605,13 @@ function MagnetNeedle({ L }: { L: ReturnType<typeof dialLayout> }): React.JSX.El
     <G opacity={0.92}>
       <Path
         d={`M ${center.x} ${center.y - len} L ${center.x + halfW} ${center.y} L ${center.x - halfW} ${center.y} Z`}
-        fill={colors.cinnabar}
+        fill={palette.needleNorth}
       />
       <Path
         d={`M ${center.x} ${center.y + len} L ${center.x + halfW} ${center.y} L ${center.x - halfW} ${center.y} Z`}
-        fill={colors.primary}
+        fill={palette.needleSouth}
       />
-      <Circle cx={center.x} cy={center.y} r={L.pool * 0.1} fill={brand.gold} />
+      <Circle cx={center.x} cy={center.y} r={L.pool * 0.1} fill={palette.poolDot} />
     </G>
   );
 }
@@ -493,9 +620,11 @@ function MagnetNeedle({ L }: { L: ReturnType<typeof dialLayout> }): React.JSX.El
 function MeasuredNeedle({
   L,
   degree,
+  palette,
 }: {
   L: ReturnType<typeof dialLayout>;
   degree: number;
+  palette: DialPalette;
 }): React.JSX.Element {
   const outer = pointOnCircle(L.center, L.mountainInner, degree);
   const inner = pointOnCircle(L.center, L.pool, degree);
@@ -506,11 +635,11 @@ function MeasuredNeedle({
         y1={outer.y}
         x2={inner.x}
         y2={inner.y}
-        stroke={colors.cinnabar}
+        stroke={palette.measured}
         strokeWidth={2}
         strokeLinecap="round"
       />
-      <Circle cx={outer.x} cy={outer.y} r={2.6} fill={colors.cinnabar} />
+      <Circle cx={outer.x} cy={outer.y} r={2.6} fill={palette.measured} />
     </G>
   );
 }
