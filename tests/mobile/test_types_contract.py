@@ -329,6 +329,29 @@ def responses(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Any]:
         # 取首宫会漏掉"IE 端把 null 当成字段缺失"这种情况。
         out["QimenPalace"] = next(p for p in chart["palaces"] if p["gong"] == 5)
 
+        # ---- 三式 · 六壬（同样不落库、不进会话体系）----
+        # 时刻同样**写死**，但六壬比奇门更依赖它：六壬以「月将加时」起课，
+        # 同一日不同时辰的课**完全不同**（时辰变了天盘就整体转一格）。
+        # 10:00 是巳时，且当日月将为巳 —— 取这个时刻是因为月将与占时同为巳，
+        # 天地盘退化成恒等映射，十二宫的对应关系肉眼可验，
+        # 一旦有人写错旋转方向，这条测试会先炸。
+        liuren_meta = client.get("/api/v1/liuren/meta").json()
+        out["LiurenMetaResponse"] = liuren_meta
+        out["LiurenSchool"] = liuren_meta["schools"][0]
+
+        lr = client.post(
+            "/api/v1/liuren/cast",
+            json={"dt": "2026-09-17T10:00:00"},
+        ).json()
+        out["LiurenChart"] = lr
+        out["LiurenGuiren"] = lr["guiren"]
+        # 四课里**第一课的下神是日干本身**（不是地支）—— 它的 `lower_label`
+        # 是干名、`lower_element` 取干五行。这是四课里唯一的异类，
+        # 取 [0] 才核得到；取 [1] 会漏掉这条最容易写错的路径。
+        out["LiurenLesson"] = lr["lessons"][0]
+        out["LiurenPalace"] = lr["palaces"][0]
+        out["LiurenChuan"] = lr["chuan"][0]
+
     return out
 
 
@@ -358,6 +381,12 @@ _CHECKED: tuple[str, ...] = (
     # 正是最容易把"字段值为 null"误当成"字段不存在"的地方。
     "QimenMetaResponse", "QimenSchool",
     "QimenChart", "QimenDingju", "QimenPillars", "QimenPalace",
+    # 三式 · 六壬 —— 同类风险，且比奇门多一层：
+    # `LiurenPalace.general_jixiong` 与 `LiurenChuan.dun_gan` 都**允许为 null**，
+    # 前者是"该宫无天将"，后者是"该支落旬空"（领域信号，非数据缺失）。
+    # 把「键存在但值为 null」误判成「键缺失」，是这类扁平盘面最常见的漂移。
+    "LiurenMetaResponse", "LiurenSchool",
+    "LiurenChart", "LiurenGuiren", "LiurenLesson", "LiurenPalace", "LiurenChuan",
 )
 
 
@@ -670,88 +699,206 @@ def test_qimen_dingju_chain_is_self_consistent(responses: dict[str, Any]) -> Non
 
 
 # ==========================================================================
-# 三式 · 奇门
+# 三式 · 六壬
 # ==========================================================================
 
 
-def test_qimen_middle_palace_has_no_door_or_god(responses: dict[str, Any]) -> None:
-    """中五宫必须**没有**八门与八神 —— 这是规则，不是数据缺失。
+def test_liuren_chart_has_twelve_palaces_four_lessons_three_chuan(
+    responses: dict[str, Any],
+) -> None:
+    """盘面结构：十二宫 / 四课 / 三传 —— 且十二宫地盘支恰好铺满十二支。
 
-    奇门里中宫寄坤，不布门、不布神。前端据此把这两格显示为空；
-    如果后端某天"顺手补上"一个默认门/神，界面不会报错，
-    只会显示一个**不存在的门**，而用户无从分辨。
+    铺垫完整性是**摆位的前提**：前端直接把 `palaces` 按地支摆进十二宫方图，
+    如果内核少给一宫或重复一宫，界面上表现为"某一格空着"或者"两格同支"，
+    但接口仍是 200、没有任何报错。
     """
-    mid = responses["QimenPalace"]
-    assert mid["gong"] == 5, "本用例取的是中五宫，采集逻辑变了？"
-    assert mid["door"] is None, f"中五宫不应有门，实为 {mid['door']!r}"
-    assert mid["god"] is None, f"中五宫不应有神，实为 {mid['god']!r}"
-    # 地盘干与天盘干在中宫依然存在（寄宫不等于整格为空）
-    assert mid["di_gan"], "中五宫应当有地盘干"
-    assert mid["tian_gan"], "中五宫应当有天盘干"
+    chart = responses["LiurenChart"]
+    assert len(chart["palaces"]) == 12
+    assert len(chart["lessons"]) == 4
+    assert len(chart["chuan"]) == 3
+
+    grounds = [p["ground"] for p in chart["palaces"]]
+    assert sorted(grounds) == sorted(
+        ["子", "丑", "寅", "卯", "辰", "巳", "午", "未", "申", "酉", "戌", "亥"]
+    ), f"十二宫地盘支应恰好铺满十二支，实为 {grounds}"
+
+    assert [c["position"] for c in chart["chuan"]] == ["初传", "中传", "末传"]
+    assert [le["name"] for le in chart["lessons"]] == ["第一课", "第二课", "第三课", "第四课"]
 
 
-def test_qimen_chart_has_exactly_nine_palaces(responses: dict[str, Any]) -> None:
-    """九宫恰好九格、宫序 1~9 不重不漏。
+def test_liuren_first_lesson_lower_is_the_day_gan(responses: dict[str, Any]) -> None:
+    """第一课：下神位取**日干寄宫**，而显示名是**日干本身** —— 四课里唯一的异类。
 
-    前端按洛书把九宫摆进 3×3 网格；少一格会留下一个空洞，
-    多一格会挤掉一格 —— 两种都不会报错。
+    两件事必须同时成立，只说一件都会漏：
+
+    - `lower` 是寄宫**支**（甲寄寅 → `寅`），它决定取哪一宫的上神；
+    - `lower_label` 是**日干**（`甲`），决定界面显示什么、以及五行按干取。
+
+    若有人为了「整齐」把第一课写成普通地支课（`lower_label` 也改成寄宫支），
+    贼克判定的五行会静默取错 —— 寄宫支与日干恰好同五行，**错误被五行吞掉**，
+    只有标签对不上时才看得出来。这里用寄宫表把两者的关系钉死。
     """
-    palaces = responses["QimenChart"]["palaces"]
-    assert len(palaces) == 9, f"应为九宫，实为 {len(palaces)}"
-    assert sorted(p["gong"] for p in palaces) == list(range(1, 10))
+    chart = responses["LiurenChart"]
+    meta = responses["LiurenMetaResponse"]
+    le = responses["LiurenLesson"]
+
+    assert le["index"] == 1
+    expected_lower = meta["jigong"][chart["day_gan"]]
+    assert le["lower"] == expected_lower, (
+        f"第一课下神位应是日干 {chart['day_gan']} 的寄宫支 {expected_lower}，实为 {le['lower']}"
+    )
+    assert le["lower_label"] == chart["day_gan"], (
+        "第一课下神的**展示名**应是日干本身，不是寄宫支"
+    )
+    assert le["upper"] in {p["heaven"] for p in chart["palaces"]}, (
+        "第一课上神必须是天盘上的一个支"
+    )
 
 
-def test_qimen_carries_uncertainties(responses: dict[str, Any]) -> None:
-    """`uncertainties` 不得为空 —— 界面靠它如实交代未覆盖项。
+def test_liuren_dun_gan_null_iff_xun_kong(responses: dict[str, Any]) -> None:
+    """`dun_gan` 为 null **等价于**该传落旬空 —— 这是领域信号，不是数据缺失。
 
-    空的 uncertainties 不会让界面报错，只会让"本版不覆盖什么"这一节
-    直接从页面上消失，而用户以为看到的是全部。
+    前端类型里 `dun_gan: string | null`，界面须显示为「空」，不得补默认天干
+    （补了就等于把空亡抹掉，且不报错）。所以这条 ⇔ 关系必须成立，
+    且**必须至少有一传落空**，否则断言会退化成"全部非 null"的恒真命题。
     """
-    chart = responses["QimenChart"]
-    assert chart["uncertainties"], "奇门盘必须携带 uncertainties"
-    meta = responses["QimenMetaResponse"]
-    assert meta["uncertainties"], "奇门 meta 必须携带 uncertainties"
-    # 两处必须是**同一份**（内核常量是唯一真源，不得各写一份）
+    chart = responses["LiurenChart"]
+    xun_kong = set(chart["xun_kong"])
+    assert xun_kong, "旬空不应为空集"
+
+    for c in chart["chuan"]:
+        if c["dun_gan"] is None:
+            assert c["zhi"] in xun_kong, (
+                f"{c['position']}{c['zhi']} 的遁干为 null，但它不在旬空 {sorted(xun_kong)} 里 —— "
+                "null 的含义只能是「落旬空」"
+            )
+        else:
+            assert c["zhi"] not in xun_kong, (
+                f"{c['position']}{c['zhi']} 落旬空却仍配到遁干 {c['dun_gan']!r}"
+            )
+
+    assert any(c["dun_gan"] is None for c in chart["chuan"]), (
+        "本锚点三传无一落旬空 —— `dun_gan` 的 null 分支未被覆盖，"
+        "换个时刻或换日辰，别让这条断言变成没测到"
+    )
+
+
+def test_liuren_guiren_sits_on_its_own_ground(responses: dict[str, Any]) -> None:
+    """贵人必须**落在自己那个地盘宫位**上，且全盘只有一宫标记为贵人。
+
+    前端不做推导（RULE-005），它只知道"把天将画在对应宫里"。
+    所以 `guiren.ground` 与 palaces 的对应关系必须由内核保证：
+    报错的话界面会**画错天将**，看起来完全正常。
+    """
+    chart = responses["LiurenChart"]
+    g = chart["guiren"]
+
+    on_ground = [p for p in chart["palaces"] if p["ground"] == g["ground"]]
+    assert len(on_ground) == 1, f"贵人所在的地盘支 {g['ground']!r} 在十二宫里有重复"
+    palace = on_ground[0]
+
+    assert palace["heaven"] == g["zhi"], (
+        f"贵人落 {g['ground']} 宫，该宫天盘支是 {palace['heaven']}，"
+        f"与贵人 {g['zhi']} 不符 —— 天将会被画到错的宫里"
+    )
+    assert palace["general"] == "贵人"
+
+    marks = [p for p in chart["palaces"] if p["is_guiren_ground"]]
+    assert len(marks) == 1, f"贵人宫标记应恰好一处，实为 {len(marks)}"
+    assert g["kind"] in {"昼贵", "夜贵"}
+    assert isinstance(g["is_day"], bool)
+    assert g["direction"] in {"顺布", "逆布"}
+    assert g["shun"] is (g["direction"] == "顺布")
+
+
+def test_liuren_tianjiang_jixiong_stays_a_property(responses: dict[str, Any]) -> None:
+    """RULE-008：天将吉凶是**天将自身的属性**，不得升格成对所问之事的结论。
+
+    盘面只允许出现「这个天将是什么」（六吉六凶），不允许出现「你问的事怎么样」。
+    同时核对 palaces 里的标记与元数据表**同源** —— 否则界面会显示一套、
+    内核按另一套排，两边都不报错。
+    """
+    meta = responses["LiurenMetaResponse"]
+    chart = responses["LiurenChart"]
+    jixiong = meta["tianjiang_jixiong"]
+
+    assert len(jixiong) == 12
+    assert set(jixiong) == set(meta["tianjiang_order"])
+    assert set(jixiong.values()) <= {"吉", "凶"}, f"天将吉凶只应是吉/凶二值，实为 {set(jixiong.values())}"
+
+    for p in chart["palaces"]:
+        if p["general"] is not None:
+            assert p["general_jixiong"] == jixiong[p["general"]], (
+                f"{p['ground']}宫的 {p['general']} 标记为 {p['general_jixiong']!r}，"
+                f"与元数据表 {jixiong[p['general']]!r} 不符"
+            )
+
+    top = set(chart)
+    for forbidden in ("verdict", "conclusion", "jixiong", "ji_xiong", "judgement", "advice"):
+        assert forbidden not in top, (
+            f"六壬盘面出现了结论性字段 {forbidden!r} —— 盘面只给事实，结论留给 AI 层（RULE-008）"
+        )
+
+
+def test_liuren_meta_only_uses_zhongqi_not_jieqi(responses: dict[str, Any]) -> None:
+    """换将表必须只含**中气**，不得混入节气。
+
+    这是真实踩过的坑：月将随中气（冬至、大寒…）换，不随节气（立春、惊蛰…）换。
+    表里若混进节气，月将每月会有一半时间偏一位，**且不报错** ——
+    表现为"这张课看着挺正常，只是月将错了"。
+    """
+    meta = responses["LiurenMetaResponse"]
+    table = meta["yuejiang_table"]
+
+    assert len(table) == 12, f"十二中气各换一将，表应 12 条，实为 {len(table)}"
+    for zhongqi in ("冬至", "大寒", "雨水", "春分", "谷雨", "小满", "夏至",
+                    "大暑", "处暑", "秋分", "霜降", "小雪"):
+        assert zhongqi in table, f"换将表缺少中气 {zhongqi}"
+    for jieqi in ("立春", "惊蛰", "清明", "立夏", "芒种", "小暑",
+                  "立秋", "白露", "寒露", "立冬", "大雪", "小寒"):
+        assert jieqi not in table, f"换将表混入了节气 {jieqi} —— 月将依中气换，不依节气"
+
+    zhi = {p["ground"] for p in responses["LiurenChart"]["palaces"]}
+    assert set(table.values()) <= zhi, f"月将取值必须是十二支，实为 {set(table.values())}"
+    assert set(meta["yuejiang_names"]) == set(table.values()), (
+        "神将名表应与月将支一一对应"
+    )
+
+
+def test_liuren_meta_carries_domain_tables(responses: dict[str, Any]) -> None:
+    """起课所需的领域表必须由接口下发（RULE-005），且条数对得上。
+
+    月将表 / 寄宫表 / 天将表 / 九宗门都在前端**没有副本**，全靠接口。
+    这里核的是"表本身是否完整"：缺一条的表现不是报错，而是前端某一格空着。
+    """
+    meta = responses["LiurenMetaResponse"]
+    assert len(meta["jigong"]) == 10, "十天干各有一寄宫"
+    assert len(meta["guiren"]) == 10, "十天干各有昼夜二贵"
+    for gan, pair in meta["guiren"].items():
+        assert len(pair) == 2, f"{gan} 的昼夜贵应有两条，实为 {pair}"
+        assert pair[0] != pair[1], f"{gan} 的昼贵与夜贵不应相同"
+    assert len(meta["tianjiang_order"]) == 12, "十二天将"
+    assert len(meta["jiuzongmen"]) == 9, "九宗门"
+    assert set(meta["jiuzongmen"]) <= set(meta["jiuzongmen_note"]), (
+        "九宗门每条都应有口径说明"
+    )
+    assert meta["daytime_zhi"], "昼贵适用的占时支不应为空"
+    assert meta["schools"], "至少应有一个流派"
+
+
+def test_liuren_carries_uncertainties(responses: dict[str, Any]) -> None:
+    """未覆盖项必须如实带出，且盘面与元数据**同源**。
+
+    这是产品基线里"用户有权知道这份盘没考虑什么"的落点。
+    同源校验的意义：两处各写一份时，改了一处忘了另一处，
+    界面就会告诉用户"已覆盖"，而内核其实没算 —— 属于最不该有的假承诺。
+    """
+    chart = responses["LiurenChart"]
+    meta = responses["LiurenMetaResponse"]
+    assert chart["uncertainties"], "六壬盘面必须带出未覆盖项"
     assert chart["uncertainties"] == meta["uncertainties"], (
-        "排盘结果与 meta 的 uncertainties 不一致 —— 说明有两份文案在漂移"
+        "盘面与元数据的未覆盖项不同源 —— 一处改了另一处没改"
     )
+    assert chart["school_name"], "盘面应带上流派显示名"
+    assert chart["school"] in {s["id"] for s in meta["schools"]}
 
-
-def test_qimen_meta_covers_all_twenty_four_jieqi(responses: dict[str, Any]) -> None:
-    """局数表覆盖全部二十四节气，且每项三元、局数在 1~9。
-
-    局数表是领域数据（RULE-005），缺一个节气会让那一天排不出盘；
-    而前端不自己维护副本，所以这张表的完整性只能在这里守。
-    """
-    meta = responses["QimenMetaResponse"]
-    table = meta["jushu_table"]
-    assert len(table) == 24, f"局数表应覆盖二十四节气，实为 {len(table)} 个"
-    assert len(meta["yang_dun_jieqi"]) == 12
-    assert len(meta["yin_dun_jieqi"]) == 12
-    assert sorted(meta["yang_dun_jieqi"] + meta["yin_dun_jieqi"]) == sorted(table)
-    for jieqi, triple in table.items():
-        assert len(triple) == 3, f"{jieqi} 应有上/中/下三元的局数，实为 {triple}"
-        assert all(1 <= n <= 9 for n in triple), f"{jieqi} 局数越界：{triple}"
-
-
-def test_qimen_dingju_chain_is_self_consistent(responses: dict[str, Any]) -> None:
-    """定局链路自洽：局数表[节气][三元-1] 必须等于实排局数。
-
-    这是把「定局」这条推导链的**最后一跳**拿真值核一遍 ——
-    前面几步（节气、天数、三元）都对了、最后查表查错，结果同样是一张错盘，
-    而且错得毫无征兆。
-    """
-    dingju = responses["QimenDingju"]
-    table = responses["QimenMetaResponse"]["jushu_table"]
-    assert dingju["jieqi"] in table, f"实排节气 {dingju['jieqi']!r} 不在局数表里"
-    expected = table[dingju["jieqi"]][dingju["yuan"] - 1]
-    assert dingju["jushu"] == expected, (
-        f"{dingju['jieqi']} 的{dingju['yuan_label']}应为 {expected} 局，"
-        f"实排 {dingju['jushu']} 局"
-    )
-    # 阴阳遁与节气归属必须一致（阳遁节气表 / 阴遁节气表）
-    meta = responses["QimenMetaResponse"]
-    in_yang = dingju["jieqi"] in meta["yang_dun_jieqi"]
-    assert dingju["yang_dun"] is in_yang, (
-        f"{dingju['jieqi']} 的阴阳遁标记与节气归属表不符"
-    )
