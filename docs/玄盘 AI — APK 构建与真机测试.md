@@ -18,34 +18,46 @@
 
 ## 二、安装与真机测试
 
-### 2.0 本次构建产物（已实测）
+### 2.0 构建产物（均已实测）
 
-```
-BUILD SUCCESSFUL in 49m 5s
-661 actionable tasks: 328 executed, 333 up-to-date
-```
+**当前交付版本：域名版（推荐使用）**
+
+| 项 | 值 |
+|---|---|
+| 文件 | `dist/玄盘AI-v0.1.0-oc.apk` |
+| 大小 | 98,517,117 字节（约 94 MB） |
+| SHA-256 | `c2859ccc8e521e5592bd16e5c82fe829af1e1f6e1e1ea2052c40161e6edff58b` |
+| **内嵌后端** | **`http://oc.ayong.qzz.io:8360`**（已在 `assets/index.android.bundle` 内 grep 到） |
+| 构建结果 | `BUILD SUCCESSFUL in 1m 41s`（661 tasks: 27 executed / 634 up-to-date） |
+
+**历史版本：局域网 IP 版**（仅同网段可用，保留作兜底）
 
 | 项 | 值 |
 |---|---|
 | 文件 | `dist/玄盘AI-v0.1.0-release.apk` |
-| 大小 | 94.0 MB（98,517,157 字节） |
 | SHA-256 | `41a3a29404836b746d0c053a49453cb5fadb5e3e78c03a271c6463071b7075a9` |
+| 内嵌后端 | `http://192.168.57.10:8360` |
+| 构建结果 | `BUILD SUCCESSFUL in 49m 5s`（首次全量） |
+
+两个包的**其余属性完全相同**：
+
+| 项 | 值 |
+|---|---|
 | 包名 / 版本 | `com.xuanpan.ai` / versionName `0.1.0` (versionCode 1) |
 | 应用名 | 玄盘 AI |
 | minSdk / targetSdk | 24 (Android 7.0) / 34 |
 | 含 ABI | arm64-v8a(17)、armeabi-v7a(15)、x86(15)、x86_64(15)，共 62 个 `.so` |
 | JS 引擎 | Hermes 字节码（`assets/index.android.bundle`，1.95 MB，magic `c61fbc03`） |
-| 内嵌后端 | `http://192.168.57.10:8360`（bundle 内可 grep 到） |
 | 明文 HTTP | `usesCleartextTraffic=true` ✅ |
-| 签名 | APK Signature Scheme **v2**，证书 `CN=Android Debug`（debug keystore） |
+| 签名 | APK Signature Scheme **v2**，证书 `CN=Android Debug`（debug keystore，仅供测试分发） |
 | 权限 | CAMERA、INTERNET、ACCESS_NETWORK_STATE、READ_MEDIA_IMAGES、VIBRATE 等 |
 
 安装前自检（可选，确认传输未损坏）：
 
 ```bash
 # [Windows / Git Bash]
-sha256sum "D:/WorkBuddy/玄盘AI/dist/玄盘AI-v0.1.0-release.apk"
-# 应输出 41a3a29404836b746d0c053a49453cb5fadb5e3e78c03a271c6463071b7075a9
+sha256sum "D:/WorkBuddy/玄盘AI/dist/玄盘AI-v0.1.0-oc.apk"
+# 应输出 c2859ccc8e521e5592bd16e5c82fe829af1e1f6e1e1ea2052c40161e6edff58b
 ```
 
 ### 2.1 安装
@@ -61,21 +73,30 @@ adb install -r "D:/WorkBuddy/玄盘AI/dist/玄盘AI-v0.1.0-release.apk"
 
 > 若手机已装过同包名旧版且签名不同，先卸载：`adb uninstall com.xuanpan.ai`。
 
-### 2.2 测试前必须确认的三件事
+### 2.2 测试前必须确认的事
 
-APK 里的**后端地址是编译期内联的字面量**，不是运行时读取的——所以下面三条任何一条不满足，
-APP 打开后会直接报网络失败：
+APK 里的**后端地址是编译期内联的字面量**，不是运行时读取的 —— 所以下面几条任何一条不满足，
+APP 打开后会直接报网络失败。
+
+**本次内联的是域名 `http://oc.ayong.qzz.io:8360`，不是 IP。**
 
 | # | 条件 | 怎么确认 |
 |---|------|----------|
-| 1 | **手机与后端在同一局域网** | 手机连的 Wi-Fi 要能访问 `192.168.57.10` |
-| 2 | **后端容器在 8360 监听** | 手机浏览器打开 `http://192.168.57.10:8360/healthz`，应返回 200 |
-| 3 | **Windows 防火墙放行 8360 入站** | 本轮已配置（规则名 `Xuanpan API 8360`，入站/TCP 8360/域+专用+公用/仅本地子网）；若换网络配置文件需重新放行 |
+| 1 | **手机所在网络有 IPv6** | 该域名是 **AAAA-only（无 A 记录）**，只有 IPv6 才解析得出。家庭宽带 Wi-Fi 与 4G/5G 均具备 IPv6；**纯 IPv4 网络（部分公司网、部分公共 Wi-Fi）会直接解析失败** |
+| 2 | **后端容器在 8360 监听** | 手机浏览器打开 `http://oc.ayong.qzz.io:8360/healthz`，应返回 `{"status":"ok",...}` |
+| 3 | **域名指向本机当前 IPv6** | `oc.ayong.qzz.io` 由本机 ddns-go 每 300s 刷新（见 2.2.2）。本机 IPv6 是**隐私扩展地址会轮换**，由 ddns-go 跟随 |
+| 4 | **Windows 防火墙放行 8360 入站** | 已有两条规则：`Xuanpan API 8360`（仅本地子网，局域网用）与 `Xuanpan API 8360 (IPv6 Public)`（任意远程地址，公网 IPv6 用） |
 
 > 想换后端地址，不要改源码，用构建参数覆盖：
 > ```bash
-> API_BASE_URL=http://192.168.1.20:8360 bash apps/mobile/scripts/build-apk.sh
+> # 指回局域网 IP（手机与本机同网段时可用，且不依赖公网 IPv6）
+> API_BASE_URL=http://192.168.57.10:8360 bash apps/mobile/scripts/build-apk.sh
 > ```
+>
+> ⚠️ 改地址后**必须确认产物**：Gradle 的 `createBundleReleaseJsAndAssets` 任务**不把环境变量算作任务输入**，
+> 早期版本会出现「构建成功、日志全绿，但 APK 里嵌的还是上一版地址」（实测踩过：`630 up-to-date`、
+> 1m25s 就报 BUILD SUCCESSFUL，产物却指向旧 IP）。现脚本已内置**地址变更检测**与**交付前自检**，
+> 自检不过会以非零码退出，可直接信任脚本结论。
 
 ### 2.2.1 ⚠️ 多网段陷阱：本机有三个局域网 IP
 
@@ -118,6 +139,40 @@ API_BASE_URL=http://192.168.68.80:8360 bash apps/mobile/scripts/build-apk.sh
 
 增量构建（原生缓存已在）会明显快于首次的 49 分钟。
 
+### 2.2.2 域名接入（oc.ayong.qzz.io）
+
+本机 ddns-go（`D:\software\ddns-go\ddns-go.exe`，注册为 Windows 服务 `ddns-go`）维护两条 AAAA 记录：
+
+| 域名 | 取址网卡 | DNS 服务商 |
+|---|---|---|
+| `oc.ayong.qzz.io` | 「以太网」 | Cloudflare |
+| `oc.yongshengcloud.asia` | 「以太网 2」 | 阿里云 |
+
+四个必须知道的点：
+
+1. **纯 IPv6（AAAA-only）**：没有 A 记录，IPv4 解析不出来 —— 这是有意的，家宽没有公网 IPv4。
+2. **地址会轮换**：本机 IPv6 是隐私扩展地址（`UseTemporaryAddresses=Enabled`），RA 续期时后缀会变。
+   ddns-go 每 300s 同步、DNS TTL 300s，因此最坏存在约 10 分钟的窗口期。
+3. **改了配置必须重启服务**：ddns-go 只在**启动时**读配置。只改 yaml 不重启，进程内仍是旧配置
+   （实测：配置 10:31 改、进程 10:26 起，则改动完全不生效）。
+   ```bash
+   # 需管理员权限
+   Restart-Service ddns-go
+   ```
+4. **配置文件含明文凭证**（Cloudflare Token、阿里云 AccessKey）：
+   `C:\Users\anyong\.ddns_go_config.yaml`。分享日志或截图前务必脱敏。
+
+验证解析（**本机 UDP 53 被代理 TUN 劫持，普通查询会返回空，必须走 DoH**）：
+
+```bash
+curl -s -H "accept: application/dns-json" \
+  "https://cloudflare-dns.com/dns-query?name=oc.ayong.qzz.io&type=AAAA"
+```
+
+> 踩坑记录：`nslookup` 与 `Resolve-DnsName -Server 223.5.5.5` 在本机**一律返回空**，
+> 一度误判为「域名没配」。实际是 sing-tun 接管了 DNS 并屏蔽 AAAA（代理防 IPv6 泄漏的常规做法）。
+> 换 DoH 后立刻拿到正确结果。
+
 ### 2.3 地址是怎么进 APK 的
 
 `EXPO_PUBLIC_API_BASE_URL` 由 `babel-preset-expo` 在打包时**静态替换成字面量**
@@ -132,7 +187,14 @@ src/api/client.ts resolveBaseUrl() 三级优先： │
   3. DEFAULT_BASE_URL                            兜底
 ```
 
-构建后可用 `grep -c "192.168.57.10" index.android.bundle` 在产物里直接验证。
+构建后**必须验证产物里的地址**（原因见 2.2 的警告）：
+
+```bash
+# 从 APK 里解出 bundle 再查（Hermes 字节码中字符串仍是明文，可直接 grep）
+python -c "import zipfile;d=zipfile.ZipFile(r'app-release.apk').read('assets/index.android.bundle');print(d.count(b'oc.ayong.qzz.io:8360'))"
+```
+
+脚本第 8 步已内置同样的自检，失败时以非零码退出，因此**脚本报成功即可信任**。
 
 ---
 
@@ -229,10 +291,10 @@ cp android-legacy.toolchain.cmake.xuanpan-orig android-legacy.toolchain.cmake
 ## 四、构建脚本用法
 
 ```bash
-# 默认：arm64-v8a，后端 192.168.57.10:8360
+# 默认：arm64-v8a，后端 http://oc.ayong.qzz.io:8360（域名，由 ddns-go 维护）
 bash apps/mobile/scripts/build-apk.sh
 
-# 指定后端地址
+# 指定后端地址（例如改回局域网 IP）
 API_BASE_URL=http://192.168.1.20:8360 bash apps/mobile/scripts/build-apk.sh
 
 # 双架构
@@ -243,6 +305,9 @@ CLEAN=1 bash apps/mobile/scripts/build-apk.sh
 
 # 临时跳过 NDK 补丁（仅用于对比验证）
 NO_NDK_PATCH=1 bash apps/mobile/scripts/build-apk.sh
+
+# 强制重新打包 JS bundle（改了后端地址但想再确认一次时用）
+FORCE_BUNDLE=1 bash apps/mobile/scripts/build-apk.sh
 ```
 
 脚本固化了 6 项本机必需处理（漏一项就是一次失败构建）：
