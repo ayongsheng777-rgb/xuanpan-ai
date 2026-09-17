@@ -26,27 +26,34 @@
 
 ---
 
-## 2. 接手后要完成的两件事（阿勇的原话目标）
+## 2. 待完成事项（阿勇的原话目标）
 
 > 「整理项目，把此目录丢给另一个 workbuddy 账号后能继续完成『三式』和『择日决策』」
 
-这两项是**术数能力追赶**的剩余缺口，详见路线图 §3.5 / §3.6。当前**均未开始**，等待新账号实施。
+详见路线图 §3.5 / §3.6。**进展如下**：
 
-### 2.1 择日决策（优先级更高，性价比中等）
+| 事项 | 状态 | commit |
+|---|---|---|
+| 择日决策 | ✅ **已完成**（2026-09-17） | `b3831eb` 核心层 + `45c45a0` MCP 工具 |
+| 三式（奇门/六壬/太乙） | ⚪ **未开始**，等待实施 | — |
 
-**现状**：黄历模块 `packages/fortune-core/fortune_core/almanac.py` 已落地，能「查每日宜忌」，但还不能「反推吉日」。
+### 2.1 择日决策 ✅ 已完成（无需重做）
 
-**要做**：基于黄历宜忌 + 黄黑道 + 建除，做「吉日筛选」——给定事件（嫁娶/开业/动土/搬家…）与时间区间，返回候选吉日列表。
+**已交付**：`packages/fortune-core/fortune_core/zeri.py`
+（`evaluate_day` 单日评价 + `select_auspicious_days` 区间筛选，17 个事件，
+MCP 工具 `xuanpan_zeri`）。
 
-**硬约束（务必遵守）**：
-- 复用 `almanac.py` 已有接口（`getDayYi`/`getDayJi` 宜忌、`getDayTianShen` 黄黑道、`getZhiXing` 建除等 lunar-python 现成接口，**别自造历法**）
-- 遵循 RULE-001（确定性计算由代码完成）、RULE-006（流派规则模块化）、RULE-009（规则变更同步测试）
-- **必须标注流派不确定性**：择日规则流派纷纭（如「黄道吉日」各家口径不同），输出要像 `duangua.py` 那样带 `school` / `uncertainties` 字段，别输出绝对化「大吉日」
-- 参考既有 `duangua.py` 的「倾向非断语」风格（commit `a3ca381`）
+**接手时只需知道**（想扩展再看细节）：
+- 事件宜忌词目全部取自 lunar-python 真实词表，**改词目前先跑**
+  `python scripts/verify_zeri_table.py --check-veto`（会检出造词 / 死规则 / 同词宜忌冲突）
+- veto 采用「忌优先」；**不要**把「忌行丧 / 忌分居」加进嫁娶否决 ——
+  实测会误杀 37 天（占婚嫁吉日 14%），因为行丧与婚嫁无对应关系
+- 若要加**新事件**：改 `data/zeri_events.json` 的 events 段，并**同步更新
+  MCP 工具 docstring**（有测试守卫，漏更新会失败）
 
 ### 2.2 三式（奇门遁甲 / 大六壬 / 太乙神数）—— 长线，难度高
 
-**现状**：全行业空白，无开源 MCP 项目在做 `[推测]`。
+**现状**：全行业空白，无开源 MCP 项目在做 `[推测]`。**尚未开始**。
 
 **要做**：先攻克排盘算法（奇门定局/排盘、六壬天地盘/四课三传、太乙积年）。**建议先做奇门遁甲或大六壬二选一**，勿三个一起上。
 
@@ -66,7 +73,7 @@
 | 计算内核 | 自研 `packages/fortune-core`（Python 纯函数） | `packages/fortune-core/fortune_core` |
 | 历法引擎 | `lunar-python`（`sxtwl` 在 Py3.13 无 wheel，已弃） | — |
 | 存储 | **SQLite 单文件**（PostgreSQL/Redis/S3 只是报告 `[推测]`，未落地） | 根 `data/` 运行时产物 |
-| MCP 暴露层 | `services/mcp/server.py`，8 工具，stdio | `services/mcp` |
+| MCP 暴露层 | `services/mcp/server.py`，9 工具，stdio | `services/mcp` |
 | 识别 | 本地 CV（classical，零成本）默认；云端 opt-in | `services/vision` |
 
 🔴 **领域数据表在 `packages/fortune-core/data/`**，不是根 `data/`。
@@ -77,14 +84,15 @@
 packages/fortune-core/fortune_core/
   ├── bazi/        # 八字：chart / dynamics(大运流年) / shensha(18神煞) / strength(旺衰) / wuxing
   ├── liuyao/      # 六爻：gua / najia(纳甲) / zhuang(装卦)
-  ├── almanac.py   # 黄历（择日决策的基础，见 §2.1）
+  ├── almanac.py   # 黄历（查每日宜忌）
+  ├── zeri.py      # 择日决策（evaluate_day / select_auspicious_days，17 事件）
   ├── duangua.py   # 断卦层（duan_liuyao / duan_bazi，倾向+流派标注）
   ├── naming.py    # 姓名五格（康熙笔画 20794 字）
   ├── qian.py      # 灵签
   ├── compass.py / mountain24.py / fenjin120.py  # 罗盘二十四山/一百二十分金
   ├── schools.py   # 流派定义（RULE-006 模块化）
   └── context.py / exceptions.py / constants.py
-services/mcp/server.py   # 8 个 MCP 工具
+services/mcp/server.py   # 9 个 MCP 工具
 ```
 
 ---
@@ -119,7 +127,7 @@ services/mcp/server.py   # 8 个 MCP 工具
 
 ```bash
 # $PY = C:/Users/anyong/.workbuddy/binaries/python/envs/default/Scripts/python.exe（managed venv）
-# 全量测试（当前 ~786 passed）
+# 全量测试（当前 828 passed）
 "$PY" -m pytest
 
 # 分层

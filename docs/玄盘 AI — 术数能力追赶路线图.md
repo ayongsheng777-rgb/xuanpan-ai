@@ -35,13 +35,14 @@
 | **六爻** | 起卦 | ✅ | ✅ | ✅ | |
 | | **装卦**（纳甲/六亲/世应/六神/伏神/用神） | ❌ | ❌ | ✅ | 上次批次（f2b425a） |
 | | 断卦（吉凶断语） | ❌ | ❌ | ❌ | 属流派解读，见 §3.1 |
-| **黄历/择日** | 建除 / 二十八宿 / 黄黑道 / 冲煞 / 宜忌 | ❌ | ❌ | ✅ | 本次新增（复用 lunar-python） |
+| **黄历/择日** | 建除 / 二十八宿 / 黄黑道 / 冲煞 / 宜忌 | ❌ | ❌ | ✅ | 批次 3 新增（复用 lunar-python） |
+| | **择日决策**（给定事件反推吉日） | ❌ | ❌ | ✅ | 本次新增（b3831eb，17 事件 + 流派模块化） |
 | **灵签** | 抽签 | ✅ | ✅ | ✅ | |
 | **姓名** | 五格 / 笔画 | 🟡(字库 254 造假) | ✅(缺字报错) | ✅ | 字库缺口见 §3.4 |
 | **三式** | 奇门遁甲 / 大六壬 / 太乙 | ❌ | ❌ | ❌ | 全行业空白，见 §3.5 |
 
 **结论** `[已确认]`：本次追赶后，玄盘在「排盘 + 装卦 + 运程 + 神煞 + 黄历」五个维度已全面超过
-玄机阁与当前开源 MCP 项目的普遍水平。剩余空白集中在「断卦吉凶」与「三式」两块，均属高难或流派相关。
+玄机阁与当前开源 MCP 项目的普遍水平。剩余空白已收窄到**只剩「三式」一块**（断卦吉凶与择日决策均已补齐），属高难算法攻坚。
 
 ---
 
@@ -84,7 +85,7 @@
 | 断卦层 | `a3ca381` | `duangua.py`：六爻/八字吉凶倾向 + 流派标注 | 10 例 |
 | MCP 暴露层 | `1f53880` | `services/mcp/`：8 工具，回 structuredContent | 10 例 |
 
-**测试基线演进**：626 → 723 → 754 → 765 → **~786**，全程无回归。
+**测试基线演进**：626 → 723 → 754 → 765 → 786 → **828**，全程无回归。
 
 ---
 
@@ -107,8 +108,9 @@
 
 ### 3.3 MCP 暴露层 ✅ 已完成（commit `1f53880`）
 
-`services/mcp/server.py` 已落地：8 个工具（bazi/liuyao/duan_liuyao/duan_bazi/almanac/name/qian/compass），
+`services/mcp/server.py` 已落地：**9 个工具**（bazi/liuyao/duan_liuyao/duan_bazi/almanac/zeri/name/qian/compass），
 回 `structuredContent`、纯 stdio 不弹浏览器、领域异常转 ToolError。测试走真实 stdio 子进程。
+（`zeri` 于 commit `45c45a0` 补入）
 
 ### 3.4 康熙笔画字库扩充 ✅ 已完成（commit `17ecfd4`）
 
@@ -120,24 +122,41 @@
 全行业空白，无开源 MCP 项目在做 `[推测]`。价值极高但需先攻克排盘算法，
 不是短期能落地的。**建议挂起**，等前几项稳定后再立项。
 
-### 3.6 择日深化（黄历已就绪，缺「择日决策」）🟡 中价值
+### 3.6 择日决策 ✅ 已完成（commit `b3831eb`）
 
 黄历能「查每日宜忌」，但还不能「择吉日」——即给定事件（嫁娶/开业/动土）反推吉日。
+本次补齐：`packages/fortune-core/fortune_core/zeri.py`。
 
-- **建议**：基于 `almanac.py` 的宜忌 + 黄黑道 + 建除，做「吉日筛选」，
-  同样标注「属流派规则，仅供参考」
+- **接口**：`evaluate_day()`（单日评价，含被否决原因）+ `select_auspicious_days()`（区间筛选）
+- **17 个事件**：嫁娶 / 订婚纳采 / 开业开市 / 动土起基 / 入宅移徙 / 安床 / 祭祀祈福 /
+  出行 / 求医问诊 / 安葬 / 开光 / 修造装修 / 入学 / 赴任就职 / 栽种 / 上梁立柱 / 作灶安灶
+- **复用而非自造**：每一日的宜忌 / 黄黑道 / 二十八宿 / 建除 / 冲煞全部取自
+  `calculate_almanac()`，本层不推算任何历法值（RULE-001）
+- **流派模块化**（RULE-006）：建除分档、各项权重、分级阈值、veto 项全部放在
+  `data/zeri_events.json` 的 `schools` 段，可整体替换；结果始终带
+  `school` + `uncertainties`（RULE-006）
+- **输出分级非断语**：「吉 / 次吉 / 平 / 不宜」四级 + `reasons` 逐项列明分数来源，
+  不输出「大吉日」这类绝对化结论，与 `duangua.py` 的「倾向非断语」风格一致
+- **两条关键实测结论**（决定了规则设计，勿凭直觉推翻）：
+  1. 事件词目**全部**取自 lunar-python 真实发出的宜忌词（730 天实测：109 宜词 / 79 忌词）。
+     凭空造词不会报错，只会让规则**静默失效** → 配套 `scripts/verify_zeri_table.py`
+     做词目真实性 + 死规则 + 冲突三项校验
+  2. 「同词既宜又忌」的真冲突实测 **0 例** → 「忌优先」veto 无歧义；
+     但**未**把「忌行丧 / 忌分居」计入嫁娶否决 —— 实测会误杀 37 天（占婚嫁吉日 14%）
+- **MCP 暴露**：第 9 个工具 `xuanpan_zeri`（commit `45c45a0`）
+- **测试**：新增 42 + 6 例，全部通过变异验证（故意改坏实现 6 处 + docstring 漂移 1 处，均被捕获）
 
 ---
 
-## 4. 建议的下一批次（供阿勇定方向）
+## 4. 剩余批次（供阿勇定方向）
 
-前三项已落地（MCP 暴露层 / 康熙笔画字库 / 断卦层）。剩余按性价比排序：
+已落地：MCP 暴露层 / 康熙笔画字库 / 断卦层 / **择日决策**。剩余按性价比排序：
 
 | 优先级 | 事项 | 成本 | 杠杆 |
 |---|---|---|---|
-| 1 | **择日决策**（§3.6） | 中 | 中：基于黄历宜忌做「吉日筛选」 |
-| 2 | 神煞吉凶分级（§3.2） | 低 | 中（但建议留给 AI 层） |
-| 3 | **SKILL.md 打包**（让仓库同时是 MCP Server + Agent Skill） | 低 | 高：抄 suanming-mcp 的 Agent 入口 |
+| 1 | **SKILL.md 打包**（让仓库同时是 MCP Server + Agent Skill） | 低 | 高：抄 suanming-mcp 的 Agent 入口 |
+| 2 | 神煞吉凶分级（§3.2） | 低 | 中（不建议做：宜留给 AI 层） |
+| 3 | 择日进阶规则（三煞 / 太岁 / 五黄 / 按人八字择日） | 中 | 中：择日决策已可用的自然延伸 |
 | 4 | 三式（§3.5） | 极高 | 长线，挂起 |
 
 ---
@@ -145,7 +164,7 @@
 ## 5. 验证与复现
 
 ```bash
-# 全量测试（当前 ~786 passed）
+# 全量测试（当前 828 passed）
 python -m pytest
 
 # 单项复现
@@ -153,5 +172,9 @@ python -m pytest packages/fortune-core/tests/test_liuyao_zhuang.py      # 六爻
 python -m pytest packages/fortune-core/tests/test_bazi_shensha_yun.py   # 八字神煞/大运
 python -m pytest packages/fortune-core/tests/test_almanac.py            # 黄历
 python -m pytest packages/fortune-core/tests/test_duangua.py            # 断卦层
+python -m pytest packages/fortune-core/tests/test_zeri.py               # 择日决策
 python -m pytest tests/test_mcp_server.py                               # MCP 暴露层
+
+# 择日规则表完整性校验（词目真实性 + 死规则 + 同词宜忌冲突）
+python scripts/verify_zeri_table.py --check-veto
 ```
