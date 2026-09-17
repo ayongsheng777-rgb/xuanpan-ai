@@ -94,7 +94,26 @@ def _build_ai_router(cfg: Settings):  # type: ignore[no-untyped-def]
 
 def _register_error_handlers(app: FastAPI) -> None:
     """领域异常 → HTTP 状态码的唯一映射点。"""
+    from fortune_core import FortuneError
+
     from .context_builder import ContextBuildError
+
+    @app.exception_handler(FortuneError)
+    async def _domain_error(request: Request, exc: FortuneError) -> JSONResponse:
+        """内核抛出的领域错误 → 400。
+
+        为什么必须单独注册：`FortuneError` 继承 `Exception`，**不是 `ValueError`**。
+        下面那个 `ValueError` 处理器抓不到它 —— 若不注册，
+        「未注册的择日事件」「未注册的流派」这类明显的调用方错误会变成 500，
+        而 500 的语义是「服务坏了」，会把用户引向完全错误的排查方向。
+
+        注册顺序不影响匹配：Starlette 按异常的 MRO 找**最具体**的处理器，
+        所以 `ContextBuildError`（`FortuneError` 的子类）仍走它自己的分支。
+        """
+        return JSONResponse(
+            status_code=400,
+            content={"detail": str(exc), "error": type(exc).__name__},
+        )
 
     @app.exception_handler(ContextBuildError)
     async def _build_error(request: Request, exc: ContextBuildError) -> JSONResponse:

@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+from datetime import date
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -235,9 +236,143 @@ class DeletedResponse(ApiModel):
     session_id: str
 
 
+# ======================================================================
+# 日历域：黄历 / 择日
+# ======================================================================
+#
+# 这三组模型**刻意不复用 `LayerPreview`**。`LayerPreview` 的语义是
+# 「某个会话模块的两层结果」，而黄历与择日是**无状态查询**：
+# 没有输入上下文、不落库、不进 `FortuneContext`。
+# 硬塞进去会让「预览与报告必然一致」这条不变量变成空话 —— 因为它们根本没有报告。
+#
+# 但**两层结构（facts / tradition）保持一致**，前端渲染逻辑仍可复用。
+
+
+class AlmanacDay(ApiModel):
+    """单日黄历（两层）。"""
+
+    facts: dict[str, Any]
+    tradition: dict[str, Any]
+
+
+class AlmanacRange(ApiModel):
+    """区间黄历。
+
+    逐日返回两层结果而非只给列表 —— 前端需要按天渲染宜忌，
+    在服务端已算好的情况下再让前端拼一次属于重复劳动。
+    """
+
+    start: str
+    end: str
+    days: list[AlmanacDay]
+
+
+class ZeriEvent(ApiModel):
+    """可择日事件（供 UI 渲染选择器）。"""
+
+    event: str
+    label: str
+    yi: list[str]
+    ji: list[str]
+    note: str = ""
+
+
+class ZeriEventsResponse(ApiModel):
+    events: list[ZeriEvent]
+    schools: list[dict[str, Any]]
+
+
+class ZeriSelect(ApiModel):
+    """择日筛选请求。
+
+    日期用 `date` 而非 `str` —— 让 pydantic 在边界就把非法格式挡成 422，
+    而不是把它带进内核再抛异常。**区间上限不在这一层校验**：
+    上限由内核的 `MAX_RANGE_DAYS` 定义，这里重复一份必然漂移。
+    """
+
+    event: str
+    start: date
+    end: date
+    school: str = "default"
+    shengxiao: str | None = Field(default=None, description="当事人属相，用于排除冲煞日")
+    limit: int = Field(default=10, ge=0, le=200, description="最多返回候选数，0 表示不限")
+    include_unfavorable: bool = Field(
+        default=False, description="是否连带返回被否决的日子（用于解释，不用于推荐）"
+    )
+
+
+class ZeriDayResponse(ApiModel):
+    """单日择日评价结果。
+
+    **刻意不拆 facts / tradition 两层**：`ZeriDay` 本身就是"事实与判断混合"
+    （干支、建除、宿是 FACT；score / grade / veto 是规则推导）。
+    硬拆只会让一条记录散成两半，读起来更费劲 —— 对称性不是目的，可读性才是。
+    """
+
+    day: dict[str, Any]
+    event_label: str
+    school: str
+    school_name: str
+    event_note: str = Field(
+        default="", description="该事件的流派备注，取自规则表（非接口层编写）"
+    )
+
+
+class ZeriResultResponse(ApiModel):
+    """区间筛选结果（两层）。"""
+
+    facts: dict[str, Any]
+    tradition: dict[str, Any]
+
+
+# ======================================================================
+# 断卦
+# ======================================================================
+
+
+class DuanLiuyaoRequest(LiuyaoInput):
+    """六爻断卦请求 = 起卦输入 + 断卦参数。
+
+    为什么不直接往 `LiuyaoInput` 加这三个字段：`/calc/liuyao` 的预览
+    **不需要**主题与起卦日（它只起卦、不装卦）。加在基类上会让那两个字段
+    出现在一个用不到它们的接口里，读者会误以为它们在那里有作用。
+    """
+
+    topic: str | None = Field(
+        default=None, description="占问类别，决定用神取用（取值见 /meta/question-categories）"
+    )
+    gender: Literal["male", "female"] | None = Field(
+        default=None, description="婚姻类占问需传：男占妻看妻财、女占夫看官鬼"
+    )
+    cast_date: date | None = Field(
+        default=None,
+        description="起卦日（决定日辰与月令），省略为今天。**补录隔夜的卦必须填**，"
+        "否则会按今天的日辰算旺衰 —— 结论看似正常，依据却全错。",
+    )
+
+
+class DuanResponse(ApiModel):
+    """吉凶倾向结果。
+
+    四个**所有断卦共有**的字段放在顶层做稳定契约，各自差异化的细节
+    （六爻的用神/世爻、八字的大运逐运倾向）放 `detail` 透传。
+    这样前端可以先统一渲染"倾向 + 依据 + 流派标注"，
+    再按术式补细节，而不是对每个术式写一套解析。
+    """
+
+    verdict: str
+    reasons: list[str]
+    school: str
+    uncertainties: list[str]
+    detail: dict[str, Any] = Field(default_factory=dict)
+
+
 __all__ = [
     "ApiModel", "SessionCreate", "CompassInput", "BaziInput", "LiuyaoInput",
     "QianInput", "NamingInput", "InputPatch", "CompassConfirm",
     "ReportRequest", "AskRequest",
     "SessionCreated", "ScanAccepted", "LayerPreview", "DeletedResponse",
+    "AlmanacDay", "AlmanacRange", "ZeriEvent", "ZeriEventsResponse",
+    "ZeriSelect", "ZeriDayResponse", "ZeriResultResponse",
+    "DuanLiuyaoRequest", "DuanResponse",
 ]
