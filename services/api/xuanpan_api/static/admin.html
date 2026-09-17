@@ -209,7 +209,7 @@
     <section id="view-lab" class="hidden">
       <div class="banner info">
         这里是**只读试算台**：直接调用公开的 <code>/api/v1/almanac</code>、<code>/zeri</code>、<code>/duan</code>、
-        <code>/qimen</code>
+        <code>/calc</code>、<code>/qimen</code>、<code>/liuren</code>、<code>/taiyi</code>
         接口，用来看清服务端实际算出了什么。不做任何写操作。
       </div>
 
@@ -290,6 +290,92 @@
             <div><label>月将表 / 十干寄宫 / 九宗门（只读，来自接口）</label><pre class="out" id="lrMeta"></pre></div>
           </div>
           <pre class="out hidden" id="lrOut"></pre>
+        </div>
+
+        <div class="card">
+          <!-- 太乙是**年局（岁计）**：输入是年份，不是时刻 —— 与奇门/六壬刚好相反。
+               这里刻意不给 datetime-local：给了就会让人以为太乙盘随时辰而变，
+               而它不会。默认值由 initLab() 填当前年份。 -->
+          <h2>太乙神数（年局）</h2>
+          <div class="row">
+            <div><label>年份（公元）</label><input id="tyYear" type="number" step="1"></div>
+            <div><label>流派</label><select id="tySchool"></select></div>
+            <div class="shrink"><button class="btn" id="tyRun">起局</button></div>
+          </div>
+          <div class="row mt">
+            <div><label>太乙宫号表 / 十六神落宫 / 值事八门（只读，来自接口）</label><pre class="out" id="tyMeta"></pre></div>
+          </div>
+          <pre class="out hidden" id="tyOut"></pre>
+        </div>
+
+        <div class="card">
+          <h2>黄历区间</h2>
+          <!-- 与「黄历」单日查询同一个接口族：区间逐日返回，
+               适合核对「同一事件连续几天怎么变」。 -->
+          <div class="row">
+            <div><label>起始</label><input id="almStart" type="date"></div>
+            <div><label>结束</label><input id="almEnd" type="date"></div>
+            <div class="shrink"><button class="btn" id="almRangeRun">逐日查询</button></div>
+          </div>
+          <pre class="out hidden" id="almRangeOut"></pre>
+        </div>
+
+        <div class="card">
+          <h2>择日单日评价</h2>
+          <!-- 与「择日筛选」的区别：这边是**指定某一天**问「行不行」，
+               会连否决原因一起给出。事件列表与筛选面板共用一份（同一个下拉的数据源）。 -->
+          <div class="row">
+            <div><label>事件</label><select id="zevEvent"></select></div>
+            <div><label>日期</label><input id="zevDate" type="date"></div>
+            <div class="shrink"><button class="btn" id="zevRun">评价</button></div>
+          </div>
+          <pre class="out hidden" id="zevOut"></pre>
+        </div>
+
+        <div class="card">
+          <h2>姓名分析</h2>
+          <!-- 笔画取值与三才体系是流派做法之一，响应里有 uncertainties，
+               这里原样展示，不做任何「看起来更合理」的修饰。 -->
+          <div class="row">
+            <div><label>姓名</label><input id="nmName" value="张伟"></div>
+            <div class="shrink"><button class="btn" id="nmRun">分析</button></div>
+          </div>
+          <pre class="out hidden" id="nmOut"></pre>
+        </div>
+
+        <div class="card">
+          <h2>求签</h2>
+          <!-- seed 决定签号 —— 同一个 seed 必须复现同一支签，这是可验证性的前提。 -->
+          <div class="row">
+            <div><label>签库</label><select id="qqSet"></select></div>
+            <div><label>随机种子（整数）</label><input id="qqSeed" type="number" step="1" value="1"></div>
+            <div class="shrink"><button class="btn" id="qqRun">抽签</button></div>
+          </div>
+          <pre class="out hidden" id="qqOut"></pre>
+        </div>
+
+        <div class="card">
+          <h2>六爻起卦（只排盘）</h2>
+          <!-- 与「六爻断卦」的区别：这边只出卦象与动爻，不带吉凶倾向。
+               想看断卦用上面那张卡。 -->
+          <div class="row">
+            <div><label>六爻数值（自下而上，逗号分隔）</label><input id="lcYao" value="7,8,9,6,7,8"></div>
+            <div class="shrink"><button class="btn" id="lcRun">排盘</button></div>
+          </div>
+          <pre class="out hidden" id="lcOut"></pre>
+        </div>
+
+        <div class="card">
+          <h2>坐向计算</h2>
+          <!-- 罗盘识别管线的最后一步：把度数/坐山映射成二十四山。
+               填坐山时按坐山算，否则按度数算 —— 两者都给时以坐山为准，
+               避免「填了名字却被度数覆盖」这种静默行为。 -->
+          <div class="row">
+            <div><label>坐山（如 子 / 乙，可空）</label><input id="cpSit" placeholder="留空则按度数"></div>
+            <div><label>度数（0-360，可空）</label><input id="cpDeg" type="number" step="0.1" value="100"></div>
+            <div class="shrink"><button class="btn" id="cpRun">换算</button></div>
+          </div>
+          <pre class="out hidden" id="cpOut"></pre>
         </div>
       </div>
     </section>
@@ -613,17 +699,36 @@ async function initLab() {
   $('zeriStart').value = localDate(start);
   $('zeriEnd').value = localDate(end);
   $('lyDate').value = localDate(start);
+  $('almStart').value = localDate(start);
+  $('almEnd').value = localDate(new Date(Date.now() + 6 * 864e5));
+  $('zevDate').value = localDate(start);
 
   $('zeriZodiac').innerHTML = '<option value="">（不指定）</option>' +
     ZODIAC.map(function (z) { return '<option value="' + z + '">' + z + '</option>'; }).join('');
 
   try {
     const ev = await publicApi('/api/v1/zeri/events');
-    $('zeriEvent').innerHTML = ev.events.map(function (e) {
+    const opts = ev.events.map(function (e) {
       return '<option value="' + esc(e.event) + '">' + esc(e.label) + '（' + esc(e.event) + '）</option>';
     }).join('');
+    $('zeriEvent').innerHTML = opts;
+    // 单日评价与筛选共用同一份事件表：同一份数据源，不在页面上放两份。
+    $('zevEvent').innerHTML = opts;
   } catch (err) {
     $('zeriEvent').innerHTML = '<option>读取失败</option>';
+    $('zevEvent').innerHTML = '<option>读取失败</option>';
+  }
+
+  try {
+    const qs = await publicApi('/api/v1/meta/qian-sets');
+    $('qqSet').innerHTML = qs.sets.map(function (s) {
+      // demo 标记进 title：演示签库是自撰样例，不是传世签文，说清楚免得被当真。
+      var tag = s.demo ? '（演示）' : '';
+      return '<option value="' + esc(s.set_id) + '" title="' + esc(s.note || '') + '">' +
+        esc(s.name) + tag + ' · ' + esc(String(s.total)) + ' 签</option>';
+    }).join('');
+  } catch (err) {
+    $('qqSet').innerHTML = '<option value="demo_guanyin">演示签库（自撰样例）</option>';
   }
 
   try {
@@ -668,6 +773,28 @@ async function initLab() {
   } catch (err) {
     $('lrSchool').innerHTML = '<option value="default">通行本</option>';
     $('lrMeta').textContent = '六壬元数据读取失败';
+  }
+
+  // 太乙：年份输入（不是时刻）。默认填当前年，避免空框点按钮时语义含糊。
+  $('tyYear').value = String(new Date().getFullYear());
+  try {
+    const ty = await publicApi('/api/v1/taiyi/meta');
+    $('tySchool').innerHTML = ty.schools.map(function (s) {
+      // note 进 title：两派积年差 60（一甲子），会让落宫/文昌/局数/值事门全变。
+      // 不点明用哪派，数字对不上任何一本书。
+      return '<option value="' + esc(s.id) + '" title="' + esc(s.note) + '">' +
+        esc(s.name) + '（积年基数 ' + esc(String(s.jiyan_base)) + '）</option>';
+    }).join('');
+    // 只展示三张最易被问倒的表：宫号表（与洛书错位，最易踩坑）、
+    // 十六神落宫、值事八门本位。全部领域表都铺开会淹没重点。
+    $('tyMeta').textContent = JSON.stringify({
+      '宫号表（🔴与洛书逐宫错位）': ty.palace_gua,
+      '十六神落宫': ty.shen_palace,
+      '值事八门（顺序/本位）': { order: ty.bamen_order, benwei: ty.bamen_benwei },
+    }, null, 1);
+  } catch (err) {
+    $('tySchool').innerHTML = '<option value="default">太乙金镜式（默认）</option>';
+    $('tyMeta').textContent = '太乙元数据读取失败';
   }
 }
 
@@ -759,6 +886,117 @@ function bindLab() {
         method: 'POST', body: JSON.stringify(payload),
       }));
     } catch (err) { $('lrOut').textContent = '错误：' + err.detail; show($('lrOut')); }
+  });
+
+  $('tyRun').addEventListener('click', async function () {
+    const y = parseInt($('tyYear').value, 10);
+    // 年份非数字时**不发请求**：接口会把 NaN 变成 422，
+    // 那串 JSON 对看调试台的人毫无信息量。
+    if (!Number.isFinite(y)) {
+      $('tyOut').textContent = '错误：请先填写年份（太乙年局以年为最小单位）';
+      show($('tyOut'));
+      return;
+    }
+    const payload = { year: y, school: $('tySchool').value };
+    try {
+      dump($('tyOut'), await publicApi('/api/v1/taiyi/cast', {
+        method: 'POST', body: JSON.stringify(payload),
+      }));
+    } catch (err) { $('tyOut').textContent = '错误：' + err.detail; show($('tyOut')); }
+  });
+
+  $('almRangeRun').addEventListener('click', async function () {
+    const s = $('almStart').value;
+    const e = $('almEnd').value;
+    if (!s || !e) {
+      $('almRangeOut').textContent = '错误：请先填起止日期（区间逐日，两个都不能空）';
+      show($('almRangeOut'));
+      return;
+    }
+    try {
+      dump($('almRangeOut'), await publicApi('/api/v1/almanac/range' + '?start=' + encodeURIComponent(s) + '&end=' + encodeURIComponent(e)));
+    } catch (err) { $('almRangeOut').textContent = '错误：' + err.detail; show($('almRangeOut')); }
+  });
+
+  $('zevRun').addEventListener('click', async function () {
+    const ev = $('zevEvent').value;
+    const d = $('zevDate').value;
+    if (!ev || !d) {
+      $('zevOut').textContent = '错误：请先选事件与日期';
+      show($('zevOut'));
+      return;
+    }
+    try {
+      dump($('zevOut'), await publicApi('/api/v1/zeri/evaluate' + '?event=' + encodeURIComponent(ev) + '&date=' + encodeURIComponent(d)));
+    } catch (err) { $('zevOut').textContent = '错误：' + err.detail; show($('zevOut')); }
+  });
+
+  $('nmRun').addEventListener('click', async function () {
+    const name = $('nmName').value.trim();
+    if (!name) {
+      $('nmOut').textContent = '错误：请先填写姓名';
+      show($('nmOut'));
+      return;
+    }
+    try {
+      dump($('nmOut'), await publicApi('/api/v1/calc/naming', {
+        method: 'POST', body: JSON.stringify({ name: name }),
+      }));
+    } catch (err) { $('nmOut').textContent = '错误：' + err.detail; show($('nmOut')); }
+  });
+
+  $('qqRun').addEventListener('click', async function () {
+    const seed = parseInt($('qqSeed').value, 10);
+    if (!Number.isFinite(seed)) {
+      $('qqOut').textContent = '错误：请先填整数随机种子';
+      show($('qqOut'));
+      return;
+    }
+    try {
+      dump($('qqOut'), await publicApi('/api/v1/calc/qian', {
+        method: 'POST', body: JSON.stringify({ seed: seed, set_id: $('qqSet').value }),
+      }));
+    } catch (err) { $('qqOut').textContent = '错误：' + err.detail; show($('qqOut')); }
+  });
+
+  $('lcRun').addEventListener('click', async function () {
+    const values = $('lcYao').value.split(',').map(function (x) { return parseInt(x.trim(), 10); });
+    if (values.some(function (v) { return !Number.isFinite(v); })) {
+      $('lcOut').textContent = '错误：六爻数值必须是整数（自下而上，逗号分隔）';
+      show($('lcOut'));
+      return;
+    }
+    try {
+      dump($('lcOut'), await publicApi('/api/v1/calc/liuyao', {
+        method: 'POST', body: JSON.stringify({ yao_values: values, method: 'yao' }),
+      }));
+    } catch (err) { $('lcOut').textContent = '错误：' + err.detail; show($('lcOut')); }
+  });
+
+  $('cpRun').addEventListener('click', async function () {
+    const sit = $('cpSit').value.trim();
+    const degRaw = $('cpDeg').value.trim();
+    const payload = {};
+    if (sit) {
+      payload.sitting = sit;
+    } else if (degRaw !== '') {
+      const deg = parseFloat(degRaw);
+      if (!Number.isFinite(deg)) {
+        $('cpOut').textContent = '错误：度数必须是数字';
+        show($('cpOut'));
+        return;
+      }
+      payload.degree = deg;
+    } else {
+      $('cpOut').textContent = '错误：请填坐山或度数（二选一，坐山优先）';
+      show($('cpOut'));
+      return;
+    }
+    try {
+      dump($('cpOut'), await publicApi('/api/v1/calc/compass', {
+        method: 'POST', body: JSON.stringify(payload),
+      }));
+    } catch (err) { $('cpOut').textContent = '错误：' + err.detail; show($('cpOut')); }
   });
 }
 

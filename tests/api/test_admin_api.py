@@ -272,11 +272,18 @@ class TestAdminPage:
         html = unlocked.get("/admin").text
         for path in (
             "/api/v1/almanac/day",
+            "/api/v1/almanac/range",
             "/api/v1/zeri/select",
+            "/api/v1/zeri/evaluate",
             "/api/v1/duan/liuyao",
             "/api/v1/calc/bazi",
+            "/api/v1/calc/naming",
+            "/api/v1/calc/qian",
+            "/api/v1/calc/liuyao",
+            "/api/v1/calc/compass",
             "/api/v1/qimen/pan",
             "/api/v1/liuren/cast",
+            "/api/v1/taiyi/cast",
         ):
             assert re.search(rf"""['"]{re.escape(path)}['"]""", html), (
                 f"试算台缺少 {path} 的入口"
@@ -298,6 +305,20 @@ class TestAdminPage:
             "qmDt", "qmSchool", "qmRun", "qmOut",
             # 六壬
             "lrDt", "lrSchool", "lrRun", "lrMeta", "lrOut",
+            # 太乙（年局：输入是年份，不是时刻）
+            "tyYear", "tySchool", "tyRun", "tyMeta", "tyOut",
+            # 黄历区间
+            "almStart", "almEnd", "almRangeRun", "almRangeOut",
+            # 择日单日评价
+            "zevEvent", "zevDate", "zevRun", "zevOut",
+            # 姓名分析
+            "nmName", "nmRun", "nmOut",
+            # 求签
+            "qqSet", "qqSeed", "qqRun", "qqOut",
+            # 六爻起卦（只排盘）
+            "lcYao", "lcRun", "lcOut",
+            # 坐向计算
+            "cpSit", "cpDeg", "cpRun", "cpOut",
         ):
             assert f'id="{element_id}"' in html, f"试算台缺少控件 {element_id}"
 
@@ -333,6 +354,10 @@ class TestPublicRoutesUnaffected:
         assert unlocked.get("/api/v1/liuren/meta").status_code == 200
         assert unlocked.post("/api/v1/liuren/cast", json={
             "dt": "2026-09-17T10:00:00",
+        }).status_code == 200
+        assert unlocked.get("/api/v1/taiyi/meta").status_code == 200
+        assert unlocked.post("/api/v1/taiyi/cast", json={
+            "year": 1972,
         }).status_code == 200
 
     def test_healthz_still_open(self, unlocked: TestClient) -> None:
