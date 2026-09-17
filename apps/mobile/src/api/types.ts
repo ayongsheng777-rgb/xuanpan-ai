@@ -669,3 +669,154 @@ export interface QimenCastRequest {
   school?: string;
   day_boundary?: 'zi' | 'early_zi';
 }
+// ======================================================================
+// 大六壬（三式之二）
+// ======================================================================
+
+/**
+ * 一课。
+ *
+ * 第一课的 `lower` 是日干**寄宫支**（甲寄寅 → `寅`），它决定取哪一宫的上神；
+ * 而 `lower_label` 是**日干本身**（`甲`），界面显示的是它，五行也按它取。
+ * 两者不可互换 —— `lower` 用来取上神，`lower_label` 用来展示与判五行。
+ */
+export interface LiurenLesson {
+  index: number;
+  name: string;
+  upper: string;
+  lower: string;
+  /** 下神的展示名：第一课是日干，其余是地支 */
+  lower_label: string;
+  upper_element: string;
+  /** 第一课要按**日干五行**取，不能按寄宫支五行 */
+  lower_element: string;
+  /** 是否为初传所出的一课（界面靠它高亮「三传从哪来」） */
+  is_ke: boolean;
+  /** 下贼上 / 上克下 / null */
+  ke_kind: string | null;
+}
+
+/** 一宫：地盘支、其上的天盘支、以及该天盘支所带的天将。 */
+export interface LiurenPalace {
+  ground: string;
+  heaven: string;
+  general: string | null;
+  /**
+   * 天将**自身的固有吉凶属性**（六吉六凶）——
+   * 是"这个天将是什么"，不是"你问的这件事怎么样"。
+   */
+  general_jixiong: '吉' | '凶' | null;
+  is_guiren_ground: boolean;
+}
+
+/**
+ * 一传。
+ *
+ * `dun_gan` 为 null 表示该支**落旬空**（本旬没有配到天干）——
+ * 这是**领域信号**，不是数据缺失。界面应显示为「空」，
+ * 不能补一个默认天干（那等于把空亡抹掉）。
+ */
+export interface LiurenChuan {
+  /** 初传 / 中传 / 末传 */
+  position: string;
+  zhi: string;
+  general: string | null;
+  dun_gan: string | null;
+  element: string;
+}
+
+/** 贵人：昼/夜贵、落在地盘哪一宫、天将顺布还是逆布。 */
+export interface LiurenGuiren {
+  zhi: string;
+  is_day: boolean;
+  /** 昼贵 / 夜贵 */
+  kind: string;
+  /** 贵人所临的**地盘**宫 */
+  ground: string;
+  shun: boolean;
+  /** 顺布 / 逆布 */
+  direction: string;
+}
+
+/**
+ * 一张大六壬课。
+ *
+ * 与奇门一样是**扁平结构**：月将、四课、三传、十二宫都在顶层，
+ * 不分 facts / tradition 两层 —— 六壬当前只有确定性的盘面事实。
+ */
+export interface LiurenChart {
+  solar_datetime: string;
+  day_ganzhi: string;
+  day_gan: string;
+  day_zhi: string;
+  /** 占时支 */
+  hour_zhi: string;
+  /** 月将支 */
+  month_general: string;
+  /** 神将名（登明 / 河魁 …） */
+  month_general_name: string;
+  month_general_label: string;
+  /** 换将所依的**中气**（不是节气） */
+  zhongqi: string;
+  zhongqi_time: string;
+  guiren: LiurenGuiren;
+  /** 四课 */
+  lessons: LiurenLesson[];
+  /** 十二宫，按地支 子~亥 排好；前端只需按十二宫方图摆放 */
+  palaces: LiurenPalace[];
+  /** 初 / 中 / 末三传 */
+  chuan: LiurenChuan[];
+  /** 取传所用宗门（九宗门之一） */
+  chuanke: string;
+  /** 该宗门的口径说明 */
+  chuanke_note: string;
+  xun_kong: string[];
+  yima: string;
+  school: string;
+  school_name: string;
+  /** 本版**未覆盖项**，界面应如实展示，不得省略 */
+  uncertainties: string[];
+}
+
+export interface LiurenSchool {
+  id: string;
+  name: string;
+  note: string;
+}
+
+/**
+ * 起课界面需要的静态元数据。
+ *
+ * 月将表 / 寄宫表 / 天将名目都由接口返回而**不是前端自己算**：
+ * 它们是领域数据（RULE-005），前端存一份必然与内核漂移，
+ * 而漂移的表现是「界面显示的月将与实排不符」——不报错、只静默不一致。
+ */
+export interface LiurenMetaResponse {
+  schools: LiurenSchool[];
+  /** 中气 -> 月将支 */
+  yuejiang_table: Record<string, string>;
+  /** 月将支 -> 神将名 */
+  yuejiang_names: Record<string, string>;
+  /** 十干寄宫：日干 -> 地支 */
+  jigong: Record<string, string>;
+  /** 日干 -> [昼贵, 夜贵] */
+  guiren: Record<string, string[]>;
+  /** 适用昼贵的占时支 */
+  daytime_zhi: string[];
+  /** 十二天将，按布将顺序 */
+  tianjiang_order: string[];
+  tianjiang_jixiong: Record<string, string>;
+  /** 九宗门，按判定优先级 */
+  jiuzongmen: string[];
+  jiuzongmen_note: Record<string, string>;
+  uncertainties: string[];
+}
+
+export interface LiurenCastRequest {
+  /**
+   * 本地时刻（ISO 8601）。六壬以**月将加时**起课 ——
+   * 同一日不同时辰是完全不同的课，只给日期排不出课。
+   */
+  dt: string;
+  school?: string;
+}

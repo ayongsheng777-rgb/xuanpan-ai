@@ -48,6 +48,9 @@ import type {
   DuanResponse,
   InputPatch,
   LayerPreview,
+  LiurenCastRequest,
+  LiurenChart,
+  LiurenMetaResponse,
   LiuyaoInput,
   MountainsResponse,
   NamingInput,
@@ -361,6 +364,26 @@ export class ApiClient {
    */
   qimenPan = (input: QimenCastRequest): Promise<QimenChart> =>
     this.json('/api/v1/qimen/pan', 'POST', input);
+
+  // ---------------------------------------------------------------- 大六壬
+
+  /**
+   * 六壬元数据：月将表 / 十干寄宫 / 十二天将 / 九宗门。
+   *
+   * 「这一课是怎么来的」面板读它，**不自己维护一份月将表** ——
+   * 月将表是领域数据（RULE-005），前端存一份必然与内核漂移，
+   * 而漂移的表现是「界面显示的月将与实排不符」，不报错、只静默不一致。
+   */
+  liurenMeta = (): Promise<LiurenMetaResponse> => this.request('/api/v1/liuren/meta');
+
+  /**
+   * 大六壬起课。
+   *
+   * `dt` 必须是**本地时刻**且含时分 —— 六壬以月将加时起课，
+   * 同一个日子的不同时辰是完全不同的课，只给日期排不出课。
+   */
+  liurenCast = (input: LiurenCastRequest): Promise<LiurenChart> =>
+    this.json('/api/v1/liuren/cast', 'POST', input);
 
   // ------------------------------------------------------------------ 报告
 
