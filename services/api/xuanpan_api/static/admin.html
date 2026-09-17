@@ -595,10 +595,9 @@ async function openSession(id) {
 async function initLab() {
   const start = new Date();
   const end = new Date(Date.now() + 60 * 864e5);
-  const iso = (d) => d.toISOString().slice(0, 10);
-  $('zeriStart').value = iso(start);
-  $('zeriEnd').value = iso(end);
-  $('lyDate').value = iso(start);
+  $('zeriStart').value = localDate(start);
+  $('zeriEnd').value = localDate(end);
+  $('lyDate').value = localDate(start);
 
   $('zeriZodiac').innerHTML = '<option value="">（不指定）</option>' +
     ZODIAC.map(function (z) { return '<option value="' + z + '">' + z + '</option>'; }).join('');
