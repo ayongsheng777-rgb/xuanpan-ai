@@ -407,6 +407,52 @@ class QimenMetaResponse(ApiModel):
     )
 
 
+# ======================================================================
+# 大六壬（三式之二）
+# ======================================================================
+
+
+class LiurenCastRequest(ApiModel):
+    """大六壬起课请求。
+
+    `dt` 用 datetime —— 六壬以「月将加时」起课，**时**是盘面的直接输入，
+    只给日期排不出课（与奇门同理）。
+    时区由调用方换算，内核不做真太阳时校正（已在 `uncertainties` 中声明）。
+    """
+
+    dt: datetime = Field(
+        description="本地时刻（ISO 8601，如 2026-09-17T10:00:00）。必须是**本地时间**",
+    )
+    school: str = Field(default="default", description="流派，见 /liuren/meta")
+
+
+class LiurenMetaResponse(ApiModel):
+    """起课界面需要的静态元数据。
+
+    月将换将表、贵人起法、十二天将名目都是**领域数据**（RULE-005），
+    放进接口而不是让前端自己算：前端硬编码一份必然与内核漂移，
+    而漂移的表现是「界面显示的月将与实排不符」，不报错、只是静默不一致。
+    """
+
+    schools: list[dict[str, str]]
+    yuejiang_table: dict[str, str] = Field(description="中气 -> 月将支")
+    yuejiang_names: dict[str, str] = Field(description="月将支 -> 神将名")
+    jigong: dict[str, str] = Field(description="十干寄宫：日干 -> 地支")
+    guiren: dict[str, list[str]] = Field(
+        description="日干 -> [昼贵, 夜贵]"
+    )
+    daytime_zhi: list[str] = Field(description="昼贵适用的占时支")
+    tianjiang_order: list[str] = Field(description="十二天将，按布将顺序")
+    tianjiang_jixiong: dict[str, str] = Field(
+        description="天将自身的吉凶属性（FACT，不是对所问之事的结论）"
+    )
+    jiuzongmen: list[str] = Field(description="九宗门，按判定优先级")
+    jiuzongmen_note: dict[str, str] = Field(description="各取传法的简短说明")
+    uncertainties: list[str] = Field(
+        default_factory=list, description="内核未覆盖项，界面应如实展示"
+    )
+
+
 __all__ = [
     "ApiModel", "SessionCreate", "CompassInput", "BaziInput", "LiuyaoInput",
     "QianInput", "NamingInput", "InputPatch", "CompassConfirm",
@@ -416,4 +462,5 @@ __all__ = [
     "ZeriSelect", "ZeriDayResponse", "ZeriResultResponse",
     "DuanLiuyaoRequest", "DuanResponse",
     "QimenCastRequest", "QimenMetaResponse",
+    "LiurenCastRequest", "LiurenMetaResponse",
 ]
