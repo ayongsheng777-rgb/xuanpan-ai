@@ -16,6 +16,7 @@ from ..constants import (
     DIZHI,
     ELEMENT_CN,
     GAN_ELEMENT,
+    GAN_YINYANG,
     TIANGAN,
     ZHI_CANGGAN,
     ZHI_SHENGXIAO,
@@ -24,6 +25,8 @@ from ..constants import (
 )
 from ..exceptions import InvalidInputError
 from .calendar import BirthInput, ResolvedBirth, resolve_birth
+from .dynamics import YunResult, calculate_yun, yun_direction
+from .shensha import ShenShaResult, find_shensha
 from .strength import DayMasterStrength, assess_strength
 from .wuxing import FiveElementStats, count_elements
 
@@ -88,6 +91,11 @@ class BaziChart:
     xun_kong: dict[str, str]           # 各柱空亡
     tai_yuan: str | None               # 胎元
     ming_gong: str | None              # 命宫
+    shen_gong: str | None              # 身宫
+    tai_xi: str | None                 # 胎息
+    di_shi: dict[str, str]             # 各柱长生十二宫（地势）
+    shen_sha: ShenShaResult            # 神煞
+    yun: YunResult                     # 大运/流年/小运
     simple_stats: FiveElementStats
     hidden_stats: FiveElementStats
     strength: DayMasterStrength
@@ -131,6 +139,11 @@ class BaziChart:
             PILLAR_CN[key]: [shishen(self.day_master, g) for g in ZHI_CANGGAN[self.pillars[key][1]]]
             for key in PILLAR_ORDER
         }
+
+    @property
+    def di_shi_cn(self) -> dict[str, str]:
+        """各柱长生十二宫（地势）中文名，键用柱名。"""
+        return {PILLAR_CN[key]: self.di_shi[key] for key in PILLAR_ORDER}
 
     # ---------------- 自检 ----------------
 
@@ -208,6 +221,11 @@ class BaziChart:
             "xun_kong": self.xun_kong,
             "tai_yuan": self.tai_yuan,
             "ming_gong": self.ming_gong,
+            "shen_gong": self.shen_gong,
+            "tai_xi": self.tai_xi,
+            "di_shi": self.di_shi_cn,
+            "shen_sha": self.shen_sha.to_dict(),
+            "da_yun": self.yun.to_dict(),
             "five_elements_simple": self.simple_stats.to_dict(),
             "five_elements_hidden": self.hidden_stats.to_dict(),
             "time_correction": {
@@ -224,17 +242,19 @@ class BaziChart:
         """TRADITION 层：传统术数规则的派生描述（非 AI 生成）。"""
         fav = "、".join(ELEMENT_CN[e] for e in self.strength.favorable) or "—"
         unfav = "、".join(ELEMENT_CN[e] for e in self.strength.unfavorable) or "—"
+        direction = yun_direction(GAN_YINYANG[self.pillars["year"][0]], self.resolved.input.gender)
         return {
             "ten_gods": self.shishen_gan,
             "ten_gods_hidden": self.shishen_zhi,
             "day_master_strength": self.strength.to_dict(),
+            "da_yun_direction": direction,
             "summary": (
                 f"日主{self.day_master}（{ELEMENT_CN[self.day_element]}），"
                 f"生于{self.month_branch}月，判为{self.strength.verdict}；"
                 f"喜用 {fav}，忌神 {unfav}。"
             ),
             "uncertainties": list(self.strength.uncertainties),
-            "note": "旺衰与用神属流派规则，结论不唯一；此处采用扶抑法，仅供参考。",
+            "note": "旺衰、用神、大运排法与神煞吉凶属流派规则，结论不唯一；此处采用扶抑法，仅供参考。",
         }
 
     def to_dict(self) -> dict[str, Any]:
@@ -292,6 +312,20 @@ def calculate_bazi(
     prev_jieqi = lunar.getPrevJieQi()
     next_jieqi = lunar.getNextJieQi()
 
+    # 长生十二宫（地势）：库已提供，直接取（RULE-001 复用而非自算）
+    di_shi = {
+        "year": ec.getYearDiShi(),
+        "month": ec.getMonthDiShi(),
+        "day": ec.getDayDiShi(),
+        "hour": ec.getTimeDiShi(),
+    }
+
+    # 神煞（自建口诀表，见 shensha.py）
+    shen_sha = find_shensha(pillars)
+
+    # 大运/流年/小运（库 getYun；未填性别时 available=False）
+    yun = calculate_yun(dt, resolved.input.gender, sect=sect)
+
     return BaziChart(
         resolved=resolved,
         pillars=pillars,
@@ -308,6 +342,11 @@ def calculate_bazi(
         },
         tai_yuan=ec.getTaiYuan(),
         ming_gong=ec.getMingGong(),
+        shen_gong=ec.getShenGong(),
+        tai_xi=ec.getTaiXi(),
+        di_shi=di_shi,
+        shen_sha=shen_sha,
+        yun=yun,
         simple_stats=simple,
         hidden_stats=hidden,
         strength=strength,

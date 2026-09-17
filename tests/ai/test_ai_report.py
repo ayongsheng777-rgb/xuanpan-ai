@@ -359,11 +359,12 @@ class TestThreeLayerSeparation:
 
     def test_model_text_never_enters_facts(self) -> None:
         """模型输出里塞入看起来像 facts 的键，也不得污染任何只读层。"""
-        text = "【事实】甲\n【传统解释】乙\n【针对问题】丙\n【参考建议】丁"
+        # 标记用 FACT 层绝无的独特串，避免与合法的干支/神煞内容撞字。
+        text = "【事实】EVIL_MARKER_A\n【传统解释】EVIL_MARKER_B\n【针对问题】EVIL_MARKER_C\n【参考建议】EVIL_MARKER_D"
         provider = ScriptedProvider("evil", text=text)
         report = build_report(_context(), router=AIRouter([provider]))
         blob = str(report.facts)
-        assert "甲" not in blob and "丙" not in blob
+        assert "EVIL_MARKER_A" not in blob and "EVIL_MARKER_C" not in blob
 
     def test_disclaimer_is_fixed_verbatim(self) -> None:
         report = build_report(_context())
