@@ -5,7 +5,7 @@ MCP server 的入口是 `server.py` 的 stdio 进程，客户端通过 JSON-RPC 
 直接 import server 调 call_tool 会绕过「进程启动 + 握手 + 消息编解码」这些真实链路。
 本测试用 mcp 的 stdio_client 启动真实子进程，验证：
 1. server 能启动并完成 initialize 握手
-2. 9 个工具全部注册
+2. 11 个工具全部注册
 3. 每个工具经 stdio 调用返回 structured_content（非自然语言摘要）
 4. 结构化输出内含 facts/tradition 两层（RULE-002 分层）
 
@@ -74,14 +74,14 @@ async def _call(session: ClientSession, name: str, args: dict[str, Any]) -> Any:
     raise AssertionError(f"工具 {name} 无 structuredContent 也无文本输出")
 
 
-async def test_server_lists_ten_tools() -> None:
+async def test_server_lists_eleven_tools() -> None:
     async with _connect() as session:
         tools = await session.list_tools()
         names = {t.name for t in tools.tools}
         assert names == {
             "xuanpan_bazi", "xuanpan_liuyao", "xuanpan_duan_liuyao", "xuanpan_duan_bazi",
             "xuanpan_almanac", "xuanpan_zeri", "xuanpan_name", "xuanpan_qian", "xuanpan_compass",
-            "xuanpan_qimen",
+            "xuanpan_qimen", "xuanpan_liuren",
         }
 
 
@@ -119,6 +119,68 @@ async def test_qimen_bad_input_raises_readable_tool_error() -> None:
             b.text for b in result.content if getattr(b, "type", "") == "text"
         )
         assert "无法解析时刻" in text, text
+
+
+async def test_liuren_structured_content() -> None:
+    """六壬课：四课 / 三传 / 月将 / 未覆盖项都必须回给调用方。
+
+    形状说明：`LiurenChart` 与 `QimenChart` 一样是**扁平** dict ——
+    月将、四课、三传、十二宫都在顶层，不分 `facts` / `tradition` 两层，
+    因为六壬盘当前是纯事实（天将吉凶只是天将自身属性），尚无「传统分析」层。
+    """
+    async with _connect() as session:
+        sc = await _call(session, "xuanpan_liuren", {"datetime_str": "2026-09-17 10:00"})
+        assert sc["day_ganzhi"] == "甲午"
+        assert sc["month_general"] == "巳"
+        assert sc["month_general_name"] == "太乙"
+        assert sc["chuanke"] == "伏吟"
+        assert len(sc["palaces"]) == 12
+        assert len(sc["lessons"]) == 4
+        assert [c["zhi"] for c in sc["chuan"]] == ["寅", "巳", "申"]
+        # 未覆盖项必须转述给调用方，不得在工具层吞掉
+        assert any("涉害" in u for u in sc["uncertainties"])
+
+
+async def test_liuren_night_guiren_and_xunkong() -> None:
+    """夜贵与旬空：戌时取夜贵；中传落旬空时遁干为 null（领域信号）。"""
+    async with _connect() as session:
+        sc = await _call(session, "xuanpan_liuren", {"datetime_str": "2026-09-17 20:00"})
+        assert sc["guiren"]["is_day"] is False
+        assert sc["guiren"]["kind"] == "夜贵"
+        assert sc["guiren"]["zhi"] == "未"
+        assert sc["xun_kong"] == ["辰", "巳"]
+        assert [c["dun_gan"] for c in sc["chuan"]] == ["丁", None, "己"]
+
+
+async def test_liuren_date_only_defaults_to_noon() -> None:
+    """只给日期时取 12:00 —— 避开子时换日的流派歧义（与奇门同口径）。"""
+    async with _connect() as session:
+        sc = await _call(session, "xuanpan_liuren", {"datetime_str": "2026-09-17"})
+        assert sc["hour_zhi"] == "午"
+
+
+async def test_liuren_bad_input_raises_readable_tool_error() -> None:
+    async with _connect() as session:
+        result = await session.call_tool("xuanpan_liuren", {"datetime_str": "不是时间"})
+        assert result.is_error
+        text = " ".join(
+            b.text for b in result.content if getattr(b, "type", "") == "text"
+        )
+        assert "无法解析时刻" in text, text
+
+
+async def test_liuren_unknown_school_is_readable_error() -> None:
+    """未知流派也应给出可读原因（SchoolNotFoundError 是 FortuneError 子类）。"""
+    async with _connect() as session:
+        result = await session.call_tool(
+            "xuanpan_liuren",
+            {"datetime_str": "2026-09-17 10:00", "school": "不存在的流派"},
+        )
+        assert result.is_error
+        text = " ".join(
+            b.text for b in result.content if getattr(b, "type", "") == "text"
+        )
+        assert "未知的六壬流派" in text, text
 
 async def test_bazi_structured_content() -> None:
     async with _connect() as session:

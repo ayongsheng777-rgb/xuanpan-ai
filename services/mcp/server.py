@@ -58,6 +58,7 @@ from fortune_core import (
     select_auspicious_days,
 )
 from fortune_core.liuyao import zhuang_gua
+from fortune_core.liuren import LiurenChart, cast_liuren
 from fortune_core.qimen import QimenChart, cast_qimen
 from lunar_python import Solar
 
@@ -67,7 +68,7 @@ server = MCPServer(
     name="xuanpan",
     title="玄盘 AI · 术数计算内核",
     description=(
-        "确定性术数计算（八字 / 六爻 / 黄历 / 择日 / 姓名 / 灵签 / 罗盘坐向）。"
+        "确定性术数计算（八字 / 六爻 / 黄历 / 择日 / 姓名 / 灵签 / 罗盘坐向 / 三式）。"
         "计算由代码完成，AI 只负责解释结果，不介入计算。"
     ),
     version=APP_VERSION,
@@ -396,6 +397,39 @@ def xuanpan_qimen(datetime_str: str = "", school: str = "chaibu") -> dict[str, A
     """
     dt = _parse_local_dt(datetime_str)
     chart: QimenChart = cast_qimen(dt, school=school)
+    return _facts_dict(chart)
+
+
+@server.tool(structured_output=True)
+@_domain_errors_as_tool_error
+def xuanpan_liuren(datetime_str: str = "", school: str = "default") -> dict[str, Any]:
+    """大六壬起课（三式之二）：月将加时 + 四课 + 三传 + 十二天将。
+
+    参数:
+        datetime_str: 本地时刻。不填或传 "" 取当前时刻；支持
+            "YYYY-MM-DD HH:MM" 与 "YYYY-MM-DD"（后者取该日 12:00）。
+            六壬以**月将加时**起课，同一个日子的不同时辰是完全不同的课，
+            故必须给到时辰粒度。
+        school: 流派，目前仅 default（通行本）。
+
+    返回: 结构化 dict：
+        day_ganzhi / hour_zhi —— 日柱与占时支
+        month_general / month_general_name / zhongqi —— 月将及其所依中气
+        guiren —— 昼/夜贵、贵人支、所临地盘宫、顺布或逆布
+        lessons —— 四课（每课含上下神、五行、是否初传所出）
+        palaces —— 十二宫（地盘支 / 天盘支 / 所带天将 + 天将吉凶属性）
+        chuan —— 初/中/末三传（含所带天将与遁干）
+        chuanke —— 取传所用宗门（九宗门之一），chuanke_note 为其口径说明
+        xun_kong / yima —— 旬空与驿马
+        uncertainties —— **本版未覆盖项**，务必如实向用户转述
+
+    说明: 月将按**中气**换将（非节气），天地盘、四课、九宗门取三传、天将顺逆布
+        全部由确定性内核算出（RULE-001）。天将的吉凶属性是**天将自身的属性**，
+        不是对所问之事的结论；内核不给吉凶断语，断语属上层解读（RULE-008）。
+        三传的遁干若为 null，表示该支落旬空 —— 这是领域信号，不是数据缺失。
+    """
+    dt = _parse_local_dt(datetime_str)
+    chart: LiurenChart = cast_liuren(dt, school=school)
     return _facts_dict(chart)
 
 
