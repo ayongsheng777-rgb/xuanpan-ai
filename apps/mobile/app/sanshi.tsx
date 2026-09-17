@@ -18,7 +18,14 @@ import React, { useCallback, useMemo, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
 import { getApiClient } from '@/api/client';
-import type { QimenChart, QimenMetaResponse, QimenPalace } from '@/api/types';
+import type {
+  LiurenChart,
+  LiurenMetaResponse,
+  LiurenPalace,
+  QimenChart,
+  QimenMetaResponse,
+  QimenPalace,
+} from '@/api/types';
 import { AppText } from '@/components/AppText';
 import { Banner, UncertaintyList } from '@/components/Banner';
 import { Button, Card, Divider, KeyValueRow } from '@/components/Card';
@@ -35,20 +42,30 @@ import {
   todayISODate,
 } from '@/lib/date';
 import { QIMEN_GRID, QIMEN_GRID_DIRECTION } from '@/lib/qimenLayout';
+import { LIUREN_GRID, LIUREN_GRID_COLUMNS } from '@/lib/liurenLayout';
 import { useAsync } from '@/lib/useAsync';
 import { alpha, colors, radius, space } from '@/theme/tokens';
 
-type SanshiKind = 'qimen';
+type SanshiKind = 'qimen' | 'liuren';
 
 /**
  * 已上线的术式。
  *
- * 六壬与太乙的内核尚未落地，所以这里**不放占位标签** ——
+ * 太乙神数的内核尚未落地，所以这里**不放占位标签** ——
  * 一个点进去只写着"建设中"的标签，比没有这个标签更让人困惑。
  * 内核上线时在此追加一项即可。
  */
-const KINDS: readonly { key: SanshiKind; label: string }[] = [
-  { key: 'qimen', label: '奇门遁甲' },
+const KINDS: readonly { key: SanshiKind; label: string; hint: string }[] = [
+  {
+    key: 'qimen',
+    label: '奇门遁甲',
+    hint: '奇门以「时辰」起局，同一日的不同时辰可能落在不同局，所以要选到时辰而不只是日期。',
+  },
+  {
+    key: 'liuren',
+    label: '大六壬',
+    hint: '六壬以「月将加时」起课，同一日的不同时辰是完全不同的课，所以必须选到时辰。',
+  },
 ];
 
 // ==========================================================================
@@ -57,6 +74,14 @@ const KINDS: readonly { key: SanshiKind; label: string }[] = [
 
 export default function SanshiScreen(): React.JSX.Element {
   const [kind, setKind] = useState<SanshiKind>('qimen');
+
+  // 起局时刻由**本页**持有，两个术式共用同一份 —— 这正是把三式放同一页的
+  // 理由：用户常三式互参，若各存一份，切一下标签时刻就重置，
+  // 参出来的两张盘根本不是同一个时刻的。
+  const initial = useMemo(defaultMoment, []);
+  const [date, setDate] = useState(initial.date);
+  const [shichen, setShichen] = useState(initial.shichen);
+  const moment = momentOf(date, shichen);
 
   return (
     <Screen scroll>
@@ -70,7 +95,17 @@ export default function SanshiScreen(): React.JSX.Element {
       ) : null}
 
       <View style={styles.body}>
-        {kind === 'qimen' ? <QimenPane /> : null}
+        <MomentPicker
+          date={date}
+          shichen={shichen}
+          moment={moment}
+          onDate={setDate}
+          onShichen={setShichen}
+          hint={KINDS.find((k) => k.key === kind)?.hint ?? ''}
+        />
+
+        {kind === 'qimen' ? <QimenPane moment={moment} /> : null}
+        {kind === 'liuren' ? <LiurenPane moment={moment} /> : null}
       </View>
 
       <AppText size="xs" color="muted" center style={styles.disclaimer}>
@@ -81,20 +116,95 @@ export default function SanshiScreen(): React.JSX.Element {
 }
 
 // ==========================================================================
+// 起局时刻（两式共用）
+// ==========================================================================
+
+/**
+ * 起局时刻选择器。
+ *
+ * 之所以做成**受控组件 + 状态放在父级**：三式共用同一个时刻是本页存在的理由，
+ * 各面板各存一份的话，切标签就会把用户刚选好的时刻丢掉。
+ *
+ * `hint` 由当前术式给 —— 同样是"要选到时辰"，奇门与六壬的原因并不相同
+ * （一个是定局，一个是月将加时），写一句泛泛的"请选择时刻"等于没说。
+ */
+function MomentPicker({
+  date,
+  shichen,
+  moment,
+  onDate,
+  onShichen,
+  hint,
+}: {
+  date: string;
+  shichen: number;
+  moment: string;
+  onDate: (next: string) => void;
+  onShichen: (next: number) => void;
+  hint: string;
+}): React.JSX.Element {
+  return (
+    <Card title="起局时刻">
+      <AppText size="xs" color="muted" style={styles.hint}>
+        {hint}
+      </AppText>
+
+      <View style={styles.stepper}>
+        <View style={styles.stepperButton}>
+          <Button label="−1 天" variant="ghost" onPress={() => onDate(shiftDays(date, -1))} />
+        </View>
+        <View style={styles.stepperValue}>
+          <AppText size="lg" weight="semibold" color="primary">
+            {date}
+          </AppText>
+          <AppText size="xs" color="muted">
+            {SHICHEN[shichen]}时 {shichenRangeLabel(shichen)}
+          </AppText>
+        </View>
+        <View style={styles.stepperButton}>
+          <Button label="+1 天" variant="ghost" onPress={() => onDate(shiftDays(date, 1))} />
+        </View>
+      </View>
+
+      <View style={styles.quickRow}>
+        <Chip label="今天" onPress={() => onDate(todayISODate())} active={isToday(date)} />
+        <Chip label="明天" onPress={() => onDate(shiftDays(todayISODate(), 1))} />
+      </View>
+
+      <Divider style={styles.divider} />
+
+      {/* 十二时辰：两行六列。子时排在最前（而非 23 时排到末尾）——
+          时辰是循环的，按钟点排反而会让「子」跑到最后一格。 */}
+      <View style={styles.shichenGrid}>
+        {SHICHEN.map((name, i) => (
+          <View key={name} style={styles.shichenCell}>
+            <Chip label={name} onPress={() => onShichen(i)} active={i === shichen} />
+          </View>
+        ))}
+      </View>
+
+      <View style={styles.momentRow}>
+        <AppText size="xs" color="muted">
+          将以此时刻起局：
+        </AppText>
+        <AppText size="xs" weight="semibold" color="primary">
+          {moment}
+        </AppText>
+      </View>
+    </Card>
+  );
+}
+
+// ==========================================================================
 // 一、奇门遁甲
 // ==========================================================================
 
-function QimenPane(): React.JSX.Element {
-  const initial = useMemo(defaultMoment, []);
-  const [date, setDate] = useState(initial.date);
-  const [shichen, setShichen] = useState(initial.shichen);
-
+function QimenPane({ moment }: { moment: string }): React.JSX.Element {
   const metaLoader = useCallback((): Promise<QimenMetaResponse> => getApiClient().qimenMeta(), []);
   const meta = useAsync(metaLoader, []);
 
   // 时刻变则重排。之所以**不用按钮触发**：盘面是纯函数式的结果，
   // 用户改完时刻却看到旧盘，会以为是缓存或算错了。
-  const moment = momentOf(date, shichen);
   const panLoader = useCallback((): Promise<QimenChart> => {
     return getApiClient().qimenPan({ dt: moment, school: 'chaibu' });
   }, [moment]);
@@ -102,55 +212,6 @@ function QimenPane(): React.JSX.Element {
 
   return (
     <>
-      <Card title="起局时刻">
-        <AppText size="xs" color="muted" style={styles.hint}>
-          奇门以**时辰**起局，同一日的不同时辰可能落在不同局，所以要选到时辰而不只是日期。
-        </AppText>
-
-        <View style={styles.stepper}>
-          <View style={styles.stepperButton}>
-            <Button label="−1 天" variant="ghost" onPress={() => setDate((d) => shiftDays(d, -1))} />
-          </View>
-          <View style={styles.stepperValue}>
-            <AppText size="lg" weight="semibold" color="primary">
-              {date}
-            </AppText>
-            <AppText size="xs" color="muted">
-              {SHICHEN[shichen]}时 {shichenRangeLabel(shichen)}
-            </AppText>
-          </View>
-          <View style={styles.stepperButton}>
-            <Button label="+1 天" variant="ghost" onPress={() => setDate((d) => shiftDays(d, 1))} />
-          </View>
-        </View>
-
-        <View style={styles.quickRow}>
-          <Chip label="今天" onPress={() => setDate(todayISODate())} active={isToday(date)} />
-          <Chip label="明天" onPress={() => setDate(shiftDays(todayISODate(), 1))} />
-        </View>
-
-        <Divider style={styles.divider} />
-
-        {/* 十二时辰：两行六列。子时排在最前（而非 23 时排到末尾）——
-            时辰是循环的，按钟点排反而会让「子」跑到最后一格。 */}
-        <View style={styles.shichenGrid}>
-          {SHICHEN.map((name, i) => (
-            <View key={name} style={styles.shichenCell}>
-              <Chip label={name} onPress={() => setShichen(i)} active={i === shichen} />
-            </View>
-          ))}
-        </View>
-
-        <View style={styles.momentRow}>
-          <AppText size="xs" color="muted">
-            将以此时刻起局：
-          </AppText>
-          <AppText size="xs" weight="semibold" color="primary">
-            {moment}
-          </AppText>
-        </View>
-      </Card>
-
       {pan.error ? (
         <Banner tone="error" title="排盘失败">
           <AppText size="sm">{pan.error}</AppText>
@@ -336,6 +397,207 @@ function PalaceCell({
 }
 
 // ==========================================================================
+// 二、大六壬
+// ==========================================================================
+
+function LiurenPane({ moment }: { moment: string }): React.JSX.Element {
+  const metaLoader = useCallback(
+    (): Promise<LiurenMetaResponse> => getApiClient().liurenMeta(),
+    [],
+  );
+  const meta = useAsync(metaLoader, []);
+
+  // 与奇门同口径：时刻变则重排，不用按钮触发。
+  const castLoader = useCallback((): Promise<LiurenChart> => {
+    return getApiClient().liurenCast({ dt: moment, school: 'default' });
+  }, [moment]);
+  const cast = useAsync(castLoader, [moment]);
+
+  return (
+    <>
+      {cast.error ? (
+        <Banner tone="error" title="起课失败">
+          <AppText size="sm">{cast.error}</AppText>
+          <Button label="重试" variant="ghost" style={styles.retry} onPress={cast.reload} />
+        </Banner>
+      ) : null}
+
+      {cast.loading && !cast.data ? (
+        <Card>
+          <AppText size="sm" color="muted">
+            起课中…
+          </AppText>
+        </Card>
+      ) : null}
+
+      {cast.data ? <LiurenChartView chart={cast.data} /> : null}
+
+      {meta.data ? (
+        <Card title="月将表（中气 → 月将）">
+          <AppText size="xs" color="muted" style={styles.hint}>
+            由服务端返回，界面不自己维护一份 —— 月将表属领域数据，
+            前端存副本必然与内核漂移，而漂移的表现是「显示的月将与实排不符」，不报错。
+            另注意换将以中气为界、不是节气：正月立春即建寅，但月将要到雨水才由神后换登明。
+          </AppText>
+          {Object.entries(meta.data.yuejiang_table).map(([zhongqi, zhi]) => (
+            <KeyValueRow
+              key={zhongqi}
+              label={zhongqi}
+              value={`${zhi}将（${meta.data?.yuejiang_names[zhi] ?? ''}）`}
+            />
+          ))}
+        </Card>
+      ) : null}
+
+      <UncertaintyList items={cast.data?.uncertainties ?? meta.data?.uncertainties ?? []} />
+    </>
+  );
+}
+
+function LiurenChartView({ chart }: { chart: LiurenChart }): React.JSX.Element {
+  const byGround = useMemo(() => {
+    const m = new Map<string, LiurenPalace>();
+    chart.palaces.forEach((p) => m.set(p.ground, p));
+    return m;
+  }, [chart.palaces]);
+
+  const { guiren } = chart;
+
+  return (
+    <>
+      <Card title="课体">
+        <View style={styles.headline}>
+          <AppText size="xxl" weight="bold" color="primary">
+            {chart.chuanke}
+          </AppText>
+          <Tag label={`${chart.day_ganzhi}日 · ${chart.hour_zhi}时`} tone="neutral" />
+        </View>
+        <KeyValueRow label="月将" value={chart.month_general_label} />
+        <KeyValueRow label="换将所依" value={`${chart.zhongqi}（${chart.zhongqi_time}）`} />
+        <KeyValueRow
+          label="贵人"
+          value={`${guiren.kind}${guiren.zhi} · 临地盘${guiren.ground} · ${guiren.direction}`}
+        />
+        <KeyValueRow label="旬空" value={chart.xun_kong.join('、')} />
+        <KeyValueRow label="驿马" value={chart.yima} />
+        <AppText size="xs" color="muted" style={styles.keNote}>
+          {chart.chuanke_note}
+        </AppText>
+      </Card>
+
+      <Card title="十二宫方图">
+        <AppText size="xs" color="muted" style={styles.hint}>
+          外圈十二宫沿顺时针排列，每格自上而下为 天将 · 天盘支 / 地盘支；
+          贵人所在之宫以金色边框标出。中央留白，起课要点见下方「三传」。
+        </AppText>
+        <View style={styles.grid}>
+          {LIUREN_GRID.map((ground, i) => (
+            <View key={i} style={styles.lrCellWrap}>
+              {ground === null ? (
+                // 中央 2×2 留白：不做成有边框的空盒子，否则看起来像"加载失败"。
+                <View style={styles.lrCenter} />
+              ) : (
+                <LiurenCell palace={byGround.get(ground)} />
+              )}
+            </View>
+          ))}
+        </View>
+      </Card>
+
+      <Card title="四课">
+        <AppText size="xs" color="muted" style={styles.hint}>
+          每课「上神 / 下神」——上神取自天盘。第一课的下神位取日干寄宫，
+          所以显示的是「日干本身」而非某个地支。标出记号的那一课是三传所出之处。
+        </AppText>
+        {chart.lessons.map((lesson) => (
+          <View
+            key={lesson.index}
+            style={[styles.itemRow, lesson.is_ke && styles.itemRowMarked]}
+          >
+            <AppText size="xs" color="muted">
+              {lesson.name}
+            </AppText>
+            <View style={styles.itemMain}>
+              <AppText size="lg" weight="semibold" color="primary">
+                {lesson.upper}
+              </AppText>
+              <AppText size="xs" color="muted">
+                上 / 下
+              </AppText>
+              <AppText size="sm" color="textSecondary">
+                {lesson.lower_label}
+              </AppText>
+            </View>
+            <AppText size="xs" color="muted">
+              {lesson.ke_kind ?? ''}
+            </AppText>
+          </View>
+        ))}
+      </Card>
+
+      <Card title="三传">
+        {chart.chuan.map((c) => (
+          <View key={c.position} style={styles.itemRow}>
+            <AppText size="xs" color="muted">
+              {c.position}
+            </AppText>
+            <View style={styles.itemMain}>
+              <AppText size="xl" weight="bold" color="primary">
+                {c.zhi}
+              </AppText>
+              <AppText size="sm" color="jade">
+                {c.general ?? '—'}
+              </AppText>
+            </View>
+            {/* 遁干为 null 是**旬空**信号，不是数据缺失 ——
+                显示成「空」而不是留白，否则用户会以为这一格没算出来。 */}
+            <AppText size="xs" color={c.dun_gan ? 'muted' : 'danger'}>
+              {c.dun_gan ? `遁${c.dun_gan}` : '空（旬空）'}
+            </AppText>
+          </View>
+        ))}
+      </Card>
+    </>
+  );
+}
+
+/** 方图外圈一格 —— 天将 / 天盘支 / 地盘支，顺序固定。 */
+function LiurenCell({ palace }: { palace: LiurenPalace | undefined }): React.JSX.Element {
+  if (!palace) {
+    // 不可达：服务端恒返回十二宫。真缺了也要显示出来，
+    // 而不是让格子静默消失（缺格会让人以为盘就长这样）。
+    return (
+      <View style={[styles.cell, styles.cellMissing]}>
+        <AppText size="xs" color="danger">
+          缺宫
+        </AppText>
+      </View>
+    );
+  }
+
+  return (
+    <View
+      style={[styles.cell, styles.lrCell, palace.is_guiren_ground && styles.cellGuiren]}
+      accessibilityLabel={`地盘${palace.ground}，天盘${palace.heaven}，`
+        + `${palace.general ?? '无天将'}`
+        + `${palace.is_guiren_ground ? '，贵人临此宫' : ''}`}
+    >
+      {/* 天将的吉凶是它**自身的固有属性**，不是对所求之事的结论，
+          故此处只显示将名，不显示吉凶 —— 显示吉凶会被读成断语。 */}
+      <AppText size="xs" color="jade" numberOfLines={1}>
+        {palace.general ?? '—'}
+      </AppText>
+      <AppText size="xl" weight="bold" color="primary">
+        {palace.heaven}
+      </AppText>
+      <AppText size="xs" color="muted">
+        地{palace.ground}
+      </AppText>
+    </View>
+  );
+}
+
+// ==========================================================================
 // 工具
 // ==========================================================================
 
@@ -368,6 +630,15 @@ function defaultMoment(): { date: string; shichen: number } {
  */
 const CELL_GAP = 2;
 const CELL_MIN_HEIGHT = 104;
+
+/**
+ * 六壬方图外圈格子的最小高度。
+ *
+ * 比奇门矮一截是**刻意**的：六壬每格只有三行短文本（将名 / 天盘支 / 地盘支），
+ * 而外圈有十二格、还要再排四课与三传两张卡；沿用奇门的 104pt 会让整页
+ * 拉到三四屏，反而看不清十二宫的整体结构。
+ */
+const LR_CELL_MIN_HEIGHT = 62;
 
 const styles = StyleSheet.create({
   body: { gap: space[4], marginTop: space[4] },
@@ -422,6 +693,30 @@ const styles = StyleSheet.create({
   cellDoorRow: { flexDirection: 'row', marginTop: CELL_GAP },
   cellGanRow: { flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between' },
   cellFlags: { flexDirection: 'row', gap: space[2] },
+
+  // ---- 六壬方图 ----
+  // 四列、十二格外圈 + 中央留白。格子比奇门矮：每格只有三行短文本
+  // （将名 / 天盘支 / 地盘支），按奇门的 104pt 会把页面拉得很长。
+  lrCellWrap: { width: `${100 / LIUREN_GRID_COLUMNS}%`, padding: CELL_GAP },
+  lrCell: { minHeight: LR_CELL_MIN_HEIGHT, alignItems: 'center', gap: CELL_GAP },
+  lrCenter: { minHeight: LR_CELL_MIN_HEIGHT },
+  cellGuiren: { borderColor: colors.gold, borderWidth: 1.5, backgroundColor: alpha.goldSoft },
+
+  // ---- 四课 / 三传行 ----
+  itemRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: space[2],
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+    gap: space[2],
+  },
+  // 三传所出那一课：加一条左侧强调线，而不是染成"吉/凶"色 ——
+  // 它标的是"初传从这里取"，不是好坏。
+  itemRowMarked: { borderLeftWidth: 3, borderLeftColor: colors.primary, paddingLeft: space[3] },
+  itemMain: { flexDirection: 'row', alignItems: 'center', gap: space[2], flex: 1 },
+  keNote: { marginTop: space[3], lineHeight: 18 },
 
   retry: { marginTop: space[2], alignSelf: 'flex-start' },
   disclaimer: { marginTop: space[6] },
