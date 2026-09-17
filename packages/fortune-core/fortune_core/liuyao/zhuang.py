@@ -25,6 +25,7 @@ from ..constants import (
     ZHI_ELEMENT,
     jiazi_index,
 )
+from ..constants import xun_kong_of as _shared_xun_kong
 from ..exceptions import InvalidInputError
 from .gua import YAO_IS_MOVING, YAO_IS_YANG, LiuYaoResult
 from .najia import (
@@ -106,6 +107,10 @@ def xun_kong_of(day_ganzhi: str) -> tuple[str, ...]:
     六十甲子分六旬，每旬十日、配十二支，故每旬必缺两支，即为「旬空」。
     甲子旬空戌亥、甲戌旬空申酉、甲申旬空午未、甲午旬空辰巳、甲辰旬空寅卯、甲寅旬空子丑。
 
+    实现在 `fortune_core.constants.xun_kong_of` —— 六爻、奇门、六壬都要用它，
+    三处各写一份就会出现「同一个日柱、三个术式算出三个旬空」。
+    本函数只作为本包的稳定入口保留。
+
     >>> xun_kong_of("甲子")
     ('戌', '亥')
     >>> xun_kong_of("庚午")
@@ -113,12 +118,7 @@ def xun_kong_of(day_ganzhi: str) -> tuple[str, ...]:
     >>> xun_kong_of("甲寅")
     ('子', '丑')
     """
-    from ..constants import DIZHI
-
-    idx = jiazi_index(day_ganzhi)
-    xun_head = (idx // 10) * 10
-    zhi_start = xun_head % 12
-    return (DIZHI[(zhi_start + 10) % 12], DIZHI[(zhi_start + 11) % 12])
+    return _shared_xun_kong(day_ganzhi)
 
 
 # --------------------------------------------------------------------------

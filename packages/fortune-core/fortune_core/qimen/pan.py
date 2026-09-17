@@ -25,6 +25,8 @@ from datetime import date, datetime
 from typing import Any
 
 from ..constants import DIZHI, TIANGAN, jiazi_index
+from ..constants import xun_kong_of as _shared_xun_kong
+from ..constants import yima_of as _shared_yima
 from ..exceptions import InvalidInputError
 from .constants import (
     BAMEN_BY_GONG,
@@ -39,7 +41,6 @@ from .constants import (
     JIUXING_JIXIONG,
     Qiyi_ORDER,
     RING_ORDER,
-    YIMA_BY_SANHE,
     is_yang_dun,
     jushu_of,
 )
@@ -322,29 +323,32 @@ def xunshou_of(ganzhi: str) -> str:
 def xun_kong_of(ganzhi: str) -> tuple[str, ...]:
     """干支 -> 旬空二支。
 
+    实现在 `fortune_core.constants.xun_kong_of` —— 六爻、奇门、六壬都要用它，
+    三处各写一份就会出现「同一个日柱、三个术式算出三个旬空」。
+    本函数只作为本包的稳定入口保留。
+
     >>> xun_kong_of("甲子")
     ('戌', '亥')
     >>> xun_kong_of("庚午")
     ('戌', '亥')
     """
-    idx = jiazi_index(ganzhi)
-    xun_start = (idx // 10) * 10
-    # 旬中共 10 个干支，占 12 支中的 10 支，余下 2 支即为空亡
-    used = {DIZHI[(xun_start + i) % 12] for i in range(10)}
-    missing = [z for z in DIZHI if z not in used]
-    return tuple(missing)
+    return _shared_xun_kong(ganzhi)
 
 
 def yima_of(zhi: str) -> str:
-    """地支 -> 驿马地支（三合局对冲）。
+    """地支 -> 驿马地支（三合局长生的对冲）。
+
+    实现在 `fortune_core.constants.yima_of`（按规律算，不查表）——
+    六爻、奇门、六壬都要用它。本包保留 `YIMA_BY_SANHE` 只是作为**可读的对照数据**，
+    取值与共享实现的一致性由 `tests/test_qimen.py` 钉住。
 
     >>> yima_of("子"), yima_of("午"), yima_of("酉"), yima_of("卯")
     ('寅', '申', '亥', '巳')
     """
-    for group, ma in YIMA_BY_SANHE.items():
-        if zhi in group:
-            return ma
-    raise InvalidInputError(f"未知地支：{zhi!r}")  # pragma: no cover
+    try:
+        return _shared_yima(zhi)
+    except ValueError as exc:  # 保持本包原有的异常类型
+        raise InvalidInputError(f"未知地支：{zhi!r}") from exc
 
 
 def _rotate(steps: int) -> list[int]:

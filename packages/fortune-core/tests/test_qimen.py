@@ -194,6 +194,27 @@ class TestYima:
         for zhi in DIZHI:
             assert yima_of(zhi) in DIZHI
 
+    def test_table_agrees_with_shared_implementation(self) -> None:
+        """`YIMA_BY_SANHE` 表与共享实现（按规律算）必须逐支一致。
+
+        本包的 `yima_of` 已改为委托 `fortune_core.constants.yima_of`，
+        表本身退化成**对照数据**保留。保留数据就有腐化风险 ——
+        这条测试把两者钉在一起：表被动过而共享实现没动，此处立刻失败。
+        """
+        from fortune_core.constants import DIZHI, yima_of as shared_yima
+        from fortune_core.qimen.constants import YIMA_BY_SANHE
+
+        for zhi in DIZHI:
+            hits = [ma for group, ma in YIMA_BY_SANHE.items() if zhi in group]
+            assert len(hits) == 1, f"{zhi} 在表中命中 {len(hits)} 组"
+            assert hits[0] == shared_yima(zhi) == yima_of(zhi), (
+                f"{zhi}: 表={hits[0]} 共享={shared_yima(zhi)} 本包={yima_of(zhi)}"
+            )
+
+    def test_rejects_unknown_zhi(self) -> None:
+        with pytest.raises(InvalidInputError):
+            yima_of("甲")
+
 
 class TestDingju:
     """定局 —— 节气 / 三元 / 局数。"""

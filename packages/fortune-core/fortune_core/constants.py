@@ -225,6 +225,51 @@ def nayin_of(ganzhi: str) -> str:
     return NAYIN_30[jiazi_index(ganzhi) // 2]
 
 
+def xun_kong_of(ganzhi: str) -> tuple[str, ...]:
+    """干支 -> 旬空（空亡）二支。
+
+    六十甲子分六旬，每旬十日而配十二支，故每旬必缺两支，即为「旬空」：
+    甲子旬空戌亥、甲戌旬空申酉、甲申旬空午未、甲午旬空辰巳、
+    甲辰旬空寅卯、甲寅旬空子丑。
+
+    放在这里而不放在各术式包里：六爻的装卦、奇门的盘、六壬的三传都要用它，
+    此前已各自实现了一份 —— 同一个规则三处实现，改一处忘一处就会出现
+    「同一个日柱、三个术式算出三个旬空」，而三张盘看起来都正常。
+    各术式应当直接调用本函数。
+
+    >>> xun_kong_of("甲子")
+    ('戌', '亥')
+    >>> xun_kong_of("庚午")
+    ('戌', '亥')
+    >>> xun_kong_of("甲寅")
+    ('子', '丑')
+    """
+    xun_head = (jiazi_index(ganzhi) // 10) * 10
+    zhi_start = xun_head % 12
+    return (DIZHI[(zhi_start + 10) % 12], DIZHI[(zhi_start + 11) % 12])
+
+
+def yima_of(zhi: str) -> str:
+    """地支 -> 驿马（天马）地支。
+
+    口诀「申子辰马在寅，寅午戌马在申，巳酉丑马在亥，亥卯未马在巳」。
+    规律：驿马 = 本三合局长生的**对冲** —— 申子辰长生在申，冲寅；
+    寅午戌长生在寅，冲申；巳酉丑长生在巳，冲亥；亥卯未长生在亥，冲巳。
+    用这条规律算而不是再抄一张表：表抄错了看不出来，规律错了会连错四组。
+
+    >>> yima_of("子"), yima_of("午"), yima_of("酉"), yima_of("卯")
+    ('寅', '申', '亥', '巳')
+    """
+    if zhi not in ZHI_ELEMENT:
+        raise ValueError(f"非法地支：{zhi!r}")
+    # 三合局按「申子辰 / 寅午戌 / 巳酉丑 / 亥卯未」四组，长生分别是申寅亥巳
+    changsheng = {"申": "申", "子": "申", "辰": "申",
+                  "寅": "寅", "午": "寅", "戌": "寅",
+                  "亥": "亥", "卯": "亥", "未": "亥",
+                  "巳": "巳", "酉": "巳", "丑": "巳"}[zhi]
+    return DIZHI[(DIZHI.index(changsheng) + 6) % 12]
+
+
 def shishen(day_gan: str, other_gan: str) -> str:
     """以日干为参照，判定另一天干的十神。
 
@@ -259,4 +304,5 @@ __all__ = [
     "GUA_YAO", "GUA_ELEMENT", "GUA_YINYANG", "GUA_HOUTIAN_DEGREE", "GUA_XIANTIAN_NUMBER",
     "SHISHEN",
     "jiazi_index", "ganzhi_from_index", "nayin_of", "shishen",
+    "xun_kong_of", "yima_of",
 ]
