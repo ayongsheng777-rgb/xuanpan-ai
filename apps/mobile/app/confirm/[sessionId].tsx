@@ -7,13 +7,17 @@
  * 这是盘面本身的信息缺失，不是算法不够好。所以让模型猜 = 50% 概率把坐向搞反，
  * 而整份报告都建立在这个前提上。
  *
- * 三条设计约束：
- *   1. 手动修正的唯一入口是**环形选择器**，不给角度输入框（基线规范 §4.1）——
- *      用户不知道 177.03° 是什么，但知道罗盘上"午"在哪
+ * 四条设计约束：
+ *   1. 手动修正的入口是**盘面本身**（拖动旋转 + 点按选山 + 逐项微调按钮），
+ *      不给角度输入框（基线规范 §4.1）—— 用户不知道 177.03° 是什么，
+ *      但知道罗盘上"午"在哪；而输入框会让人把 17.7 与 177 写混。
  *   2. 向山**永远由坐山推导**（±180°），不提供独立选择：坐向是一条直线，
  *      独立选会造出"坐午向巳"这种几何上不成立的状态
  *   3. 实测角度只在选中同一座山时回传。用户改选了别的山，原实测角就失效了 ——
  *      此时若仍回传旧角度，计算层会因"角度与坐山不符"抛错（RULE-008 不静默纠正）
+ *   4. **盘体旋转是视角、不是数据**。用户旋转盘面是为了让画面与手里罗盘对齐，
+ *      它不进 `CompassConfirmRequest`，也绝不影响坐山与实测角 ——
+ *      把"看起来对齐了"当成"数据变了"是这一层最容易犯的错。
  */
 
 import { Ionicons } from '@expo/vector-icons';
@@ -26,8 +30,8 @@ import type { CompassConfirmRequest, LayerPreview, MountainCandidate } from '@/a
 import { AppText } from '@/components/AppText';
 import { Banner, UncertaintyList } from '@/components/Banner';
 import { Button, Card, EmptyState } from '@/components/Card';
+import { CompassAdjuster } from '@/components/CompassAdjuster';
 import { FactList } from '@/components/FactList';
-import { MountainRing, ringHint } from '@/components/MountainRing';
 import { Screen } from '@/components/Screen';
 import { indexOfName, nameOfIndex, oppositeIndex } from '@/lib/ring24';
 import { useAsync, useSubmit } from '@/lib/useAsync';
@@ -48,6 +52,16 @@ export default function ConfirmOrientationScreen(): React.JSX.Element {
   const [note, setNote] = useState('');
   const [preview, setPreview] = useState<LayerPreview | null>(null);
   const [seeded, setSeeded] = useState(false);
+  /** 盘体旋转量 —— 纯**视角**，只影响盘面怎么画，不进计算、不上传 */
+  const [rotation, setRotation] = useState(0);
+  /**
+   * 用户对实测角的手工校准（RULE-004：识别结果必须允许用户修正）。
+   *
+   * 为什么单独存一个覆盖值而不去改候选：候选是**识别层的原始输出**，
+   * 必须原样留痕以备追溯（RULE-008 不得改写用户/识别数据）。
+   * 用户的修正另立一处，提交时才由它顶替 —— 原始识别值与人工修正值互不污染。
+   */
+  const [degreeOverride, setDegreeOverride] = useState<number | null>(null);
 
   const detail = session.data;
   const recognition = detail?.recognition ?? null;
@@ -87,9 +101,16 @@ export default function ConfirmOrientationScreen(): React.JSX.Element {
     return candidates.find((c) => c.name === name) ?? null;
   }, [sitting, candidates]);
 
-  const measuredDegree = selectedCandidate?.angle ?? null;
+  /** 最终采用的实测角：用户手工校准优先于识别值 */
+  const measuredDegree = degreeOverride ?? selectedCandidate?.angle ?? null;
 
   const facing = sitting === null ? null : oppositeIndex(sitting);
+
+  /** 换坐山 = 换了一条鱼丝线，原有的实测角与新坐山不再同源，必须作废 */
+  const handleSelectSitting = useCallback((next: number | null) => {
+    setSitting(next);
+    setDegreeOverride(null);
+  }, []);
 
   const submit = useSubmit(
     useCallback(
@@ -177,21 +198,23 @@ export default function ConfirmOrientationScreen(): React.JSX.Element {
 
       {recognition ? <RecognitionCard candidates={candidates} recognition={recognition} /> : null}
 
-      <Card title="选择坐山">
-        <MountainRing
+      <Card title="确认坐向 · 盘面可逐项微调">
+        <CompassAdjuster
           sitting={sitting}
-          onChange={setSitting}
+          rotation={rotation}
           measuredDegree={measuredDegree}
+          onChangeSitting={handleSelectSitting}
+          onChangeRotation={setRotation}
+          onChangeMeasuredDegree={setDegreeOverride}
           size={300}
         />
-        <AppText size="sm" color="textSecondary" center style={styles.ringHint}>
-          {ringHint(sitting)}
-        </AppText>
 
         {selectedCandidate ? (
           <AppText size="xs" color="muted" center style={styles.candMeta}>
             该山由照片实测支持，置信度 {(selectedCandidate.confidence * 100).toFixed(0)}%；
-            实测角 {selectedCandidate.angle.toFixed(2)}° 将用于分金精算
+            {degreeOverride === null
+              ? `实测角 ${selectedCandidate.angle.toFixed(2)}° 将用于分金精算`
+              : `已手工校准为 ${degreeOverride.toFixed(2)}°（识别原值 ${selectedCandidate.angle.toFixed(2)}° 仍留存）`}
           </AppText>
         ) : sitting !== null ? (
           <AppText size="xs" color="muted" center style={styles.candMeta}>
@@ -326,7 +349,6 @@ function ConfirmedResult({
 
 const styles = StyleSheet.create({
   loadingText: { marginTop: space[10] },
-  ringHint: { marginTop: space[3] },
   candMeta: { marginTop: space[2], lineHeight: 16 },
   provider: { marginTop: space[1] },
   regionBlock: { marginTop: space[2], gap: 2 },

@@ -17,7 +17,7 @@ import { getApiClient, resolveBaseUrl } from '@/api/client';
 import { AppText } from '@/components/AppText';
 import { Banner } from '@/components/Banner';
 import { Button, Card, EmptyState } from '@/components/Card';
-import { HeroCompass } from '@/components/HeroCompass';
+import { CompassDial } from '@/components/CompassDial';
 import { Screen } from '@/components/Screen';
 import { useAsync } from '@/lib/useAsync';
 import { alpha, colors, radius, space } from '@/theme/tokens';
@@ -61,7 +61,7 @@ export default function CompassHomeScreen(): React.JSX.Element {
       {error ? <BackendHint message={error} onRetry={reload} /> : null}
 
       <View style={styles.hero}>
-        <HeroCompass size={228} />
+        <CompassDial size={236} />
         <AppText size="md" color="textSecondary" style={styles.tagline}>
           一盘入局 · AI 解读你的盘面
         </AppText>

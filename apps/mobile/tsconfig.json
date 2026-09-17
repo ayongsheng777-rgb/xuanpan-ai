@@ -7,6 +7,12 @@
     "noFallthroughCasesInSwitch": true,
     "forceConsistentCasingInFileNames": true,
     "jsx": "react-jsx",
+    // 允许在 import 里写显式 `.ts` 后缀 —— 这是 Node 的 ESM/TS 载入器要求的写法，
+    // 而 `scripts/*_probe.ts` 要能被 `node --experimental-strip-types` 直接执行。
+    // 只有 `src/lib/compassDial.ts` 用了这种写法（它被探针导入且自身又导入 ring24）；
+    // 其余源码仍是免后缀风格。tsc 只做类型检查（noEmit），不进构建产物。
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
     "baseUrl": ".",
     "paths": {
       "@/*": ["src/*"]

@@ -30,12 +30,15 @@ apps/mobile/
 │   ├── api/
 │   │   ├── types.ts             # 与 services/api/xuanpan_api/schemas.py 一一对应
 │   │   └── client.ts            # 带超时、错误分类、密钥零持有的 HTTP 客户端
-│   ├── components/              # AppText / Card / Banner / Screen / MountainRing …
+│   ├── components/              # AppText / Card / Banner / Screen / CompassDial / CompassAdjuster …
 │   ├── lib/
-│   │   ├── ring24.ts            # 二十四山环形选择器几何（纯函数，已跨语言校验）
+│   │   ├── ring24.ts            # 二十四山环形几何：角度 ↔ 山、扇形路径（纯函数，已跨语言校验）
+│   │   ├── compassDial.ts       # 罗盘盘式：层次 / 刻度 / 配色角色 / 旋转（纯函数，已跨语言校验）
 │   │   └── useAsync.ts          # 极简异步状态（读 / 写两条路径 + 错误分类）
 │   └── theme/tokens.ts          # 五色设计 Token（唯一真源）
-└── scripts/ring24_probe.ts      # 几何探针：供 pytest 做跨语言一致性校验
+└── scripts/
+    ├── ring24_probe.ts          # 山表 / 角度探针：供 pytest 做跨语言一致性校验
+    └── compass_dial_probe.ts    # 盘面探针：卦位 / 分金 / 配色角色的跨语言校验
 ```
 
 ---
