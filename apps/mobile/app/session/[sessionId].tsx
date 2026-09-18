@@ -13,7 +13,7 @@
 
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import React, { useCallback, useMemo } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { Alert, Pressable, StyleSheet, View } from 'react-native';
 
 import { getApiClient } from '@/api/client';
@@ -21,8 +21,12 @@ import type { ModuleName, SessionDetail } from '@/api/types';
 import { AppText } from '@/components/AppText';
 import { Banner, UncertaintyList } from '@/components/Banner';
 import { Button, Card, EmptyState, KeyValueRow } from '@/components/Card';
+import { CompassDial } from '@/components/CompassDial';
 import { FactList } from '@/components/FactList';
 import { Screen } from '@/components/Screen';
+import { initialRotationFor } from '@/lib/compassDial';
+import { DEFAULT_DIAL_STYLE } from '@/lib/dialStyle';
+import { indexOfName } from '@/lib/ring24';
 import { useAsync, useSubmit } from '@/lib/useAsync';
 import { alpha, colors, radius, space } from '@/theme/tokens';
 
@@ -55,6 +59,17 @@ export default function SessionDetailScreen(): React.JSX.Element {
 
   const api = useMemo(() => getApiClient(), []);
   const session = useAsync(useCallback(() => api.getSession(id), [api, id]), [id]);
+
+  /**
+   * 盘面可用宽度。
+   *
+   * 不能把 size 写死：盘面放在 Card 里，而 Card 内宽 = 屏宽 − 2·gutter − 2·cardPadding。
+   * 320pt 的老机型上这个值只有 256 —— 写死 280 会**溢出被裁掉一小圈**，
+   * 而盘面恰恰是"看排位对不对"用的，缺一圈就失效了，且不会报任何错。
+   * 故先量再画（未量到之前不渲染，避免先用一个会溢出的尺寸画一帧）。
+   */
+  const [dialBox, setDialBox] = useState(0);
+  const dialSize = Math.min(320, dialBox);
 
   const remove = useSubmit(useCallback(() => api.deleteSession(id), [api, id]));
 
@@ -118,6 +133,26 @@ export default function SessionDetailScreen(): React.JSX.Element {
   }
 
   const hasReport = d.report_count > 0;
+
+  /**
+   * 档存坐向 → 盘面几何。
+   *
+   * 对准规则走 `initialRotationFor`（唯一实现）—— 它的口径是
+   * **顶部读数为坐山方向**，依据在内核：`degree` 落在坐山那一格上
+   * （见该函数注释里的两处证据）。
+   *
+   * 🔴 本页原先自己拼了一套：有实测角用实测角、没实测角用**向山**山心角。
+   *    于是同一条记录在"有没有实测角"两种情况下盘面相差 180°，
+   *    而盘面画得完全正常 —— 只有把盘面与记录里的「坐 X 向 Y」对读才会发现。
+   */
+  const archivedSitting =
+    d.confirm_state && d.confirm_state.sitting
+      ? indexOfName(d.confirm_state.sitting)
+      : -1;
+  const archivedRotation = initialRotationFor({
+    sittingIndex: archivedSitting,
+    degree: d.confirm_state?.degree ?? null,
+  });
 
   return (
     <Screen scroll bottomInsetExtra={space[10]}>
@@ -194,6 +229,31 @@ export default function SessionDetailScreen(): React.JSX.Element {
         <Banner tone="warning" title="识别结果尚未确认">
           这张照片识别出了候选坐向，但还没有经过你的确认，因此不计入计算。
         </Banner>
+      ) : null}
+
+      {archivedSitting >= 0 ? (
+        <Card title="盘面还原">
+          <View
+            style={styles.dialWrap}
+            onLayout={(e) => setDialBox(e.nativeEvent.layout.width)}
+          >
+            {dialBox > 0 ? (
+              <CompassDial
+                size={dialSize}
+                style={DEFAULT_DIAL_STYLE}
+                sitting={archivedSitting}
+                measuredDegree={d.confirm_state?.degree ?? null}
+                rotation={archivedRotation}
+              />
+            ) : null}
+          </View>
+          <AppText size="xs" color="muted" center style={styles.dialHint}>
+            顶部读数是当年的坐山方向（有实测角就按实测角，否则按山心角）。
+            {'\n'}
+            这是按当前内核重算出来的盘面，不是存档里的截图；盘式（层数）属显示设置、
+            不随记录存档，故这里用与其它页面相同的盘式。
+          </AppText>
+        </Card>
       ) : null}
 
       {d.recognition ? <RecognitionBlock recognition={d.recognition} /> : null}
@@ -349,6 +409,9 @@ const styles = StyleSheet.create({
   },
   chipReport: { backgroundColor: alpha.primarySoft },
   kvBlock: { marginTop: space[3] },
+
+  dialWrap: { alignItems: 'center', marginTop: space[2], marginBottom: space[3] },
+  dialHint: { lineHeight: 17 },
 
   confirmMain: { marginBottom: space[1] },
   confirmSub: {},
