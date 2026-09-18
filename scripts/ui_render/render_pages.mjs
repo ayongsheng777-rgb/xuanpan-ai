@@ -31,6 +31,17 @@ if (!CHROME || !OUT) {
 const ADMIN_TOKEN = process.env.XP_ADMIN_TOKEN || '';
 
 /**
+ * 会话 ID（可选）：确认坐向 / 会话详情 / AI 报告三页都是动态路由，
+ * 没有真实 sessionId 就只能拍到「无此会话」的错误屏 —— 那比不拍更误导。
+ * 所以这三页只在显式给了 XP_SESSION_ID 时才渲染。
+ *
+ * 刻意不写死 id：快照依赖运行时的库数据（`data/xuanpan.db`，不入版本库），
+ * 写死的 id 在换库 / 清库后必然失效，而失效的表现是**静默拍下一张错误页** ——
+ * 与「这页坏了」无法区分。
+ */
+const SESSION_ID = process.env.XP_SESSION_ID || '';
+
+/**
  * 待渲染页面：name|path|w|h|mode|click（click 可选，CSS 选择器）
  *
  * `click` 用于懒渲染的视图：页面初始视图之外的面板要点了才建 DOM，
@@ -80,6 +91,16 @@ const PAGES = [
     'viewport',
     'button[data-view="config"]',
   ],
+  // 会话链路的三页（确认坐向 → 会话详情 → AI 报告）：动态路由，需要真实 id。
+  // 它们覆盖了产品最关键的两道机制 —— RULE-004 的用户确认闸门、
+  // 报告页三标签的物理分离；缺了这三张，主链路的快照是断的。
+  ...(SESSION_ID
+    ? [
+        ['17-confirm', `/confirm/${SESSION_ID}`, 390, 844, 'viewport'],
+        ['18-session', `/session/${SESSION_ID}`, 390, 844, 'viewport'],
+        ['19-report', `/report/${SESSION_ID}`, 390, 844, 'viewport'],
+      ]
+    : []),
 ].filter((p) => !ONLY || ONLY.split(',').map((s) => s.trim()).includes(p[0]));
 
 const PORT = 9300 + Math.floor(Math.random() * 400);
