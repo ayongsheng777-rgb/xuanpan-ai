@@ -40,6 +40,10 @@ dist/
 build/
 web-build/
 *.tsbuildinfo
+
+# expo web 静态产物（`npx expo export --platform web` 的默认去向，
+# 也是 tests/mobile/test_ui_render.py 的输入）。属可再生产物，不入库。
+dist-web/
 .next/
 .npm/
 .metro-health-check*
