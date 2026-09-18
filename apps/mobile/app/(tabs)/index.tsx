@@ -1,27 +1,35 @@
 /**
- * 罗盘（首页）—— 基线规范 §1.1。
+ * 罗盘（首页）—— V2 演示图第 1 屏「数字罗盘 · 仿真模式」。
  *
- * 结构：标题栏 → 罗盘视觉 → 主 CTA → 快捷入口 → 今日状态。
+ * 布局（核心数据优先，V2 §31）：
+ *   标题栏 → 真北指示 → 深色大罗盘（可拖动）→
+ *   当前方位（大字）+ 磁场强度卡 → 三快捷入口 → 今日状态
  *
- * 关于"后端没起来"：这是本地/自建部署最常见的第一次体验问题。
- * 页面**不隐藏**这个状态，而是给出端口与排查方向 ——
- * 静默失败会让用户以为 App 坏了，而这其实是最容易自查的一类问题。
+ * 语义约定：
+ *   - 本页罗盘是**仿真模式**：用户拖出的方向就是「当前方位」，
+ *     不读取传感器（传感器测量在 /sensors 页，职责分离，V2 §30「一页一事」）。
+ *   - 磁场卡的数据来自传感器；设备无磁力计/数据未到时显示「—」占位，
+ *     **不编造数值**（RULE-008 同精神：没有就是没有）。
+ *
+ * 深色仪器风（instrument 色域）仅用于罗盘域 —— 见《V2 评估与实施路线》冲突 2 裁决。
  */
 
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import React, { useCallback } from 'react';
+import React, { useCallback, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
-import { getApiClient, resolveBaseUrl } from '@/api/client';
+import { getApiClient } from '@/api/client';
 import { AppText } from '@/components/AppText';
 import { Banner } from '@/components/Banner';
-import { Button, Card, EmptyState } from '@/components/Card';
-import { CompassDial } from '@/components/CompassDial';
+import { Button, Card } from '@/components/Card';
+import { CompassDial, DIAL_DARK } from '@/components/CompassDial';
 import { HelpButton } from '@/components/HelpButton';
 import { Screen } from '@/components/Screen';
+import { normalizeSigned } from '@/lib/compassDial';
 import { useAsync } from '@/lib/useAsync';
-import { alpha, colors, radius, space } from '@/theme/tokens';
+import { useSensorSnapshot } from '@/services/useSensors';
+import { instrument, radius, space } from '@/theme/tokens';
 
 interface HomeStats {
   total: number;
@@ -30,25 +38,27 @@ interface HomeStats {
 
 export default function CompassHomeScreen(): React.JSX.Element {
   const router = useRouter();
+  /** 仿真模式的盘面旋转量（度）。用户拖出来的「当前方位」 */
+  const [rotation, setRotation] = useState(0);
+  /** 磁场卡需要传感器 —— 首页也订阅（进入即开始，离开即停止，见 useSensors 注释） */
+  const sensor = useSensorSnapshot(true);
 
   const load = useCallback(async (): Promise<HomeStats> => {
     const page = await getApiClient().listSessions(1, 0);
     return { total: page.total, latestTitle: page.items[0]?.title ?? null };
   }, []);
+  const { data, error, reload } = useAsync(load, []);
 
-  const { data, loading, error, reload } = useAsync(load, []);
+  // 方位按 0..360 显示（负角如 -12.72° 显示为 347.28°，与实物罗盘读法一致）
+  const azimuth = ((normalizeSigned(rotation) % 360) + 360) % 360;
 
   return (
-    <Screen scroll onRefresh={reload} refreshing={loading && data !== null}>
+    <Screen scroll style={styles.root} onRefresh={reload} refreshing={false}>
+      {/* ---------- 标题栏 ---------- */}
       <View style={styles.headerRow}>
-        <View>
-          <AppText size="xxl" weight="bold" color="primary">
-            玄盘 AI
-          </AppText>
-          <AppText size="xs" color="muted" style={styles.subtitle}>
-            确定性计算 · AI 解读
-          </AppText>
-        </View>
+        <AppText size="xl" weight="bold" color={instrument.text}>
+          玄盘 AI
+        </AppText>
         <View style={styles.headerActions}>
           <HelpButton topic="compass-home" />
           <Pressable
@@ -57,91 +67,117 @@ export default function CompassHomeScreen(): React.JSX.Element {
             hitSlop={10}
             style={styles.gear}
           >
-            <Ionicons name="settings-outline" size={22} color={colors.textSecondary} />
+            <Ionicons name="settings-outline" size={20} color={instrument.textSecondary} />
           </Pressable>
         </View>
       </View>
 
-      {error ? <BackendHint message={error} onRetry={reload} /> : null}
+      {error ? (
+        <Banner tone="error" title="无法连接后端服务" style={styles.banner}>
+          <AppText size="sm">{error}</AppText>
+          <Button label="重试" variant="ghost" style={styles.retry} onPress={reload} />
+        </Banner>
+      ) : null}
 
-      <View style={styles.hero}>
-        <CompassDial size={236} />
-        <AppText size="md" color="textSecondary" style={styles.tagline}>
-          一盘入局 · AI 解读你的盘面
+      {/* ---------- 真北指示 ---------- */}
+      <View style={styles.northRow}>
+        <AppText size="xs" color={instrument.textSecondary}>
+          真北 0°
         </AppText>
+        <View style={styles.northArrow} />
       </View>
 
-      <Card highlight style={styles.ctaCard}>
-        <Button
-          label="拍摄罗盘 —— AI 自动识别坐山向山"
-          size="lg"
-          icon={<Ionicons name="compass" size={20} color={colors.onPrimary} />}
+      {/* ---------- 深色大罗盘（仿真：可拖动） ---------- */}
+      <View style={styles.dialWrap}>
+        <CompassDial
+          size={300}
+          palette={DIAL_DARK}
+          rotation={rotation}
+          interactive
+          onRotate={setRotation}
+        />
+      </View>
+
+      {/* ---------- 核心读数 ---------- */}
+      <View style={styles.readoutRow}>
+        <View style={[styles.readoutCard, styles.readoutMain]}>
+          <AppText size="xs" color={instrument.textSecondary}>
+            当前方位（仿真）
+          </AppText>
+          <AppText size="display" weight="bold" color={instrument.accent} style={styles.azimuth}>
+            {azimuth.toFixed(2)}°
+          </AppText>
+          <AppText size="xs" color={instrument.muted}>
+            拖动罗盘改变方向
+          </AppText>
+        </View>
+        <View style={styles.readoutCard}>
+          <AppText size="xs" color={instrument.textSecondary}>
+            磁场强度
+          </AppText>
+          <AppText size="xl" weight="bold" color={instrument.text} style={styles.magValue}>
+            {sensor.magneticMagnitude === null
+              ? '—'
+              : `${sensor.magneticMagnitude.toFixed(1)} μT`}
+          </AppText>
+          <View style={styles.magStatus}>
+            <View
+              style={[
+                styles.dot,
+                {
+                  backgroundColor:
+                    sensor.magneticMagnitude === null
+                      ? instrument.muted
+                      : sensor.quality.magnetic >= 70
+                        ? instrument.ok
+                        : instrument.warn,
+                },
+              ]}
+            />
+            <AppText size="xs" color={instrument.textSecondary}>
+              {sensor.magneticMagnitude === null ? '无数据' : `磁场${sensor.quality.magneticLabel}`}
+            </AppText>
+          </View>
+        </View>
+      </View>
+
+      {/* ---------- 三快捷入口 ---------- */}
+      <View style={styles.quickRow}>
+        <QuickEntry
+          label="扫描真实罗盘"
+          icon="camera-outline"
           onPress={() => router.push('/scan')}
         />
-        <AppText size="xs" color="muted" center style={styles.ctaHint}>
-          也可从相册选择已拍好的照片；识别结果须经你确认后才进入计算
-        </AppText>
-      </Card>
-
-      <View style={styles.quickRow}>
-        <QuickEntry label="八字" icon="calendar-outline" onPress={() => router.push('/chart')} />
-        <QuickEntry label="六爻" icon="git-branch-outline" onPress={() => router.push('/divine')} />
-        <QuickEntry label="灵签" icon="book-outline" onPress={() => router.push('/divine')} />
-        <QuickEntry label="黄历" icon="today-outline" onPress={() => router.push('/almanac')} />
-        <QuickEntry label="三式" icon="grid-outline" onPress={() => router.push('/sanshi')} />
+        <QuickEntry
+          label="传感器测量"
+          icon="radio-outline"
+          onPress={() => router.push('/sensors')}
+        />
+        <QuickEntry
+          label="手动调节"
+          icon="options-outline"
+          onPress={() => router.push('/adjust')}
+        />
       </View>
 
-      <Card title="今日状态">
-        {loading && data === null ? (
-          <AppText size="sm" color="muted">
-            读取中…
+      {/* ---------- 今日状态 ---------- */}
+      {data && data.total > 0 ? (
+        <Pressable onPress={() => router.push('/history')} style={styles.statsCard}>
+          <AppText size="sm" weight="semibold" color={instrument.text}>
+            已保存 {data.total} 个盘面
           </AppText>
-        ) : data && data.total > 0 ? (
-          <>
-            <AppText size="lg" weight="semibold" color="primary">
-              已保存 {data.total} 个盘面
+          {data.latestTitle ? (
+            <AppText size="xs" color={instrument.textSecondary} style={styles.latest}>
+              最近：{data.latestTitle}
             </AppText>
-            {data.latestTitle ? (
-              <AppText size="sm" color="textSecondary" style={styles.latest}>
-                最近：{data.latestTitle}
-              </AppText>
-            ) : null}
-            <Button
-              label="查看历史"
-              variant="ghost"
-              style={styles.historyBtn}
-              onPress={() => router.push('/history')}
-            />
-          </>
-        ) : (
-          <EmptyState title="还没有记录" hint="上传一张罗盘照片，或在命盘 / 占测页录入信息" />
-        )}
-      </Card>
+          ) : null}
+        </Pressable>
+      ) : null}
 
-      <AppText size="xs" color="muted" center style={styles.disclaimer}>
-        以上内容属于传统文化娱乐/学习参考
+      <AppText size="xs" color={instrument.muted} center style={styles.disclaimer}>
+        仿真模式仅用于熟悉盘面；实测请用传感器测量或扫描真实罗盘
       </AppText>
     </Screen>
-  );
-}
-
-/** 后端不可达提示 —— 给出端口与排查方向，而不是只说"网络错误" */
-function BackendHint({
-  message,
-  onRetry,
-}: {
-  message: string;
-  onRetry: () => void;
-}): React.JSX.Element {
-  return (
-    <Banner tone="error" title="无法连接后端服务">
-      <AppText size="sm">{message}</AppText>
-      <AppText size="sm" style={styles.hintBody}>
-        请确认后端已启动（当前地址 {resolveBaseUrl()}）。真机调试时需把 app.json 里的
-        apiBaseUrl 改成本机局域网 IP。
-      </AppText>
-      <Button label="重试" variant="ghost" style={styles.retry} onPress={onRetry} />
-    </Banner>
   );
 }
 
@@ -155,9 +191,14 @@ function QuickEntry({
   onPress: () => void;
 }): React.JSX.Element {
   return (
-    <Pressable onPress={onPress} style={({ pressed }) => [styles.quick, pressed && styles.quickPressed]}>
-      <Ionicons name={icon} size={20} color={colors.primary} />
-      <AppText size="sm" weight="medium" color="primary" style={styles.quickLabel}>
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      style={({ pressed }) => [styles.quick, pressed && styles.quickPressed]}
+    >
+      <Ionicons name={icon} size={22} color={instrument.accent} />
+      <AppText size="xs" weight="medium" color={instrument.text} center style={styles.quickLabel}>
         {label}
       </AppText>
     </Pressable>
@@ -165,29 +206,61 @@ function QuickEntry({
 }
 
 const styles = StyleSheet.create({
-  headerRow: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between' },
-  subtitle: { marginTop: 2 },
+  root: { backgroundColor: instrument.bg },
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
   headerActions: { flexDirection: 'row', alignItems: 'center', gap: space[1] },
-  gear: { padding: space[2], borderRadius: radius.pill, backgroundColor: colors.surface },
-  hero: { alignItems: 'center', marginTop: space[5], marginBottom: space[4] },
-  tagline: { marginTop: space[3] },
-  ctaCard: { marginBottom: space[4] },
-  ctaHint: { marginTop: space[2] },
-  quickRow: { flexDirection: 'row', gap: space[3], marginBottom: space[4] },
+  gear: { padding: space[2], borderRadius: radius.pill, backgroundColor: instrument.surface },
+  banner: { marginTop: space[3] },
+  retry: { marginTop: space[2] },
+  northRow: { alignItems: 'center', marginTop: space[4], gap: 2 },
+  northArrow: {
+    width: 0,
+    height: 0,
+    borderLeftWidth: 5,
+    borderRightWidth: 5,
+    borderBottomWidth: 8,
+    borderLeftColor: 'transparent',
+    borderRightColor: 'transparent',
+    borderBottomColor: instrument.needle,
+  },
+  dialWrap: { alignItems: 'center', marginTop: space[1] },
+  readoutRow: { flexDirection: 'row', gap: space[3], marginTop: space[4] },
+  readoutCard: {
+    backgroundColor: instrument.surface,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: instrument.border,
+    padding: space[3],
+  },
+  readoutMain: { flex: 1.4 },
+  azimuth: { marginTop: space[1], fontVariant: ['tabular-nums'] },
+  magValue: { marginTop: space[2], fontVariant: ['tabular-nums'] },
+  magStatus: { flexDirection: 'row', alignItems: 'center', gap: space[1], marginTop: space[1] },
+  dot: { width: 6, height: 6, borderRadius: 3 },
+  quickRow: { flexDirection: 'row', gap: space[3], marginTop: space[4] },
   quick: {
     flex: 1,
     alignItems: 'center',
     paddingVertical: space[3],
-    borderRadius: radius.md,
-    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    backgroundColor: instrument.surface,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: instrument.border,
   },
-  quickPressed: { backgroundColor: alpha.primarySoft },
-  quickLabel: { marginTop: space[1] },
-  latest: { marginTop: space[1] },
-  historyBtn: { marginTop: space[3] },
+  quickPressed: { backgroundColor: instrument.surfaceAlt },
+  quickLabel: { marginTop: space[2] },
+  statsCard: {
+    marginTop: space[4],
+    backgroundColor: instrument.surface,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: instrument.border,
+    padding: space[3],
+  },
+  latest: { marginTop: 2 },
   disclaimer: { marginTop: space[4] },
-  hintBody: { marginTop: space[1] },
-  retry: { marginTop: space[3] },
 });
