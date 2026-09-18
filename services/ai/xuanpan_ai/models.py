@@ -20,11 +20,28 @@ from typing import Any, Literal
 #：固定免责声明（基线规范 §3 硬性要求 3，逐字不得改写）
 DISCLAIMER = "以上内容属于传统文化娱乐/学习参考"
 
-#：AI 解读标签内的固定子区块与顺序（材料 A 的四段并入此处）
+#：AI 解读标签内的固定子区块与顺序（每个文体各一份）
 REQUIRED_SECTIONS: tuple[str, ...] = ("事实", "传统解释", "针对问题", "参考建议")
+
+#: 两种文体的块标题。
+#:
+#: 为什么要**两种**而不是把术语解释塞进同一段：同一份盘面，懂术数的人要的是
+#: 精确术语（好去对照手里的盘与书），不懂的人要的是"这说的是什么"。把两者
+#: 揉在一段里，前者嫌啰嗦、后者还是看不懂 —— 这是两种读者的两种需求，
+#: 不是一种需求的两个措辞。
+#:
+#: 先专业后白话的顺序是刻意的：先给术语精确的版本，再给讲人话的版本。
+#: 反过来会让读者先建立一个模糊理解，再被术语纠正。
+REGISTER_EXPERT = "专业分析"
+REGISTER_PLAIN = "白话讲解"
+REGISTER_TITLES: tuple[str, ...] = (REGISTER_EXPERT, REGISTER_PLAIN)
+
+#: 文体标识（`Interpretation` 的两个字段用它区分）
+Register = Literal["expert", "plain"]
 
 Layer = Literal["FACT", "TRADITION", "AI_INTERPRETATION"]
 Role = Literal["user", "assistant"]
+
 
 
 # ==========================================================================
@@ -118,25 +135,57 @@ class ReportSection:
 
 @dataclass(frozen=True, slots=True)
 class Interpretation:
-    """AI 解读层（`AI_INTERPRETATION`）—— 唯一由模型生成的层。"""
+    """AI 解读层（`AI_INTERPRETATION`）—— 唯一由模型生成的层。
+
+    含**两种文体**（同一件事、同一批数据的深浅两版）：
+
+        sections        专业分析 —— 用术语，面向能对照盘面/命盘的读者
+        plain_sections  白话讲解 —— 不用术语，面向第一次接触的读者
+
+    两者是**并列的两份**，不是"白话是专业的注解"：白话版必须自己讲得完整，
+    否则读者只能两版对着看才懂，那就等于没有白话版。
+    """
 
     sections: tuple[ReportSection, ...]
     raw_text: str
     provider: str
     model: str
+    #: 白话讲解。模型没给出白话块时为 `()` —— **不填充、不拿专业版冒充**，
+    #: 由界面如实显示"本篇没有白话版"，并记 warning 说明原因。
+    plain_sections: tuple[ReportSection, ...] = ()
     degraded: bool = False
     attempts: tuple[Attempt, ...] = ()
     usage: TokenUsage | None = None
     warnings: tuple[str, ...] = ()
 
     @property
+    def has_plain(self) -> bool:
+        """是否有白话版。界面据此决定显示切换还是显示"没有白话版"的说明。"""
+        return bool(self.plain_sections)
+
+    @property
     def text(self) -> str:
-        """把子区块拼回整段文本（供复制/分享）。"""
+        """把**专业分析**的子区块拼回整段文本。
+
+        只拼专业版是刻意的：这段文本会作为 assistant 的对话轮次回灌给模型
+        （见 `routers/report.py` 的 `add_turn`），专业版更短、术语更准，
+        是更好的上下文。白话版是给**人**看的，不必进模型上下文。
+        """
         return "\n\n".join(f"【{s.title}】\n{s.body}" for s in self.sections)
+
+    @property
+    def plain_text(self) -> str:
+        """白话版的整段文本（无白话版时为空串）。"""
+        return "\n\n".join(f"【{s.title}】\n{s.body}" for s in self.plain_sections)
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "sections": [s.to_dict() for s in self.sections],
+            "plain_sections": [s.to_dict() for s in self.plain_sections],
+            # 冗余一个布尔：前端据此决定显不显示文体切换。若只给数组，
+            # 每个消费方都要自己写 `plain_sections.length > 0` 的判断 ——
+            # 而漏写这一处判断的表现是"切换按钮点了没反应"。
+            "has_plain": self.has_plain,
             "raw_text": self.raw_text,
             "provider": self.provider,
             "model": self.model,
@@ -183,7 +232,8 @@ class Report:
 
 
 __all__ = [
-    "DISCLAIMER", "REQUIRED_SECTIONS", "Layer", "Role",
+    "DISCLAIMER", "REQUIRED_SECTIONS", "REGISTER_EXPERT", "REGISTER_PLAIN",
+    "REGISTER_TITLES", "Register", "Layer", "Role",
     "Turn", "TokenUsage", "LLMRequest", "Attempt", "LLMResponse",
     "ReportSection", "Interpretation", "Report",
 ]

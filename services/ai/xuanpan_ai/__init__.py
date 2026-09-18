@@ -29,6 +29,9 @@ from .errors import (
 )
 from .models import (
     DISCLAIMER,
+    REGISTER_EXPERT,
+    REGISTER_PLAIN,
+    REGISTER_TITLES,
     REQUIRED_SECTIONS,
     Attempt,
     Interpretation,
@@ -46,6 +49,7 @@ from .prompt import (
     missing_sections,
     parse_sections,
     required_sections_of,
+    split_registers,
     unmentioned_uncertainties,
 )
 from .providers import (
@@ -65,6 +69,8 @@ __all__ = [
     # 报告装配
     "build_report", "UNCERTAINTY_SECTION_TITLE", "Report",
     "Interpretation", "ReportSection", "DISCLAIMER", "REQUIRED_SECTIONS",
+    # 文体（专业分析 / 白话讲解）
+    "REGISTER_EXPERT", "REGISTER_PLAIN", "REGISTER_TITLES",
     # 路由
     "AIRouter", "RouterConfig",
     # 调用模型
@@ -73,6 +79,7 @@ __all__ = [
     "SYSTEM_ROLE", "required_sections_of",
     "build_system_prompt", "build_user_message",
     "parse_sections", "missing_sections", "unmentioned_uncertainties",
+    "split_registers",
     # provider 元信息（供 API / UI）
     "CAPABILITY_MATRIX", "ENDPOINT_PRESETS", "get_provider",
     "list_providers", "list_endpoint_presets",

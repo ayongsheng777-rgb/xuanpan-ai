@@ -15,6 +15,11 @@
 **三、输出必须落回固定区块**
 `REQUIRED_SECTIONS` 是硬结构。解析失败时不报错、不丢内容：
 原文整段保留为一个区块并记 warning —— 宁可结构丑，不可内容丢。
+
+**四、两种文体都要写全**
+输出分【专业分析】与【白话讲解】两块，各含同一套区块。白话块**不是**
+可选装饰：它是给"看术语就看不懂"的那部分读者的唯一入口。模型漏写白话块时，
+解析层不报错、不拿专业版顶上，只记 warning 并由界面如实显示"本篇没有白话版"。
 """
 
 from __future__ import annotations
@@ -22,7 +27,12 @@ from __future__ import annotations
 import re
 from typing import Any, Sequence
 
-from .models import REQUIRED_SECTIONS, ReportSection
+from .models import (
+    REGISTER_EXPERT,
+    REGISTER_PLAIN,
+    REQUIRED_SECTIONS,
+    ReportSection,
+)
 
 #：AI 的角色与边界。**不得删除任何一条禁止项**（有测试守着）。
 SYSTEM_ROLE = """你是「玄盘 AI」的解读助手，服务于传统文化术数（风水坐向、八字、六爻、灵签、姓名）的学习与娱乐。
@@ -99,9 +109,19 @@ def _output_rule(titles: Sequence[str]) -> str:
     headings = "\n".join(f"【{t}】" for t in titles)
     return (
         "输出格式（严格遵守）：\n"
-        f"用【】标出下列 {len(titles)} 个区块标题，顺序不可调换，不得增删区块：\n\n"
+        f"全文分两块，先【{REGISTER_EXPERT}】再【{REGISTER_PLAIN}】，"
+        "顺序不可调换，两块都要写。\n"
+        f"每块内部用【】标出下列 {len(titles)} 个区块，顺序不可调换，不得增删区块：\n\n"
         f"{headings}\n\n"
-        "全文不超过 900 字。不要输出 JSON，不要输出表格，不要使用 Markdown 代码块。\n"
+        f"【{REGISTER_EXPERT}】：面向熟悉术数的读者，直接用术语（坐山、向山、分金、"
+        "五行、体用等），简洁、准确，不解释术语。\n"
+        f"【{REGISTER_PLAIN}】：面向完全没接触过的读者，把**同一件事**重讲一遍。"
+        "不得使用未解释的术语；每出现一个术语就用一句话说明它的意思，"
+        "可以用生活化的比方。\n"
+        "两个文体讲的是同一批数据、同一个结论，只是深浅不同 —— "
+        "不得出现互相矛盾的说法，也不得在白话版里删掉专业版已经说明的不确定性"
+        "（讲人话 ≠ 讲得含糊）。\n"
+        "每块不超过 700 字。不要输出 JSON，不要输出表格，不要使用 Markdown 代码块。\n"
     )
 
 
@@ -215,6 +235,53 @@ def missing_sections(
     return [t for t in titles if t not in got]
 
 
+# --------------------------------------------------------------------------
+# 文体切分
+# --------------------------------------------------------------------------
+
+
+def _first_heading_span(text: str, title: str) -> tuple[int, int] | None:
+    """某个标题的首次命中位置 (起点, 终点)，认法与区块标题同一套。"""
+    best: tuple[int, int] | None = None
+    for pat in _patterns_for(title):
+        for m in re.finditer(pat, text, flags=re.MULTILINE):
+            if best is None or m.start() < best[0]:
+                best = (m.start(), m.end())
+            break  # 每个模式只取首次命中，与 parse_sections 同规则
+    return best
+
+
+def split_registers(text: str) -> tuple[str, str]:
+    """把模型输出按文体切成 (专业分析文本, 白话讲解文本)。
+
+    切分而不是"整体解析两遍"的理由：两个文体内部用的是**同一套区块标题**
+    （事实 / 传统解释 / 针对问题 / 参考建议）。整体解析会把两套标题混在一起，
+    得到 8 个区块且顺序被打乱 —— 那时再想还原"哪一段属于哪个文体"已经晚了。
+
+    容错：
+    - 认不出白话块 → 返回 `(全文, "")`，由调用方记 warning 并如实显示"没有白话版"。
+      **不拿专业版冒充白话版**：那会让读者以为白话功能坏了，而界面看起来完全正常。
+    - 专业块标记之前的文字予以保留（`parse_sections` 会把它归入「补充」），
+      不因为切分而丢掉内容。
+
+    >>> split_registers("【专业分析】\\n【事实】甲\\n【白话讲解】\\n【事实】乙")
+    ('\\n【事实】甲\\n', '\\n【事实】乙')
+    """
+    plain = _first_heading_span(text, REGISTER_PLAIN)
+    if plain is None:
+        return text, ""
+
+    head = text[: plain[0]]
+    plain_text = text[plain[1] :]
+
+    expert = _first_heading_span(head, REGISTER_EXPERT)
+    if expert is not None:
+        # 只摘掉标记本身，保留它之前的内容（可能是模型的引言或被误置的正文）
+        head = head[: expert[0]] + head[expert[1] :]
+
+    return head, plain_text
+
+
 def unmentioned_uncertainties(
     text: str, uncertainties: Sequence[str], *, sample_chars: int = 8
 ) -> list[str]:
@@ -238,4 +305,5 @@ __all__ = [
     "SYSTEM_ROLE", "required_sections_of",
     "build_system_prompt", "build_user_message",
     "parse_sections", "missing_sections", "unmentioned_uncertainties",
+    "split_registers",
 ]
