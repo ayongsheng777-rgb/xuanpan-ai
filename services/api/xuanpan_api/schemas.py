@@ -505,8 +505,52 @@ class TaiyiMetaResponse(ApiModel):
     )
 
 
+# ======================================================================
+# 罗盘模板
+# ======================================================================
+
+
+class TemplateCreate(ApiModel):
+    """新建模板。
+
+    `style` 是**盘式 id**（simple / sanhe / zonghe），不是层数 ——
+    后端刻意不维护「盘式 → 层数」表：那份表在前端 `lib/dialStyle.ts`，
+    两边各存一份必然漂移，而漂移的表现是「列表写 18 层、打开画出 6 层」，
+    数字对不上却不报任何错。故这里只限长度、不校验枚举：
+    删掉某个盘式后，旧模板仍能读出来并由前端回落到默认盘，而不是 500。
+    """
+
+    name: str = Field(min_length=1, max_length=32, description="模板名，如「李师傅三元盘」")
+    style: str = Field(default="zonghe", max_length=24, description="盘式 id")
+    sitting: str | None = Field(default=None, max_length=8, description="默认坐山，如「午」")
+    facing: str | None = Field(default=None, max_length=8, description="默认向山，如「子」")
+    degree: float | None = Field(default=None, ge=0.0, le=360.0, description="默认方位角")
+    school: str = Field(default="default", max_length=32, description="流派 id")
+    note: str | None = Field(default=None, max_length=200)
+    is_favorite: bool = Field(default=False, description="常用标记（列表置顶）")
+
+
+class TemplateUpdate(ApiModel):
+    """局部更新：只给要改的字段。
+
+    刻意**不是**「`TemplateCreate` 字段全变 Optional」的全量覆盖语义：
+    列表页点一下收藏只会传 `is_favorite`，若走全量覆盖，
+    没传的 `name` 会被 `None` 抹掉，而用户看不到任何提示。
+    """
+
+    name: str | None = Field(default=None, min_length=1, max_length=32)
+    style: str | None = Field(default=None, max_length=24)
+    sitting: str | None = Field(default=None, max_length=8)
+    facing: str | None = Field(default=None, max_length=8)
+    degree: float | None = Field(default=None, ge=0.0, le=360.0)
+    school: str | None = Field(default=None, max_length=32)
+    note: str | None = Field(default=None, max_length=200)
+    is_favorite: bool | None = None
+
+
 __all__ = [
     "ApiModel", "SessionCreate", "CompassInput", "BaziInput", "LiuyaoInput",
+    "TemplateCreate", "TemplateUpdate",
     "QianInput", "NamingInput", "InputPatch", "CompassConfirm",
     "ReportRequest", "AskRequest",
     "SessionCreated", "ScanAccepted", "LayerPreview", "DeletedResponse",

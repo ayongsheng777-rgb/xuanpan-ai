@@ -70,9 +70,26 @@ CREATE TABLE IF NOT EXISTS turns (
     FOREIGN KEY (session_id) REFERENCES sessions(session_id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS compass_templates (
+    template_id  TEXT PRIMARY KEY,
+    created_at   TEXT NOT NULL,
+    updated_at   TEXT NOT NULL,
+    name         TEXT NOT NULL,
+    style        TEXT NOT NULL DEFAULT 'zonghe',
+    sitting      TEXT,
+    facing       TEXT,
+    degree       REAL,
+    school       TEXT NOT NULL DEFAULT 'default',
+    note         TEXT,
+    is_favorite  INTEGER NOT NULL DEFAULT 0,
+    use_count    INTEGER NOT NULL DEFAULT 0,
+    last_used_at TEXT
+);
+
 CREATE INDEX IF NOT EXISTS idx_reports_session ON reports(session_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_turns_session   ON turns(session_id, id);
 CREATE INDEX IF NOT EXISTS idx_sessions_time   ON sessions(updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_templates_order ON compass_templates(is_favorite DESC, last_used_at DESC);
 """
 
 #：会话里所有 input 列（用于统一读写）
@@ -322,6 +339,136 @@ class Store:
                 (session_id, max(1, limit)),
             ).fetchall()
         return [dict(r) for r in rows]
+
+
+    # ---------------- 罗盘模板 ----------------
+    #
+    # 模板 = 一套「盘式 + 默认坐向」的命名预设，供下次一键复用。
+    #
+    # 🔴 `style` 存的是**盘式 id 字符串**，不是层数。后端刻意不维护一份
+    # 「盘式 → 层数」的表：那份表在前端 `lib/dialStyle.ts` 里，后端再存一份
+    # 必然漂移，而漂移的表现是「列表显示 18 层、打开却画出 6 层」——不报错、
+    # 只是数字对不上。层数由前端按 id 查得。
+    # 故后端对 style **只做长度限制、不校验枚举**：未知值由前端
+    # `coerceDialStyle` 回落到默认盘 —— 删掉某个盘式后，旧模板不该打不开。
+
+    def create_template(
+        self,
+        *,
+        name: str,
+        style: str = "zonghe",
+        sitting: str | None = None,
+        facing: str | None = None,
+        degree: float | None = None,
+        school: str = "default",
+        note: str | None = None,
+        is_favorite: bool = False,
+    ) -> dict[str, Any]:
+        tid = new_id("tpl")
+        now = _now()
+        with self.connect() as conn:
+            conn.execute(
+                "INSERT INTO compass_templates(template_id, created_at, updated_at, name, style,"
+                " sitting, facing, degree, school, note, is_favorite, use_count, last_used_at)"
+                " VALUES(?,?,?,?,?,?,?,?,?,?,?,0,NULL)",
+                (
+                    tid, now, now, name, style, sitting, facing,
+                    degree, school, note, 1 if is_favorite else 0,
+                ),
+            )
+            row = conn.execute(
+                "SELECT * FROM compass_templates WHERE template_id=?", (tid,)
+            ).fetchone()
+        return _decode_template(row)
+
+    def list_templates(self) -> list[dict[str, Any]]:
+        """排序：常用 → 最近使用 → 新建。
+
+        为什么不是单纯按创建时间倒序：模板列表是**给手指点的**，
+        最常用的必须落在最上面。只按创建时间排，一次性的测试模板
+        会把用了很久的主力模板挤到下面，而用户不会往下翻。
+        `COALESCE(last_used_at, created_at)` 是为了让"建了但还没用过"的模板
+        也参与时间排序 —— 否则它们会全部沉底。
+        """
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM compass_templates"
+                " ORDER BY is_favorite DESC, COALESCE(last_used_at, created_at) DESC, created_at DESC"
+            ).fetchall()
+        return [_decode_template(r) for r in rows]
+
+    def get_template(self, template_id: str) -> dict[str, Any] | None:
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM compass_templates WHERE template_id=?", (template_id,)
+            ).fetchone()
+        return _decode_template(row) if row else None
+
+    def update_template(self, template_id: str, fields: dict[str, Any]) -> dict[str, Any] | None:
+        """局部更新：`fields` 里没给到的键保持原值。
+
+        为什么不做整体覆盖（PUT 语义）：模板字段会被不同界面分别修改
+        （列表页只改收藏、编辑页才改名），整体覆盖会让"只点了个收藏"
+        把其它字段抹成默认值 —— 而用户看不出发生了什么。
+        """
+        allowed = ("name", "style", "sitting", "facing", "degree", "school", "note", "is_favorite")
+        updates = {k: v for k, v in fields.items() if k in allowed}
+        if not updates:
+            return self.get_template(template_id)
+        if "is_favorite" in updates:
+            updates["is_favorite"] = 1 if updates["is_favorite"] else 0
+        # 列名来自上面的白名单，不是用户输入 —— 不存在注入面
+        sets = ", ".join(f"{k}=?" for k in updates)
+        with self.connect() as conn:
+            cur = conn.execute(
+                f"UPDATE compass_templates SET {sets}, updated_at=? WHERE template_id=?",
+                (*updates.values(), _now(), template_id),
+            )
+            if cur.rowcount == 0:
+                return None
+            row = conn.execute(
+                "SELECT * FROM compass_templates WHERE template_id=?", (template_id,)
+            ).fetchone()
+        return _decode_template(row)
+
+    def delete_template(self, template_id: str) -> bool:
+        with self.connect() as conn:
+            cur = conn.execute("DELETE FROM compass_templates WHERE template_id=?", (template_id,))
+            return cur.rowcount > 0
+
+    def touch_template(self, template_id: str) -> dict[str, Any] | None:
+        """记录一次使用：`use_count` +1、`last_used_at` 置为现在。
+
+        与 `update_template` 分开：使用是**副作用**（打开一次就算用过），
+        不该让它有机会改动模板内容本身。合成一个接口的话，
+        某天前端传错字段就会在"使用"的同时把模板改坏。
+        """
+        with self.connect() as conn:
+            cur = conn.execute(
+                "UPDATE compass_templates SET use_count = use_count + 1, last_used_at=?"
+                " WHERE template_id=?",
+                (_now(), template_id),
+            )
+            if cur.rowcount == 0:
+                return None
+            row = conn.execute(
+                "SELECT * FROM compass_templates WHERE template_id=?", (template_id,)
+            ).fetchone()
+        return _decode_template(row)
+
+
+def _decode_template(row: sqlite3.Row) -> dict[str, Any]:
+    """把 SQLite 的 0/1 归一成 Python bool。
+
+    归一放在**读出口**而不是各调用点：漏一处就会让 JSON 里出现 `0`/`1`
+    而 TS 侧声明的是 `boolean` —— 类型成了谎话，且前端拿到 0 时
+    `if (tpl.is_favorite)` 恰好也工作（0 是 falsy），所以很难被发现，
+    直到某处写成 `tpl.is_favorite === false` 而 0 !== false。
+    """
+    d = dict(row)
+    d["is_favorite"] = bool(d.get("is_favorite"))
+    d["use_count"] = int(d.get("use_count") or 0)
+    return d
 
 
 def _decode_session(row: sqlite3.Row) -> dict[str, Any]:

@@ -13,6 +13,10 @@
   但**不共用端点** —— 会话域是给 App 用的、没有鉴权，
   管理界面若直接调它就等于没有保护（知道 URL 即可绕过）。
 
+- **模板域**（`templates`）：可反复套用的盘式预设。与会话域**分表** ——
+  会话是「一次测量的记录」（不可变、有报告），模板是「可改可删的预设」。
+  混在一起会让"删掉一个模板"变成"删掉一次测量记录"。
+
 `meta` 为各组共用。
 """
 
@@ -32,6 +36,7 @@ from . import (
     scan,
     sessions,
     taiyi,
+    templates,
     zeri,
 )
 
@@ -48,6 +53,7 @@ API_V1.include_router(liuren.router)
 API_V1.include_router(taiyi.router)
 API_V1.include_router(sessions.router)
 API_V1.include_router(report.router)
+API_V1.include_router(templates.router)
 API_V1.include_router(admin.router)
 
 __all__ = ["API_V1"]
