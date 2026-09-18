@@ -96,6 +96,7 @@
   .pill.ok   { background: rgba(60,112,102,.12); color: var(--brand-jade); }
   .pill.bad  { background: rgba(185,62,53,.10); color: var(--brand-cinnabar); }
   .pill.warn { background: rgba(218,179,125,.24); color: #8a6a33; }
+  .pill.mute { background: #EFEBE6; color: var(--muted); }
 
   table { width: 100%; border-collapse: collapse; font-size: 13px; }
   th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); }
@@ -145,6 +146,26 @@
   .right { text-align: right; }
   .mt { margin-top: 12px; }
   .empty { padding: 28px; text-align: center; color: var(--muted); font-size: 13px; }
+
+  /* ── 配置面板 ────────────────────────────────────────────── */
+  .cfgItem { padding: 11px 0; border-bottom: 1px dashed var(--border); }
+  .cfgItem:last-child { border-bottom: none; }
+  .cfgHead { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 6px; }
+  .cfgKey { font-size: 13px; font-weight: 600; color: var(--text); }
+  .cfgItem .desc { font-size: 12px; color: var(--muted); margin-bottom: 6px; line-height: 1.5; }
+  .cfgItem .ctrl { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .cfgItem .ctrl > input, .cfgItem .ctrl > select { flex: 1 1 200px; min-width: 0; }
+  .cfgItem .ctrl > .fixed { flex: 1 1 200px; }
+  .cfgItem.dirty { background: rgba(218,179,125,.10); border-left: 3px solid var(--brand-gold); padding-left: 9px; margin-left: -12px; }
+  .envnote { font-size: 11px; color: var(--muted); font-family: "SFMono-Regular", Consolas, monospace; }
+  .tag-new { background: rgba(218,179,125,.28); color: #7a5a25; }
+  .ro { background: #F5F3F0; color: var(--muted); }
+  #cfgBar {
+    position: sticky; bottom: 0; background: var(--surface);
+    border-top: 1px solid var(--border); padding: 12px 20px;
+    display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+  }
+  #cfgBar .spacer { flex: 1; }
 </style>
 </head>
 <body>
@@ -181,6 +202,7 @@
   <nav>
     <button data-view="overview" class="active">概览</button>
     <button data-view="sessions">会话记录</button>
+    <button data-view="config">配置</button>
     <button data-view="lab">能力调试台</button>
   </nav>
 
@@ -203,6 +225,52 @@
         <div id="sessTable" class="mt"></div>
       </div>
       <div id="sessDetail" class="mt"></div>
+    </section>
+
+    <!-- 配置 -->
+    <section id="view-config" class="hidden">
+      <div id="cfgMsg"></div>
+
+      <div class="banner info">
+        改完<b>即时生效</b>，不需要重启（标「需重启服务」的项除外）。每项都标了当前值的来源：
+        <b>管理台覆盖 &gt; 环境变量 &gt; 代码默认值</b>。<br>
+        若你改了 <code>.env</code> 却没生效，先看来源是不是「管理台覆盖」——
+        清除覆盖即可回落到 <code>.env</code> 的值。
+      </div>
+
+      <div class="card">
+        <h2>AI 模型</h2>
+        <div id="aiSummary"></div>
+        <div id="cfgAi"></div>
+        <div class="row mt">
+          <div class="shrink">
+            <button class="btn ghost sm" id="aiProbeBtn">探取模型列表</button>
+          </div>
+          <div class="shrink hint" id="aiProbeHint"></div>
+        </div>
+      </div>
+
+      <div class="card mt">
+        <h2>其它配置</h2>
+        <div id="cfgOther"></div>
+      </div>
+
+      <div class="card mt">
+        <h2>候选链与可用性</h2>
+        <div class="hint" style="margin-bottom:10px">
+          解释「这次报告为什么走了本地模板」—— template 是零成本兜底，永远排在最后。
+        </div>
+        <div id="cfgAiStatus"></div>
+      </div>
+
+      <div id="cfgBar">
+        <div class="shrink"><button class="btn" id="cfgSave" disabled>保存改动</button></div>
+        <div class="shrink"><button class="btn ghost" id="cfgDiscard" disabled>撤销未保存</button></div>
+        <div class="shrink"><button class="btn danger" id="cfgResetAll">清除全部覆盖</button></div>
+        <div class="shrink hint" id="cfgDirtyNote">没有未保存的改动</div>
+        <div class="spacer"></div>
+        <div class="shrink hint">只提交你改过的项</div>
+      </div>
     </section>
 
     <!-- 调试台 -->
@@ -417,29 +485,38 @@ class ApiError extends Error {
 }
 
 async function api(path, options) {
-  const res = await fetch(path, {
+  // `Content-Type` 必须显式给：fetch 对**字符串** body 默认发
+  // `text/plain;charset=UTF-8`，服务端按 JSON 解析会直接 422。
+  // 此前这个封装只用于 GET / DELETE（无 body），所以一直没暴露；
+  // 配置面板是第一个带 JSON body 的调用，不加这行就会得到一个
+  // 看不出原因的 422。
+  const raw = await fetch(path, {
     ...(options || {}),
-    headers: { 'X-Xuanpan-Admin-Token': token, ...((options && options.headers) || {}) },
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Xuanpan-Admin-Token': token,
+      ...((options && options.headers) || {}),
+    },
   });
-  const text = await res.text();
+  const text = await raw.text();
   let body = null;
-  try { body = text ? JSON.parse(text) : null; } catch (e) { body = null; }
-  if (!res.ok) {
-    throw new ApiError(res.status, (body && body.detail) || ('请求失败 HTTP ' + res.status));
+  try { body = text ? JSON.parse(text) : null; } catch (err) { body = null; }
+  if (!raw.ok) {
+    throw new ApiError(raw.status, (body && body.detail) || ('请求失败 HTTP ' + raw.status));
   }
   return body;
 }
 
 // 公开接口（试算台用）—— 不需要管理令牌
 async function publicApi(path, options) {
-  const res = await fetch(path, {
+  const raw = await fetch(path, {
     ...(options || {}),
     headers: { 'Content-Type': 'application/json', ...((options && options.headers) || {}) },
   });
-  const text = await res.text();
+  const text = await raw.text();
   let body = null;
-  try { body = text ? JSON.parse(text) : null; } catch (e) { body = null; }
-  if (!res.ok) throw new ApiError(res.status, (body && body.detail) || ('请求失败 HTTP ' + res.status));
+  try { body = text ? JSON.parse(text) : null; } catch (err) { body = null; }
+  if (!raw.ok) throw new ApiError(raw.status, (body && body.detail) || ('请求失败 HTTP ' + raw.status));
   return body;
 }
 
@@ -1001,20 +1078,354 @@ function bindLab() {
 }
 
 // ==========================================================================
+// 配置（运行时可变）
+// ==========================================================================
+// 两条不可动摇的规矩：
+//
+// 1. **只提交改动过的项**。若把表单里所有值一次性 PATCH 上去，每一项都会变成
+//    「管理台覆盖」，来源列随即失去意义 —— 用户再也看不出哪些是 .env 配的、
+//    哪些是默认值，而"来源"恰恰是这个页面存在的理由。
+//
+// 2. **密钥框永不带初值**，且**留空 = 不改动**。把掩码填进 value，用户一保存
+//    就会把掩码本身写成密钥；把"空"当成"清除"，用户想改别的项时会顺手把密钥
+//    清掉。清除必须是独立的显式动作（每项的「清除覆盖」按钮）。
+let cfgData = null;
+let cfgDirty = {};
+let cfgModels = [];
+
+const CFG_AI_KEYS = ['llm.base_url', 'llm.model', 'llm.capability', 'llm.api_key'];
+
+// 给运维看的名字。技术键名同时显示在下面那行等宽小字里 ——
+// 界面用中文名，出问题时能对上 env 变量名。
+const CFG_LABEL = {
+  'ai_mode': '选路模式',
+  'keep_photos': '保留原图',
+  'max_upload_mb': '上传上限（MB）',
+  'llm.base_url': '模型接入地址',
+  'llm.model': '模型名',
+  'llm.capability': '能力档位',
+  'llm.api_key': 'API 密钥',
+  'cors_origins': '跨域来源',
+  'admin_token': '管理令牌',
+};
+
+function cfgKey(key) { return 'cfg-in-' + key.replace(/\./g, '-'); }
+
+function cfgMsg(text, isError) {
+  $('cfgMsg').innerHTML = '<div class="banner ' + (isError ? 'error' : 'info') + '">' + esc(text) + '</div>';
+}
+function cfgClearMsg() { $('cfgMsg').innerHTML = ''; }
+
+function cfgSrcPill(item) {
+  if (item.source === 'override') return '<span class="pill warn">管理台覆盖</span>';
+  if (item.source === 'env') return '<span class="pill ok">环境变量</span>';
+  return '<span class="pill mute">代码默认值</span>';
+}
+
+// 只读预览。布尔要说"是/否"而不是 true/false —— 这一栏是给人看的。
+function cfgPreview(item) {
+  if (item.secret) return item.configured ? '已配置 ' + item.masked : '未配置';
+  if (item.kind === 'bool') return item.value ? '是' : '否';
+  if (item.kind === 'list') return (item.value || []).join('、') || '（空）';
+  if (item.value === '' || item.value === null || item.value === undefined) return '（空）';
+  return String(item.value);
+}
+
+function cfgCtrl(item) {
+  const id = cfgKey(item.key);
+  const attrs = ' id="' + id + '" data-key="' + esc(item.key) + '" data-kind="' + esc(item.kind) + '"';
+  const dis = item.editable ? '' : ' disabled';
+
+  // 密钥：**不设 value**。留空即不改动。
+  if (item.secret) {
+    if (!item.editable) {
+      return '<span class="fixed ro" style="padding:6px 10px;border-radius:6px">' +
+        (item.configured ? '已配置 ' + esc(item.masked) : '未配置') + '</span>';
+    }
+    return '<input type="password" autocomplete="new-password"' + attrs + ' placeholder="' +
+      (item.configured ? '已配置（' + esc(item.masked) + '）— 留空＝不改动' : '未配置 — 填写后保存') +
+      '">';
+  }
+  if (item.kind === 'enum') {
+    return '<select' + attrs + dis + '>' + item.choices.map(function (c) {
+      return '<option value="' + esc(c) + '"' + (c === item.value ? ' selected' : '') + '>' + esc(c) + '</option>';
+    }).join('') + '</select>';
+  }
+  if (item.kind === 'bool') {
+    return '<select' + attrs + dis + '>' +
+      '<option value="true"' + (item.value === true ? ' selected' : '') + '>开启</option>' +
+      '<option value="false"' + (item.value !== true ? ' selected' : '') + '>关闭</option>' +
+      '</select>';
+  }
+  if (item.kind === 'int') {
+    return '<input type="number"' + attrs +
+      ' value="' + esc(item.value) + '"' +
+      (item.minimum !== undefined && item.minimum !== null ? ' min="' + item.minimum + '"' : '') +
+      (item.maximum !== undefined && item.maximum !== null ? ' max="' + item.maximum + '"' : '') +
+      dis + '>';
+  }
+  if (item.kind === 'list') {
+    // 占位符刻意不写完整的带协议 URL 字面量。
+    // 页面有一条守卫断言全文不得出现协议前缀形式的网址（容器运行期不出网，
+    // 任何 CDN 引用都会白屏，见 tests/api/test_admin_api.py::test_page_avoids_cdn）；
+    // 那条断言是**故意做钝**的 —— grep 一下就能复核，比"只查 fetch 类属性"可靠。
+    // 所以这里改文案，而不是去把守卫改松。
+    // （连注释也不能写出那个前缀，否则断言同样会红 —— 这是实测踩到的。）
+    return '<input type="text"' + attrs + ' value="' + esc((item.value || []).join(', ')) +
+      '" placeholder="逗号分隔，例如 a.example；每个都要带协议前缀"' + dis + '>';
+  }
+  // 模型名用 input + datalist：既能从探测结果里选，也能手填。
+  // 只给下拉是不行的 —— 很多网关没实现 /models，那时用户就完全没法填了。
+  if (item.key === 'llm.model') {
+    return '<input type="text"' + attrs + ' list="cfgModelList" value="' + esc(item.value || '') +
+      '" placeholder="例如 deepseek-chat"' + dis + '>' +
+      '<datalist id="cfgModelList">' + cfgModelOptions() + '</datalist>';
+  }
+  return '<input type="text"' + attrs + ' value="' + esc(item.value == null ? '' : item.value) + '"' + dis + '>';
+}
+
+function cfgModelOptions() {
+  return cfgModels.map(function (m) {
+    return '<option value="' + esc(m) + '"></option>';
+  }).join('');
+}
+
+function cfgItemHtml(item) {
+  const out = [];
+  out.push('<div class="cfgHead">');
+  out.push('<span class="cfgKey">' + esc(CFG_LABEL[item.key] || item.key) + '</span>');
+  out.push(cfgSrcPill(item));
+  // 需重启的项要显眼 —— 不提示的话，改完没生效的人会以为程序坏了
+  if (item.applies && item.applies.indexOf('重启') >= 0) {
+    out.push('<span class="pill bad">' + esc(item.applies) + '</span>');
+  }
+  if (!item.editable) out.push('<span class="pill mute">只读</span>');
+  out.push('</div>');
+  out.push('<div class="desc">' + esc(item.description) + '</div>');
+  out.push('<div class="ctrl">' + cfgCtrl(item));
+  if (item.overridden && item.editable) {
+    out.push('<button class="btn ghost sm" data-clear="' + esc(item.key) + '">清除覆盖</button>');
+  }
+  out.push('</div>');
+  out.push('<div class="envnote mt">当前生效：' + esc(cfgPreview(item)) +
+    '　·　' + esc(item.env_var) +
+    (item.override_updated_at ? '　·　覆盖于 ' + esc(item.override_updated_at) : '') +
+    '</div>');
+  return '<div class="cfgItem" data-item="' + esc(item.key) + '">' + out.join('') + '</div>';
+}
+
+function renderConfig() {
+  const items = cfgData.settings;
+  $('cfgAi').innerHTML = items.filter(function (i) { return CFG_AI_KEYS.indexOf(i.key) >= 0; })
+    .map(cfgItemHtml).join('');
+  $('cfgOther').innerHTML = items.filter(function (i) { return CFG_AI_KEYS.indexOf(i.key) < 0; })
+    .map(cfgItemHtml).join('');
+
+  // 变量名刻意叫 eff 而不是 e：`e` 在别处是 catch 的参数（e.key / e.preventDefault），
+  // 同名会让"页面读了后端不提供的字段"这类静态契约检查收到一堆假阳性，
+  // 从而失去判别力 —— tests/api/test_admin_page_wiring.py 依赖这里的命名唯一性。
+  const eff = cfgData.effective;
+  $('aiSummary').innerHTML =
+    '<div class="kv"><span class="k">云端解释</span><span class="v">' +
+      (eff.cloud_ai_ready
+        ? '<span class="pill ok">已就绪</span>'
+        : '<span class="pill mute">未启用 —— 报告走本地模板（零成本，属设计内行为）</span>') +
+    '</span></div>' +
+    '<div class="kv"><span class="k">选路模式</span><span class="v">' + esc(eff.ai_mode) + '</span></div>' +
+    '<div class="kv"><span class="k">上传上限</span><span class="v">' + esc(eff.max_upload_mb) + ' MB</span></div>' +
+    '<div class="kv"><span class="k">保留原图</span><span class="v">' + (eff.keep_photos ? '是' : '否') + '</span></div>';
+
+  bindCfgControls();
+  markDirtyUi();
+}
+
+function bindCfgControls() {
+  document.querySelectorAll('#view-config [data-key]').forEach(function (el) {
+    el.addEventListener('input', function () { cfgOnInput(el); });
+    el.addEventListener('change', function () { cfgOnInput(el); });
+  });
+  document.querySelectorAll('#view-config [data-clear]').forEach(function (b) {
+    b.addEventListener('click', function () { cfgReset([b.dataset.clear]); });
+  });
+}
+
+// 从控件读值。类型与后端 `_coerce` 对齐，但**不在前端做完整校验** ——
+// 校验规则只应有一处（后端），前端再判一遍必然漂移。这里只做类型转换。
+function cfgReadValue(el) {
+  const kind = el.dataset.kind;
+  if (kind === 'bool') return el.value === 'true';
+  if (kind === 'int') {
+    const n = parseInt(el.value, 10);
+    return Number.isFinite(n) ? n : el.value;   // 非法值原样送去，让后端给可读的报错
+  }
+  if (kind === 'list') {
+    return el.value.split(',').map(function (s) { return s.trim(); }).filter(Boolean);
+  }
+  return el.value;
+}
+
+function cfgOnInput(el) {
+  const key = el.dataset.key;
+  const item = cfgData.settings.filter(function (i) { return i.key === key; })[0];
+  if (!item) return;
+
+  let changed;
+  if (item.secret) {
+    changed = el.value !== '';                  // 留空＝不改动
+  } else if (item.kind === 'bool') {
+    changed = (el.value === 'true') !== (item.value === true);
+  } else if (item.kind === 'list') {
+    changed = cfgReadValue(el).join(',') !== (item.value || []).join(',');
+  } else {
+    changed = String(el.value).trim() !== String(item.value === null || item.value === undefined ? '' : item.value);
+  }
+
+  if (changed) cfgDirty[key] = item.secret ? el.value : cfgReadValue(el);
+  else delete cfgDirty[key];
+  markDirtyUi();
+}
+
+function markDirtyUi() {
+  const keys = Object.keys(cfgDirty);
+  $('cfgSave').disabled = keys.length === 0;
+  $('cfgDiscard').disabled = keys.length === 0;
+  $('cfgDirtyNote').textContent = keys.length === 0
+    ? '没有未保存的改动'
+    : '未保存 ' + keys.length + ' 项：' + keys.map(function (k) { return CFG_LABEL[k] || k; }).join('、');
+  document.querySelectorAll('#view-config .cfgItem').forEach(function (el) {
+    el.classList.toggle('dirty', Object.prototype.hasOwnProperty.call(cfgDirty, el.dataset.item));
+  });
+}
+
+async function loadConfig(opts) {
+  // 有未保存改动时**不重新读取**：否则点一下导航就把用户的输入冲掉了。
+  // 这种丢失是静默的（表单看起来只是"恢复了原值"），必须避免。
+  if (!(opts && opts.force) && cfgData && Object.keys(cfgDirty).length) {
+    cfgMsg('有未保存的改动，已保留当前表单。要放弃改动，点「撤销未保存」。', false);
+    return;
+  }
+  try {
+    cfgData = await api('/api/v1/admin/config');
+    cfgDirty = {};
+    cfgClearMsg();
+    renderConfig();
+    await loadAiStatus();
+  } catch (err) {
+    cfgMsg('读取配置失败：' + err.detail, true);
+  }
+}
+
+async function loadAiStatus() {
+  const box = $('cfgAiStatus');
+  try {
+    const st = await api('/api/v1/admin/ai/status');
+    if (!st.available) {
+      box.innerHTML = '<div class="banner error">' + esc(st.reason) + '</div>';
+      return;
+    }
+    const rows = st.providers.map(function (p) {
+      return '<tr><td>' + esc(p.name) + '</td>' +
+        '<td class="mono">' + esc(p.capability || '—') + '</td>' +
+        '<td class="mono">' + esc(p.model || '—') + '</td>' +
+        '<td>' + (p.available ? '<span class="pill ok">可用</span>' : '<span class="pill mute">不可用</span>') + '</td></tr>';
+    }).join('');
+    box.innerHTML = '<table><thead><tr><th>provider</th><th>能力档位</th><th>模型</th><th>状态</th></tr></thead>' +
+      '<tbody>' + rows + '</tbody></table>' +
+      '<p class="hint mt">' + esc(st.note) + '</p>';
+  } catch (err) {
+    box.innerHTML = '<div class="banner error">' + esc(err.detail) + '</div>';
+  }
+}
+
+async function loadModels() {
+  $('aiProbeHint').textContent = '正在探取…';
+  try {
+    // 变量叫 probe 而不是 res：它与保存响应是两种完全不同的结构，
+    // 同名会让静态契约检查把两者的字段混在一起，失去判别力。
+    const probe = await api('/api/v1/admin/ai/models');
+    cfgModels = probe.available ? probe.models : [];
+    // 没有模型名可填时，输入框必须仍然能打字 —— 所以是 input+datalist，不是 select
+    const dl = $('cfgModelList');
+    if (dl) dl.innerHTML = cfgModelOptions();
+    if (probe.available) {
+      $('aiProbeHint').innerHTML = '探到 ' + probe.count + ' 个模型' +
+        (probe.current_in_list === false ? '（当前模型不在列表内，但不代表不可用）' : '');
+    } else {
+      $('aiProbeHint').innerHTML = '<span class="pill bad">探取失败</span> ' + esc(probe.reason) +
+        (probe.hint ? '　·　' + esc(probe.hint) : '');
+    }
+  } catch (err) {
+    $('aiProbeHint').innerHTML = '<span class="pill bad">错误</span> ' + esc(err.detail);
+  }
+}
+
+async function saveConfig() {
+  const keys = Object.keys(cfgDirty);
+  if (!keys.length) return;
+  const payload = {};
+  keys.forEach(function (k) { payload[k] = cfgDirty[k]; });
+  $('cfgSave').disabled = true;
+  try {
+    const saved = await api('/api/v1/admin/config', { method: 'PATCH', body: JSON.stringify(payload) });
+    cfgData = saved.config;
+    cfgDirty = {};
+    renderConfig();
+    let note = '已保存：' + (saved.updated.join('、') || '（无）');
+    if (saved.cleared.length) note += '；已清除覆盖：' + saved.cleared.join('、');
+    // 需重启的项必须点名，否则用户会以为改动失败了
+    if (saved.restart_required.length) note += '。⚠️ 以下项需重启服务才生效：' + saved.restart_required.join('、');
+    cfgMsg(note, false);
+    await loadAiStatus();
+    await loadOverview();
+  } catch (err) {
+    $('cfgSave').disabled = false;
+    cfgMsg('保存失败：' + err.detail, true);
+  }
+}
+
+async function cfgReset(keys) {
+  try {
+    const cleared = await api('/api/v1/admin/config/reset', {
+      method: 'POST', body: JSON.stringify(keys || null),
+    });
+    cfgData = cleared.config;
+    cfgDirty = {};
+    renderConfig();
+    let note = '已清除 ' + cleared.cleared_existing + ' 项覆盖';
+    if (cleared.restart_required.length) note += '。⚠️ 以下项需重启服务才生效：' + cleared.restart_required.join('、');
+    cfgMsg(note, false);
+    await loadAiStatus();
+    await loadOverview();
+  } catch (err) {
+    cfgMsg('清除失败：' + err.detail, true);
+  }
+}
+
+function discardCfgEdits() {
+  cfgDirty = {};
+  renderConfig();
+  cfgMsg('已撤销未保存的改动。', false);
+}
+
+// ==========================================================================
 // 视图切换与启动
 // ==========================================================================
 function switchView(name) {
   document.querySelectorAll('nav button').forEach(function (b) {
     b.classList.toggle('active', b.dataset.view === name);
   });
-  ['overview', 'sessions', 'lab'].forEach(function (v) {
+  ['overview', 'sessions', 'config', 'lab'].forEach(function (v) {
     $('view-' + v).classList.toggle('hidden', v !== name);
   });
   if (name === 'sessions') loadSessions();
+  if (name === 'config') loadConfig();
 }
 
 async function loadAll() {
   await loadOverview();
+  // 只刷新当前可见的视图 —— 在概览页点刷新时不该顺带把配置表单重新拉一遍，
+  // 那会静默丢掉用户正在编辑的内容。
+  if (!$('view-config').classList.contains('hidden')) await loadConfig({ force: true });
 }
 
 document.querySelectorAll('nav button').forEach(function (b) {
@@ -1031,6 +1442,29 @@ $('logoutBtn').addEventListener('click', function () {
 });
 $('refreshBtn').addEventListener('click', function () { loadAll(); });
 $('sessReload').addEventListener('click', function () { loadSessions(); });
+
+// 配置面板
+$('cfgSave').addEventListener('click', function () { saveConfig(); });
+$('cfgDiscard').addEventListener('click', function () { discardCfgEdits(); });
+$('aiProbeBtn').addEventListener('click', function () { loadModels(); });
+$('cfgResetAll').addEventListener('click', function () {
+  // 清除全部覆盖会一次性撤销所有管理台改动，回到 .env / 默认值。
+  // 必须二次确认：这个动作没有撤销入口（原值已不在库里）。
+  if (Object.keys(cfgDirty).length) {
+    cfgMsg('请先保存或撤销未保存的改动，再执行清除全部覆盖。', true);
+    return;
+  }
+  const n = cfgData ? cfgData.settings.filter(function (i) { return i.overridden; }).length : 0;
+  if (!n) { cfgMsg('当前没有任何管理台覆盖，无需清除。', false); return; }
+  if (!window.confirm('将清除全部 ' + n + ' 项管理台覆盖，所有配置回落到 .env / 代码默认值。\n' +
+      '此操作无法撤销（原值已不在数据库中）。确定继续？')) return;
+  cfgReset(null);
+});
+
+// 离开页面前提醒未保存的改动 —— 配置页的输入不会被浏览器自动恢复。
+window.addEventListener('beforeunload', function (e) {
+  if (Object.keys(cfgDirty).length) { e.preventDefault(); e.returnValue = ''; }
+});
 
 bindLab();
 initLab();
