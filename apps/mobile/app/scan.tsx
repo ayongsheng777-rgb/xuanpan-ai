@@ -8,8 +8,10 @@
  *   2. 识别结果必须经用户确认方可进入计算（RULE-004）→ 本页只负责识别，确认在下一页
  *   3. 不得显示"AI 正在思考"，必须展示**测量过程**（见 `StepList`）
  *
- * 关于相机：定位是「专业测量仪器」，不是扫码框。因此画面上给的是
- * 罗盘对齐参考圈 + 拍摄要点，而不是通用取景框。
+ * 关于相机：定位是「专业测量仪器」，不是扫码框。因此取景是**沉浸式**的 ——
+ * 全宽出血、参考圈 + 四角对位标记、控制条压在取景画面上，而不是把相机
+ * 塞进一张卡片里（卡片自己的边框会与参考圈争夺"哪条线才是对齐基准"）。
+ * 相册作为第二入口也放在控制条上，与快门共用同一条识别管线。
  */
 
 import { Ionicons } from '@expo/vector-icons';
@@ -17,7 +19,7 @@ import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as ImagePicker from 'expo-image-picker';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useCallback, useRef, useState } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
 
 import { getApiClient, resolveBaseUrl } from '@/api/client';
 import type { ScanResult } from '@/api/types';
@@ -28,7 +30,7 @@ import { Screen } from '@/components/Screen';
 import { SegmentedTabs } from '@/components/SegmentedTabs';
 import { StepList, failureStepOf, stepsUpTo, type Step } from '@/components/StepList';
 import { useSubmit } from '@/lib/useAsync';
-import { alpha, brand, colors, radius, space } from '@/theme/tokens';
+import { alpha, brand, colors, layout, radius, space } from '@/theme/tokens';
 
 type Entry = 'camera' | 'library';
 export default function ScanScreen(): React.JSX.Element {
@@ -114,6 +116,7 @@ export default function ScanScreen(): React.JSX.Element {
           onRequest={() => void requestPermission()}
           cameraRef={cameraRef}
           onShoot={takePicture}
+          onPick={pickFromLibrary}
           shooting={scan.loading}
         />
       ) : (
@@ -174,6 +177,7 @@ function CameraEntry({
   onRequest,
   cameraRef,
   onShoot,
+  onPick,
   shooting,
 }: {
   permissionGranted: boolean;
@@ -181,8 +185,20 @@ function CameraEntry({
   onRequest: () => void;
   cameraRef: React.MutableRefObject<CameraView | null>;
   onShoot: () => void;
+  onPick: () => void;
   shooting: boolean;
 }): React.JSX.Element {
+  const { height } = useWindowDimensions();
+
+  /**
+   * 取景高度：视口高约 62%，夹在 260~560 之间。
+   *
+   * 上限的理由：参考圈是**圆**的，取景区再高也不会更好对位，
+   * 只会把控制条顶出屏幕。下限的理由：矮屏上取景区不能矮于参考圈本身，
+   * 否则圈被裁掉一半 —— 而"让罗盘外圈与参考圈贴合"正是这一屏的全部意义。
+   */
+  const viewfinderH = Math.min(560, Math.max(260, Math.round(height * 0.62)));
+
   if (!permissionGranted) {
     return (
       <Card title="需要相机权限">
@@ -201,31 +217,64 @@ function CameraEntry({
   }
 
   return (
-    <Card title="拍摄识别">
-      <View style={styles.cameraBox}>
-        <CameraView ref={cameraRef} style={StyleSheet.absoluteFill} facing="back" />
-        {/* 罗盘对齐参考圈 —— 相机是"测量仪器"，给的是对齐参考而不是扫码框 */}
-        <View style={styles.overlay} pointerEvents="none">
-          <View style={styles.alignRing} />
-          <AppText size="xs" color="onPrimary" center style={styles.alignHint}>
-            让罗盘外圈与参考圈尽量贴合
-          </AppText>
+    /* 沉浸式取景 —— 全宽出血、不套 Card 外壳。
+       理由：取景框套在卡片里时，卡片自己的边框会与参考圈争夺"哪条线才是对齐基准"，
+       而这个动作的全部意义就是对齐。 */
+    <View style={[styles.viewfinder, { height: viewfinderH }]}>
+      <CameraView ref={cameraRef} style={StyleSheet.absoluteFill} facing="back" />
+
+      {/* 参考圈 + 四角对位标记。相机在本产品里是「测量仪器」，不是扫码框。 */}
+      <View style={styles.overlay} pointerEvents="none">
+        <View style={styles.alignRing}>
+          <View style={[styles.bracket, styles.bracketTL]} />
+          <View style={[styles.bracket, styles.bracketTR]} />
+          <View style={[styles.bracket, styles.bracketBL]} />
+          <View style={[styles.bracket, styles.bracketBR]} />
         </View>
+        <AppText size="sm" weight="medium" color={colors.onPrimary} center style={styles.vfHint}>
+          请保持罗盘平稳，尽量正对拍摄
+        </AppText>
       </View>
 
-      <Pressable
-        onPress={onShoot}
-        disabled={shooting}
-        accessibilityRole="button"
-        accessibilityLabel="拍照"
-        style={({ pressed }) => [styles.shutter, pressed && styles.shutterPressed]}
-      >
-        <View style={styles.shutterInner} />
-      </Pressable>
-      <AppText size="xs" color="muted" center style={styles.shutterHint}>
-        {shooting ? '正在识别…' : '点击快门拍摄罗盘'}
-      </AppText>
-    </Card>
+      {shooting ? (
+        <View style={styles.statusChip} pointerEvents="none">
+          <AppText size="xs" color={colors.onPrimary}>
+            正在识别…
+          </AppText>
+        </View>
+      ) : null}
+
+      {/* 底部控制条。相册是**第二入口**，与拍照走同一条识别管线
+          （基线规范裁定：双入口同管线，不复制业务逻辑）。 */}
+      <View style={styles.controlBar}>
+        <Pressable
+          onPress={onPick}
+          disabled={shooting}
+          accessibilityRole="button"
+          accessibilityLabel="从相册选择照片"
+          style={({ pressed }) => [styles.sideBtn, pressed && styles.sideBtnPressed]}
+        >
+          <Ionicons name="images-outline" size={22} color={colors.onPrimary} />
+          <AppText size="xs" color={colors.onPrimary} style={styles.sideLabel}>
+            相册
+          </AppText>
+        </Pressable>
+
+        <Pressable
+          onPress={onShoot}
+          disabled={shooting}
+          accessibilityRole="button"
+          accessibilityLabel="拍照"
+          style={({ pressed }) => [styles.shutter, pressed && styles.shutterPressed]}
+        >
+          <View style={styles.shutterInner} />
+        </Pressable>
+
+        {/* 占位块：只为让快门保持在正中。
+            不在这里补一个"点了没反应的按钮" —— 那比缺一个位置更糟。 */}
+        <View style={styles.sideBtn} />
+      </View>
+    </View>
   );
 }
 
@@ -324,12 +373,13 @@ function NotDetectedCard({
 
 const styles = StyleSheet.create({
   spacer: { height: space[3] },
-  cameraBox: {
-    height: 300,
-    borderRadius: radius.lg,
+  /* 取景器：横向负 margin 抵消 Screen 的页面留白 —— 取景区必须贴到屏幕两侧，
+     否则"沉浸"只是把卡片换成另一块矩形。 */
+  viewfinder: {
+    marginHorizontal: -layout.gutter,
+    marginBottom: space[3],
     overflow: 'hidden',
     backgroundColor: '#000',
-    marginBottom: space[4],
   },
   overlay: {
     ...StyleSheet.absoluteFillObject,
@@ -337,20 +387,44 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   alignRing: {
-    width: 210,
-    height: 210,
-    borderRadius: 105,
-    borderWidth: 2,
-    borderColor: brand.gold,
-    backgroundColor: 'transparent',
+    width: 230,
+    height: 230,
+    borderRadius: 115,
+    borderWidth: 1,
+    borderColor: 'rgba(218, 179, 125, 0.55)',
   },
-  alignHint: {
+  bracket: { position: 'absolute', width: 26, height: 26, borderColor: brand.gold },
+  bracketTL: { top: -1, left: -1, borderTopWidth: 3, borderLeftWidth: 3 },
+  bracketTR: { top: -1, right: -1, borderTopWidth: 3, borderRightWidth: 3 },
+  bracketBL: { bottom: -1, left: -1, borderBottomWidth: 3, borderLeftWidth: 3 },
+  bracketBR: { bottom: -1, right: -1, borderBottomWidth: 3, borderRightWidth: 3 },
+  /* 提示落在控制条上方 —— 压在控制条上会被快门挡住 */
+  vfHint: { position: 'absolute', bottom: 78 },
+  statusChip: {
     position: 'absolute',
-    bottom: space[4],
-    color: colors.onPrimary,
-  },
-  shutter: {
+    top: space[3],
     alignSelf: 'center',
+    paddingHorizontal: space[3],
+    paddingVertical: space[1],
+    borderRadius: radius.pill,
+    backgroundColor: alpha.scrim,
+  },
+  controlBar: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-around',
+    paddingVertical: space[3],
+    paddingHorizontal: space[4],
+    backgroundColor: alpha.scrim,
+  },
+  sideBtn: { width: 56, alignItems: 'center', gap: 2 },
+  sideBtnPressed: { opacity: 0.6 },
+  sideLabel: { marginTop: 2 },
+  shutter: {
     width: 68,
     height: 68,
     borderRadius: 34,
@@ -358,16 +432,15 @@ const styles = StyleSheet.create({
     borderColor: brand.gold,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: colors.surface,
+    backgroundColor: 'rgba(255, 255, 255, 0.22)',
   },
   shutterPressed: { backgroundColor: alpha.goldSoft },
   shutterInner: {
     width: 48,
     height: 48,
     borderRadius: 24,
-    backgroundColor: colors.primary,
+    backgroundColor: colors.surface,
   },
-  shutterHint: { marginTop: space[2] },
   libHint: { marginBottom: space[3], lineHeight: 20 },
   permBtn: { marginTop: space[3] },
   detectedNote: { marginTop: space[2], lineHeight: 18 },
