@@ -197,11 +197,55 @@ HTTP 层无路由、App 里 0 处引用。本轮把三条链路打通：
   本轮不做是为了不越出断点范围。要补 = `help.ts` 加一个 `adjust` 主题 + 该页 `headerRight` 换成 `HelpButton`
 - 真机 UI 走查仍未做，且 V2 又增 3 个页面 → 见 §7.1
 
-**V2 本轮明确不做（别越界，裁决理由见评估文档）**：
-- 底部导航**不动**（产品基线规范已裁定 5 栏：罗盘/命盘/占测/历史/我的）
-- **不做全局深色化** —— 双轨并存：罗盘域深色（instrument）、其余页面保持浅色，
-  待真机走查后再定是否推广
-- 「自动水平 / 盘体跟随」、相机扫描增强、V2 Phase 3+ 全部暂缓
+---
+
+### 2.6 AI 双文体 + 运行时可调配置 + 管理台配置面板（2026-09-18 续，10 个 commit 已推送）
+
+**目标（阿勇原话口径）**：AI 解读要能切换**专业分析 / 白话讲解**；配置要能**在后台改、改完即时生效**，
+不必改代码重打 APK。
+
+| 内容 | commit |
+|---|---|
+| **AI 双文体**：`专业分析` / `白话讲解` 各出一整套区块 | `7829587` |
+| 报告页可切换双文体（前端只认后端 `has_plain`） | `78c747c` |
+| 双文体守卫：解析 / 术语 / 契约 / 端到端 | `c827f0f` |
+| provider 链接受已解析配置，不再只认 `os.environ` | `f160184` |
+| **运行时可调配置**：环境变量给默认，后台覆盖即时生效 | `21a92b2` |
+| `.env.example` 修正错误的能力标签 | `6291d39` |
+| 配置接口守卫 47 条：改了就生效 + 密钥永不回显 | `c10b6ee` |
+| **管理台配置面板**（第 4 个导航页） | `f08e495` |
+| 管理台页面接线守卫 18 条 | `dff8230` |
+| 配置说明里的 Markdown 标记会原样显示成星号 | `bdfa456` |
+
+**双文体要点**：
+
+- 前端**只认** `has_plain` 布尔，不去猜文体；后端一次给两套 section
+- 🔴 **解析顺序是「先按文体切分、再解析各区块」** —— 反过来的话，白话正文里出现的
+  「专业」字样会让两套区块串台（结论看着正常、内容却是错的那套）
+- **零成本模板 provider（`rule-template`）也必须产出两文体**，否则断网/未配 key 时
+  切换键点了没反应；冒烟里专门有一条断言「两文体逐字不同的区块 > 0」，防的正是
+  「白话版就是专业版复制一遍」
+
+**运行时配置层要点（改配置相关代码前必读）**：
+
+- 优先级 **管理台覆盖 > 环境变量 > 代码默认值**，接口对每一项都报来源（`override/env/default`）
+- 两套配置并存：`get_settings`（环境基线，启动时冻结）vs `get_active_settings`（生效值）。
+  **业务路径一律用后者**；只有 `app.state` 初始化还用前者。`deps.py` 里两者都在，别拿错
+- AI 路由器按**配置指纹**缓存、指纹变化即重建（`RuntimeConfig.ai_router`）—— 这是「即时生效」的落点；
+  去掉指纹比对，测试只会有 1 条红（另 2 条是「先改后首次取路由器」，构造上就按新值，抓不到）
+- 密钥明文**只有一个出口**：`RuntimeConfig.llm()`。`entries()` 对密钥项**压根不带 `value` 字段**
+  （不是打码，是不给）。`SECRET_KEYS = {llm.api_key, admin_token}`
+- `admin_token` 刻意**不可从界面修改**（改错就把自己锁在门外）；「清除全部覆盖」只清可编辑项，
+  显式点名不可编辑键才报错
+- 覆盖落 SQLite `app_settings` 表（`SCHEMA_VERSION` 已由 1 升到 2）
+- 🔴 **`admin.html` 的 `api()` 必须显式设 `Content-Type: application/json`** ——
+  否则 fetch 对字符串 body 发 `text/plain`，FastAPI 直接 422，现象是「保存按钮点了没反应」。
+  守这条的是 `tests/api/test_admin_page_wiring.py`
+- 🔴 **管理台有静态接线守卫**（`tests/api/test_admin_page_wiring.py`，18 条）：`$('x')` 引用的 id 必须存在、
+  `switchView` 名单与导航一致、JS 读的字段 ⊆ 后端给的字段、脚本可过 `node --check`、
+  带 body 的请求必须声明 JSON。**加面板/改字段后它是最先报错的那道防线**
+- 页面**不需要令牌**即可打开（否则陷入「打不开 → 不知配什么 → 更打不开」的死循环）；
+  401 = 令牌值不对，403 = `XUANPAN_ADMIN_TOKEN` 没配（整体关闭）
 
 ---
 
@@ -285,9 +329,9 @@ apps/mobile/
 
 ```bash
 # $PY = C:/Users/anyong/.workbuddy/binaries/python/envs/default/Scripts/python.exe（managed venv）
-# 全量测试 = 分模块合计 1411 passed, 2 skipped（2026-09-18 实测，逐模块核 exit code）
-# ⚠️ 直接跑全量拿不到汇总行（原因见下），要数字请走下面「分模块」那条
-"$PY" -m pytest
+# 全量测试 = 1560 passed, 2 skipped（2026-09-18 实测，单进程全量 + 汇总行完整）
+# 🔴 跑全量必须把 basetemp 放到**系统 Temp 下**，否则会撞 safe-delete 批量守卫（见下方说明）
+"$PY" -m pytest --basetemp="$("$PY" -c 'import tempfile;print(tempfile.gettempdir())')/xp-full"
 
 # 分层
 "$PY" -m pytest packages/fortune-core/tests    # 计算内核（新增三式/择日测试放这里）
@@ -296,13 +340,31 @@ apps/mobile/
 "$PY" -m pytest tests/api tests/ai tests/mobile
 ```
 
-> 🔴 **全量跑完拿不到「940 passed」那一行，是已知现象，不是测试失败。**
-> WorkBuddy 的 `[safe-delete]` 在 teardown 清理 pytest 临时目录（实测 399 个文件 > 阈值 50）
-> 时会**直接拦停进程**，汇总行来不及打印、并把 exit code 变成 1。
-> 现象是：点阵走到 `[100%]`、一个 `F` 都没有，紧跟着一行 `[SAFE_DELETE_BULK_CONFIRM_REQUIRED]`。
+> 🔴 **`[safe-delete]` 批量守卫会打断 pytest；basetemp 放哪里，决定你是「丢一行」还是「丢 87 个用例」。**
 >
-> **取真实数字的办法**（也是判断"是不是真失败"的办法）：分模块跑，逐个核对 exit code。
-> 命令行**不要传 `-q`** —— `pyproject` 的 addopts 已含 `-q`，再传会变成 `-qq` 从而**吞掉汇总行**。
+> **机制**（`D:/software/WorkBuddy/resources/app.asar.unpacked/cli/vendor/shim/sitecustomize.py`，
+> 已读源码确认）：`_should_bypass_safe_delete()` 只豁免三类路径 —— `tempfile.gettempdir()` 之下、
+> pip 的 site-packages 临时目录、WorkBuddy 托管的 pip 路径。**其余路径每删一个文件/目录，
+> 都要先去问批量守卫**（`_try_trash()` 的第一行就是 `_check_bulk_delete_guard()`）；
+> 同一次工具调用内累计删除数 > 50（JSON 里 `scope:"turn"`）即 `raise SystemExit(1)`。
+> 这个异常落在 pytest 的 fixture teardown 里 → 该用例变 **ERROR**；落在收尾清理里 → **汇总行来不及打印、exit=1**。
+>
+> **三种跑法实测对照（同一份代码，2026-09-18）**：
+>
+> | basetemp | 实测结果 | 危害 |
+> |---|---|---|
+> | `--basetemp=D:/tmp/pytest-clean1`（**非 Temp 目录**） | 970 passed 后首个 fixture ERROR 即停（`-x`）；全量口径 **1469 passed + 87 errors**，exit=1 | 🔴 最重：**大批用例集体 ERROR**，看着像代码坏了 |
+> | `--basetemp="$T/xp-full1"`（`$T` = 系统 Temp） | **1560 passed, 2 skipped, exit=0**，汇总行完整（254s） | ✅ **推荐** |
+> | 不带 `--basetemp`（默认） | 用例**全部通过**（进度 100%、一个 `F`/`E` 都没有），收尾删 `pytest-of-anyong/garbage-*` 时被拦（实测 `count:175`）→ **汇总行丢失、exit=1** | ⚠️ 假失败，但至少没 ERROR |
+>
+> **结论（照这个来）**：
+> 1. 跑全量/大批量一律 `--basetemp="$T/xxx"`，`$T` = `"$PY" -c 'import tempfile;print(tempfile.gettempdir())'`；
+> 2. 🔴 **绝不要把 basetemp 指到 `D:/tmp` 这类非 Temp 目录** —— 本文档早版曾把它当「绕开守卫」的解法，
+>    **方向是反的**：它把「丢一行汇总」升级成「87 个用例 ERROR」，比原来的问题严重得多；
+> 3. 判据始终是**有没有 `F`/`E` + 那行 safe-delete JSON**，不是只看 exit code；
+> 4. 命令行**不要传 `-q`**（`pyproject` 的 addopts 已含 `-q`，再传变 `-qq` 同样会吞掉汇总行）。
+>
+> **备选取数法**：分模块跑、逐个核 exit code。
 >
 > ```bash
 > for m in packages/fortune-core/tests tests/vision tests/ai tests/api tests/mobile \
@@ -311,20 +373,13 @@ apps/mobile/
 >     | grep -E 'passed|failed' | tail -1)"
 > done
 > ```
-> 分模块合计 = 全量数，且每个模块都能看到明确的 `N passed in Xs`。
 > 想拿总数又不跑测试：`"$PY" -m pytest --collect-only -p no:warnings | tail -3`。
 >
-> 🔴 **`[safe-delete]` 吞掉汇总行时，用系统 Temp 之外的 `--basetemp` 绕开它**（2026-09-18 实测）：
->
-> ```bash
-> "$PY" -m pytest packages/fortune-core/tests -p no:warnings --basetemp=D:/tmp/pytest-base-ft
-> # → 827 passed, 2 skipped in 50.86s   （exit=0）
-> ```
->
-> 不带 `--basetemp` 跑同一模块，收尾会变成
-> `[SAFE_DELETE_BULK_CONFIRM_REQUIRED] {"count":222,"threshold":50,...}`、
-> **exit=1、汇总行丢失** —— 那是**假失败**（进度条已走满 100% 且一个 `F` 都没有），不是真失败。
-> 判据：看有没有 `F`/`E` 与那行 safe-delete JSON，别只看 exit code。
+> ⚠️ **仍未查清的一环（别当成已定论）**：默认 basetemp 那次被拦的目标路径**就在系统 Temp 下**，
+> 按上面的豁免规则本应放行。用两个独立探针直接测过「系统 Temp 下的普通路径」与「`\\?\` 长路径前缀」
+> 各删 120 个，**都没被拦**（探针自检确认 shim 已 patch：`unlink.__module__ == "sitecustomize"`）——
+> 但那些探针是在**非沙箱**工具调用里跑的，疑似此时批量计数本身就没启用，故**不能据此推断豁免边界**。
+> 操作层结论不受影响（上表是三次真实全量跑的结果）；谁要追这一环，得在**沙箱内**做对照实验。
 
 > ⚠️ 本机有系统代理（`HTTP_PROXY` 指向 127.0.0.1），用 httpx/requests 连本机服务必须 `trust_env=False`。
 
@@ -369,25 +424,39 @@ PYTHONPATH=packages/fortune-core "$PY" services/mcp/server.py   # stdio 模式�
 ### 7.1 未验证项清单（走查时逐项过，别当成"已经验过了"）
 
 离线能验的都已验（`tsc` 零错、`expo export` 出包并核到字节码字符串、接口契约、
-真实 HTTP 的 62 项断言、`tests/mobile` 248 项、三处变异验证）。
+端到端冒烟、`tests/mobile` 的一致性校验、多处变异验证）。
 
 > 🔵 **2026-09-18 更新：这张表里一半以上已经能用「离线渲染」验掉了。**
 > `scripts/ui_render/` 可把 expo web 产物按**精确手机视口**渲染成 PNG，并把实测数据
-> （横向溢出量 / 全文 / 未捕获 JS 错误）回传出来。快照见 `docs/ui-render/`（11 页），
+> （横向溢出量 / 全文 / 未捕获 JS 错误）回传出来。快照见 `docs/ui-render/`（**16 页**），
 > 回归测试 `tests/mobile/test_ui_render.py`（设 `XP_WEB_DIST` 启用）。
 > **它验的是同一套 React 组件树**，不是手绘示意图。
+>
+> 🔄 **刷新快照（2026-09-18 实测一次跑通，16 页全 OK / `exit=0`）**：
+>
+> ```bash
+> cd apps/mobile && npx expo export --platform web --output-dir "$T/xp-web"   # $T = 系统 Temp
+> "$PY" scripts/ui_render/preview_server.py "$T/xp-web" 8955 &
+> XP_ADMIN_TOKEN=… "$NODE" scripts/ui_render/render_pages.mjs \
+>   "C:/Program Files/Google/Chrome/Application/chrome.exe" docs/ui-render http://127.0.0.1:8955
+> ```
+> ⚠️ 导出**别加 `--clear`**（会被 safe-delete 拦）；产物目录也放系统 Temp 下。
+> `11-admin` / `16-admin-config` 走绝对 URL 打到本机后端，需**先起 API**。
 
 **A. 本轮已离线核对通过（除非改动对应页面，否则不必重复）**
 
 | 项 | 实测证据 |
 |---|---|
-| 各页路由是否真的跳得过去 | 11 页全部渲染出内容，`errors = []` |
+| 各页路由是否真的跳得过去 | **16 页**全部渲染出内容，`errors = []` |
 | 各页布局是否横向溢出 | 全部 `overflowX = 0`（`scrollWidth == innerWidth`） |
 | 六爻类别 chip、大运两列网格在窄屏是否换行得体 | 见 `08-divine.png` / `07-chart.png`，可直接肉眼核对 |
 | V2 深色盘对比度、双轨配色并存观感 | `01-home / 02-adjust / 03-sensors.png` 对比 `07-chart.png` |
 | V2 三张指标卡 / 三轴表在窄屏是否挤成两行 | `03-sensors.png`（且 `overflowX = 0`） |
 | 「无数据」一等状态的实际呈现 | `03-sensors.png` 实测为**虚线空盘 + 说明文案**，确实没画盘面 |
 | 黄历 / 择日长文案折行 | `05-almanac.png`（含干支、建除、28 宿、宜忌全字段） |
+| **底栏改版新增 4 页**（测盘 / 分析 / 牌库 / 校准） | `12-test / 13-analysis / 14-templates / 15-calibrate.png`，均 `overflowX = 0`、`errors = []`。这 4 页**此前从未渲染过**（有页面没快照 = 白屏风险最高的地方），本轮补齐 |
+| **管理台配置面板**（本轮新增） | `16-admin-config.png`。渲染器本轮新增「先点击再截图」能力，日志里 `clicked=clicked` 证明真点开了；面板正文 1346 字 vs 总览 347 字，`overflowX = 0`、`errors = []` |
+| **管理台说明文案是否残留 Markdown 标记** | 静态检查与单测全绿，**只有 CDP 真渲染读 innerText 才发现裸星号**（已修 + 已加稳态守卫） |
 
 **B. 仍需真机 —— 离线确实证不了**
 
