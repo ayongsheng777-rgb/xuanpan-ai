@@ -57,13 +57,58 @@ export const neutral = {
   onPrimary: '#FFFFFF',
 } as const;
 
-/** 语义色 —— 状态与提示 */
+/** 语义色 —— 状态与提示（只有前景色；底色/描边见下方 `tone`） */
 export const semantic = {
   success: brand.jade,
   warning: '#A8722B',
   danger: brand.cinnabar,
   /** 信息提示，不用纯蓝以免与主色混淆 */
   info: '#4A6572',
+} as const;
+
+/**
+ * 语义色三件套（前景 / 淡底 / 描边）。
+ *
+ * 为什么必须成组给：`Banner` 原先在组件里手写 4 组 `{bg, border}` 共 8 个色值，
+ * 而 `semantic` 里另有 4 个前景色 —— 同一个语义的色值被拆在两个文件里，
+ * 改一处忘一处就会出现"警示条描边变了、小圆点没变"，且**没有任何检查会报错**
+ * （都是合法色值）。成组后 `tone[danger].fg` 恒等于 `colors.danger`。
+ */
+export const tone = {
+  info: { fg: '#4A6572', bg: '#F1F5F8', border: '#C9D6DE' },
+  warning: { fg: '#A8722B', bg: '#FDF7EC', border: '#E8D5AC' },
+  danger: { fg: brand.cinnabar, bg: '#FDF4F3', border: '#EFC9C5' },
+  success: { fg: brand.jade, bg: '#F2F7F5', border: '#C6DCD5' },
+} as const;
+
+export type ToneName = keyof typeof tone;
+
+/**
+ * 实底淡色面 —— **不是半透明**（半透明的在 `alpha`）。
+ *
+ * 用途是小面积状态底：状态药丸、警示卡。与 `tone[].bg` 的区别是它们会被
+ * 用在需要"比提示条更实"的地方（药丸压在卡片上，若用半透明会透出卡底色）。
+ */
+export const tint = {
+  /** 警示卡整卡底色（比 tone.danger.bg 更浅，整卡铺开才不会显脏） */
+  dangerCard: '#FDF6F5',
+  /** 「可用 / 通过」药丸底色 */
+  jadePill: '#EAF3EF',
+} as const;
+
+/**
+ * 五行本色 —— 命盘五行条专用。
+ *
+ * 归入 token 而不是留在 `FactList` 里的理由：木火土金水是**领域常量**，
+ * 和「山名/卦名」同性质 —— 它在任何页面、任何流派里都该是同一个颜色。
+ * 留在组件里，下一个要画五行环的页面就会自己再挑一遍色。
+ */
+export const element = {
+  木: '#4A7C59',
+  火: brand.cinnabar,
+  土: '#A8722B',
+  金: brand.gold,
+  水: brand.primary,
 } as const;
 
 export const colors = { ...brand, ...neutral, ...semantic } as const;
@@ -127,6 +172,19 @@ export const alpha = {
    * 视觉上就成了"宜是次要信息、忌才是正经内容"，而语义上两者等价。
    */
   jadeSoft: 'rgba(60, 112, 102, 0.10)',
+  /**
+   * 金系半透明 —— 罗盘盘面与取景器用。
+   *
+   * 三档对应三种"金在暗底上的存在感"：`goldRing` 取景对准环（要看清但别抢主体）、
+   * `goldDim` 先天八卦层（与后天的亮金分色）、`goldFaint` 角落山格底纹（几乎只是暗示）。
+   */
+  goldRing: 'rgba(218, 179, 125, 0.55)',
+  goldDim: 'rgba(218, 179, 125, 0.62)',
+  goldFaint: 'rgba(218, 179, 125, 0.14)',
+  /** 磁针红淡底 —— 盘面四正格 */
+  needleSoft: 'rgba(224, 85, 72, 0.16)',
+  /** 白系半透明 —— 取景器快门内芯 */
+  whiteSoft: 'rgba(255, 255, 255, 0.22)',
 } as const;
 
 // ==========================================================================
@@ -147,6 +205,8 @@ export const space = {
 } as const;
 
 export const radius = {
+  /** 内嵌小元素（标签、徽标）—— 与外层容器拉开一档，"内紧外松" */
+  xs: 4,
   sm: 6,
   md: 10,
   lg: 14,
@@ -158,6 +218,24 @@ export const radius = {
 // 字体
 // ==========================================================================
 
+/**
+ * 字距阶梯。
+ *
+ * 中文没有大小写，**层级只能靠"字号 × 字重 × 字距"三件套**——
+ * 少一件就会出现"字号变了但看起来还是同一层"。
+ * 大字要负字距（否则字与字之间像被撑开），小字标签要正字距（否则挤成一团）。
+ */
+export const tracking = {
+  /** 仪表读数大字：40px 以上必须收紧，否则数字之间漏风 */
+  tighter: -0.8,
+  tight: -0.4,
+  normal: 0,
+  /** 分区标题 / 小标签 */
+  wide: 0.6,
+  /** 全大写拉丁标签或极短的中文标签 */
+  wider: 1.2,
+} as const;
+
 export const font = {
   size: {
     xs: 11,
@@ -167,12 +245,28 @@ export const font = {
     xl: 20,
     xxl: 26,
     display: 32,
+    /**
+     * 仪表读数档 —— **一屏只有一个**。
+     *
+     * 为什么 display(32) 不够：方位角、磁场强度这类读数是页面的主角，
+     * 32 与 xxl(26) 只差 1.23 倍，在一张卡片里区分不出"主角/配角"。
+     * 40 与 26 差 1.54 倍，才真正拉出层次（原来的写法是让 display 兼职，
+     * 结果首页的方位角和各页的大标题是同一个字号，主角感全靠颜色硬撑）。
+     */
+    metric: 40,
   },
   weight: {
     regular: '400',
     medium: '500',
     semibold: '600',
     bold: '700',
+    /**
+     * 特粗 —— 只给 `metric` 读数用。
+     *
+     * 中文字形在 800 档上多数系统字体没有独立字重（会回落到 bold，无副作用）；
+     * 但读数主体是**阿拉伯数字与 °**，拉丁字形有真实 800 档，所以这里有实效。
+     */
+    heavy: '800',
   },
   /** 行高按字号 ≈1.5 倍给，中文比英文需要更宽的行距 */
   lineHeight: {
@@ -183,28 +277,43 @@ export const font = {
     xl: 30,
     xxl: 36,
     display: 42,
+    /** 读数不需要 1.5 倍 —— 它就一行，行高过大会在卡片里顶出空档 */
+    metric: 46,
   },
 } as const;
 
-// ==========================================================================
-// 阴影（iOS shadow* / Android elevation 同时给，保证两端一致）
-// ==========================================================================
-
+/**
+ * 阴影阶梯（iOS shadow* / Android elevation 同时给，保证两端一致）。
+ *
+ * 三档对应三种"离页面多远"：静置卡片贴近纸面（范围大、极淡）、
+ * 浮起元素离得远（范围更大更散）、按下态**收紧**（范围变小 = 物理下沉）。
+ * 阴影色统一带底色暖调（`#2C2416`），不用纯黑 —— 纯黑投在暖白纸上会发脏。
+ */
 export const elevation = {
   none: {},
+  /** 静置卡片：范围给大、透明度压低，看起来是"贴着纸"而不是"描了个边" */
   card: {
     shadowColor: '#2C2416',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.06,
-    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 6,
     elevation: 2,
   },
+  /** 浮起：弹层、主 CTA、被选中的卡 */
   raised: {
     shadowColor: '#2C2416',
-    shadowOffset: { width: 0, height: 3 },
+    shadowOffset: { width: 0, height: 6 },
     shadowOpacity: 0.1,
-    shadowRadius: 10,
-    elevation: 5,
+    shadowRadius: 16,
+    elevation: 6,
+  },
+  /** 按下：阴影收紧，与 `scale` 一起读作"被压下去" */
+  pressed: {
+    shadowColor: '#2C2416',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.07,
+    shadowRadius: 3,
+    elevation: 1,
   },
 } as const;
 
@@ -218,9 +327,32 @@ export const layout = {
   maxContentWidth: 560,
 } as const;
 
+/**
+ * 交互常量 —— 按压反馈只许从这里取值。
+ *
+ * 为什么值得单开一节：全仓原先**三种按压写法并存** —— `Button` 用 `opacity 0.86`、
+ * 首页「去测盘」用换底色、而「已保存 N 个盘面」这类同样可点的卡片**完全没有反馈**。
+ * 同一个手势在不同页面给出不同回应，用户读到的不是"风格差异"，而是"有的地方坏了"。
+ */
+export const interaction = {
+  /**
+   * 按下缩放。0.985 是"肉眼几乎看不出、但手指能感到"的档位
+   * （缩放会把文字和图标一起带走，这正是它读起来像"实体按钮"的原因）；
+   * 再往下调就变成夸张的弹跳，与专业仪器风不符。
+   */
+  pressedScale: 0.985,
+  /** 按下视觉变化的目标时长（ms）。100~150 是"按下即刻有回应"的上界，超了就迟钝 */
+  pressDuration: 150,
+  /** 最小触达边长。视觉可以更小，但必须用 `hitSlop` 补足 */
+  minTouchTarget: 44,
+} as const;
+
 export const theme = {
-  brand, neutral, semantic, colors, alpha, instrument, space, radius, font, elevation, layout,
+  brand, neutral, semantic, colors, alpha, instrument,
+  tone, tint, element, interaction,
+  space, radius, font, tracking, elevation, layout,
 } as const;
 
 export type Colors = typeof colors;
 export type Space = typeof space;
+export type TrackName = keyof typeof tracking;
