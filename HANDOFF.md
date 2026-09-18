@@ -241,11 +241,70 @@ HTTP 层无路由、App 里 0 处引用。本轮把三条链路打通：
 - 🔴 **`admin.html` 的 `api()` 必须显式设 `Content-Type: application/json`** ——
   否则 fetch 对字符串 body 发 `text/plain`，FastAPI 直接 422，现象是「保存按钮点了没反应」。
   守这条的是 `tests/api/test_admin_page_wiring.py`
-- 🔴 **管理台有静态接线守卫**（`tests/api/test_admin_page_wiring.py`，18 条）：`$('x')` 引用的 id 必须存在、
+- 🔴 **管理台有静态守卫**（`tests/api/test_admin_page_wiring.py`，**23 条**）：`$('x')` 引用的 id 必须存在、
   `switchView` 名单与导航一致、JS 读的字段 ⊆ 后端给的字段、脚本可过 `node --check`、
-  带 body 的请求必须声明 JSON。**加面板/改字段后它是最先报错的那道防线**
+  带 body 的请求必须声明 JSON、**页面文案里不得出现 Markdown 标记**（HTML 骨架 + JS 字面量两处扫）。
+  **加面板/改字段后它是最先报错的那道防线**
 - 页面**不需要令牌**即可打开（否则陷入「打不开 → 不知配什么 → 更打不开」的死循环）；
   401 = 令牌值不对，403 = `XUANPAN_ADMIN_TOKEN` 没配（整体关闭）
+
+---
+
+### 2.7 管理台工艺重做 + APK 重打（2026-09-18 深夜）
+
+#### APK
+
+`dist/玄盘AI-v0.1.0-v2-ui.apk`（95,616,561 B，sha256 `0e40ce99b4598d65…`）
+含 V2 罗盘域改版 + 本轮界面工艺修复。构建命令见 `apps/mobile/scripts/build-apk.sh`。
+
+- 🔴 脚本只在「地址变化」时重打包 JS，增量构建会显示 `605 up-to-date` —— **别据此认为 JS 是新的**。
+  本轮是用 Python 解包比对 bundle sha（新旧不同）**并核对包内文案已无旧 `**` 标记** 才敢确认。
+- 🔴 仍是 **Android Debug 签名**（`apksigner` 显示 `CN=Android Debug`），对外分发必须换正式签名。
+- ⚠️ 产物含 9 个权限。`RECORD_AUDIO` / `SYSTEM_ALERT_WINDOW` / `READ|WRITE_EXTERNAL_STORAGE`
+  来自 **prebuild 生成的** `android/app/src/main/AndroidManifest.xml`（不是 `app.json` 声明的），
+  `ACTIVITY_RECOGNITION` / `VIBRATE` 来自 `expo-sensors`。**未擅自改** —— 见 §7.0 ⑤。
+
+#### 管理台（`services/api/xuanpan_api/static/admin.html`）
+
+把单文件零依赖的管理台拉到与 APP 相同的工艺标准。**没动五色品牌、没动功能逻辑与接口契约。**
+
+| 项 | 改前 | 改后 |
+|---|---|---|
+| token 层 | 无（硬编码色值 24 处） | 49 个变量：四级语义 / 4pt 栅格 / 字阶 / 动效 |
+| 焦点可见性 | input 用金 on 白 **1.96:1**；按钮**完全没有** `:focus-visible` | 主色 outline |
+| 卡片标题 | `13px + muted`（比它管的正文更小更淡） | `15px + text + semi` |
+| 等宽数字 | **0 处** | `.stat .n` / `td` / `pre` / `.mono` / `.badge` 全加 `tabular-nums` |
+| 按压反馈 | 无 | 统一 `translateY(1px)` |
+| 禁用态 | `opacity`（半透明蓝按钮仍"像能点"） | 中性灰底 + 中性灰字 |
+| 无障碍 | 只靠 `.active` 类，读屏读不出当前页 | `tablist`/`tab`/`tabpanel` + `aria-selected` + **roving tabindex** + ←→/Home/End |
+| 内联 style | 6 处 | 收编为语义类 |
+
+🔴 **刻意不做第四级文字** —— 实测四级里只有三级过 4.5:1；需要第四级说明内容该被裁掉，不是该被调淡。
+🔴 **管理台保持浅色工程风**，不与 APP 深色仪器风统一（两套体系是有意的，见 PITFALLS §7）。
+
+#### 快照与对照
+
+- 补齐管理台**四个视图**快照（此前只有总览 + 配置；「能力调试台」是管理台最大单一界面，**从未被拍过**）
+- 改前/改后对照：概览 **9.07%** / 配置 **17.43%** 像素变化 → `dist/ui-compare/`
+- 工具固化：`scripts/ui_render/make_compare.py`
+- 🔴 **像素差异不算证据**，要证明「差异来自视觉而非数据」得比渲染诊断的 `text` 字段 ——
+  本轮概览/配置/会话三页改前改后 `text` **逐字节相同**（347/700/343 字符）才敢下结论
+
+#### 🔴 本轮最值钱的发现：快照拍的是**容器镜像**，不是工作区
+
+管理台由 8360 的**容器**提供，镜像里烧的是**构建时刻**的 `admin.html`。所以
+「改了页面没 `docker compose up -d --build`」时，快照拍到的是**旧界面**，
+而 **`ok:true` / `errors:[]` / `overflowX:0` / `clicked=clicked` 一个不缺** —— 全绿。
+
+本轮就是靠**读诊断 `text` 字段**才发现的：旧副本渲染出 `这里是**只读试算台**：`，
+而磁盘上早已是 `<strong>只读试算台</strong>`。
+**判据：`curl :8360/admin` 与磁盘文件比 sha256，不一致就是旧副本。** 详见 PITFALLS §5。
+
+#### 已知限制 / 未做
+
+- `16-admin-sessions` / `16-admin-lab` **没有改前基线**（本轮之前从未拍过），故不做伪对照
+- 管理台未做真机/真实浏览器人工走查（键盘 Tab 顺序、读屏实际播报未验）
+- 存量 `dist/` 有 4 个 9-17 的旧 APK（≈394 MB），**未删除**（可保留 tag `v0.1.0-pre-v2` 等重建）—— 是否清理待阿勇定
 
 ---
 
@@ -417,6 +476,7 @@ PYTHONPATH=packages/fortune-core "$PY" services/mcp/server.py   # stdio 模式�
 | ② | **底栏两个名字**：SSOT 写「命盘 / 占测」，APP 实际是「测盘 / 分析」 | (a) 改 SSOT 承认 V2 改版 (b) 改回 APP | APP 现状有理由（见 `(tabs)/_layout.tsx` 顶部注释），但**文档与实现不一致本身就是缺陷** —— 下次接手的人会照文档找「命盘」页 |
 | ③ | **深色仪器风要不要铺到全站** | (a) 维持双轨（6 个测量页深色、其余浅色）(b) 全站深色化 | V2 明确「不做全局深色化」，双轨待**真机走查**后再定 |
 | ④ | 去 Markdown 标记后，**那些强调要不要改成真加粗** | (a) 维持现状（强调不显形）(b) 加一个极小的粗体解析（把 `**x**` 渲染成粗体） | 现按管理台先例「删标记」（同类问题一种解法）。**这是可选项，不是待修项** —— 不加也不会错 |
+| ⑤ | **APK 签名与权限**：`dist/` 的包是 **debug 签名**；且含 `RECORD_AUDIO` / `SYSTEM_ALERT_WINDOW` / `READ\|WRITE_EXTERNAL_STORAGE`（来自 prebuild 生成的 Manifest，`app.json` 里没有） | (a) 出一版只含真正需要权限的最小 Manifest，并换正式签名 (b) 先不管，内测阶段够用 | **未擅自改**。`app.json` 与生成 Manifest 不一致这件事本身值得看一眼：改 `app.json` 不会生效 |
 
 > ④ 的背景：`src/content/help.ts` 的 53 对标记是有意加在**最容易被搞错的句子**上的，
 > 删掉后这些句子读起来更平。要恢复强调就得引入粗体渲染，属新能力，故留给阿勇定。
