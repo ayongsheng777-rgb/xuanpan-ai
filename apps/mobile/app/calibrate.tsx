@@ -161,7 +161,7 @@ export default function CalibrateScreen(): React.JSX.Element {
         {/* ---------- 照片对位 ---------- */}
         <Card title="照片对位">
           <AppText size="xs" color={instrument.textSecondary} style={styles.hintLine}>
-            把照片里罗盘的**外圈**对到矢量盘的外缘、**鱼丝线**对到同一条直线上。
+            把照片里罗盘的外圈对到矢量盘的外缘、鱼丝线对到同一条直线上。
             照片只是参照，读数始终来自矢量盘。
           </AppText>
 
@@ -281,7 +281,7 @@ export default function CalibrateScreen(): React.JSX.Element {
 
         <View style={styles.foot}>
           <AppText size="xs" color={instrument.muted} style={styles.footLine}>
-            校准参数（照片的旋转 / 缩放 / 平移）只作用于本页视图，**不写入服务端** ——
+            校准参数（照片的旋转 / 缩放 / 平移）只作用于本页视图，不写入服务端 ——
             本版没有保存校准的记录表，与其假装存了，不如说清没存。
           </AppText>
           <AppText size="xs" color={instrument.muted} style={styles.footLine}>

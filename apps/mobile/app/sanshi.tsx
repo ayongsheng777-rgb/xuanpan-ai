@@ -704,7 +704,7 @@ function TaiyiPane({ year }: { year: number }): React.JSX.Element {
         <Card title="宫号表（🔴与洛书逐宫错位）">
           <AppText size="xs" color="muted" style={styles.hint}>
             由服务端返回，界面不自己维护一份 —— 宫号表是领域数据（RULE-005）。
-            太乙宫号与洛书**逐宫错位**（乾1 离2 艮3 震4 兑6 坤7 坎8 巽9），
+            太乙宫号与洛书逐宫错位（乾1 离2 艮3 震4 兑6 坤7 坎8 巽9），
             前端若抄洛书必然整盘转 45°，且不报错。
           </AppText>
           {Object.entries(meta.data.palace_gua)
@@ -760,7 +760,7 @@ function TaiyiChartView({ chart }: { chart: TaiyiChart }): React.JSX.Element {
 
       <Card title="三目">
         <AppText size="xs" color="muted" style={styles.hint}>
-          文昌 / 始击 / 定目都在**十六神**上走（含四维乾坤巽艮），计神只在十二支上走。
+          文昌 / 始击 / 定目都在十六神上走（含四维乾坤巽艮），计神只在十二支上走。
         </AppText>
         <KeyValueRow label="文昌天目" value={`${wenchang.pos}（${wenchang.name}）· ${wenchang.gua}${wenchang.palace}宫`} />
         <KeyValueRow label="计神" value={jishen.zhi} />
@@ -770,7 +770,7 @@ function TaiyiChartView({ chart }: { chart: TaiyiChart }): React.JSX.Element {
 
       <Card title="三算（主 / 客 / 定）">
         <AppText size="xs" color="muted" style={styles.hint}>
-          算数是**属性**，不是吉凶结论；长短、和数孤数、三才同属属性。
+          算数是属性，不是吉凶结论；长短、和数孤数、三才同属属性。
           格局（掩迫囚击关格）与「利主利客」属上层解读（RULE-008），本页不做。
         </AppText>
         {sansuan.map((s) => (
@@ -796,7 +796,7 @@ function TaiyiChartView({ chart }: { chart: TaiyiChart }): React.JSX.Element {
       <Card title="值事八门盘（南上北下，中央留白）">
         <AppText size="xs" color="muted" style={styles.hint}>
           太乙八宫盘跳过中五宫，中央留白。每格为 门（+自身吉凶）。值事门以金色边框标出。
-          门的吉凶是门**自身的固有属性**，不是对所问之事的结论。
+          门的吉凶是门自身的固有属性，不是对所问之事的结论。
         </AppText>
         <View style={styles.grid}>
           {TAIYI_GRID.map((gong, i) => (

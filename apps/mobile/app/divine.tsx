@@ -199,7 +199,7 @@ function LiuyaoPanel({ onOpenReport }: { onOpenReport: (id: string) => void }): 
     <>
       <Card title="登记摇卦结果（自下而上）">
         <AppText size="sm" color="textSecondary" style={styles.cardIntro}>
-          请先实际摇卦，再把每一爻的结果登记在这里。程序**不会**替你摇 ——
+          请先实际摇卦，再把每一爻的结果登记在这里。程序不会替你摇 ——
           随机数不构成占测，且结果无法复现。
         </AppText>
 

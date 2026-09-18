@@ -63,7 +63,7 @@ function AiModelCard({ data }: { data: AiProvidersResponse | null }): React.JSX.
   return (
     <Card title="AI 模型（由服务端配置）">
       <AppText size="xs" color="muted" style={styles.note}>
-        密钥保存在服务端，不进入本 App。此处只展示服务端当前**能用什么**。
+        密钥保存在服务端，不进入本 App。此处只展示服务端当前能用什么。
       </AppText>
 
       {data === null ? (
@@ -179,7 +179,7 @@ function PrivacyCard({ caps }: { caps: CapabilitiesResponse | null }): React.JSX
   return (
     <Card title="隐私与数据">
       <AppText size="sm" style={styles.privacyLine}>
-        罗盘照片**仅用于识别**，分析完成后默认不保留原图；生辰信息仅用于排盘，
+        罗盘照片仅用于识别，分析完成后默认不保留原图；生辰信息仅用于排盘，
         可随时一键删除全部记录。
       </AppText>
       <Divider />
