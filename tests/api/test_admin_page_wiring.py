@@ -423,4 +423,211 @@ class TestRequestContentType:
             )
 
 
+# ==========================================================================
+# 静态文案守卫 —— HTML 骨架与 JS 字面量里不得出现 Markdown 标记
+# ==========================================================================
+#
+# 与 `test_admin_config.py::TestCopyIsPlainText` 分工不同：那个类只扫
+# **服务端响应**（`/api/v1/admin/config` 返回的 `description` 字段之类），
+# 而管理台绝大多数文案**直接写死在页面里**，从不经过服务端 —— 于是它守不到。
+#
+# 调试台 banner 那句 `这里是**只读试算台**：` 就是这么溜进来的：用 CDP 真渲染
+# 该视图，取回的 `text` 字段里明明白白是**两个星号**。它不会让任何测试失败
+# （后端一切正常、`tsc` 也不管 HTML），只能靠这里的静态扫描。
+#
+# 覆盖面刻意分成两半，因为两种载体的"合法反例"完全不同：
+#   · HTML 骨架 —— 剥掉 CSS / 注释 / 实体后，`*` 与反引号**一个都不该有**
+#   · JS 字面量 —— `**` 一个都不该有；但反引号是模板字面量分隔符，**不能报**
+
+_STYLE_BLOCK = re.compile(r"<style\b.*?</style>", re.S)
+_HTML_COMMENT = re.compile(r"<!--.*?-->", re.S)
+#: `&gt;` / `&ast;` 是作者**故意**写出来的字符（`&ast;` 就是字面星号），不算标记
+_HTML_ENTITY = re.compile(r"&#?\w+;")
+
+# 🔴 **判据一律用 ASCII 专用字符类，绝不用 `\w`** —— Python 的 `\w` 含 CJK，
+#    于是"幂运算符判据" `[\w\)\]]\s*\*\*\s*[\w\(\[]` 会把 `页**刻**分` 判成
+#    合法的 `2 ** 3`，**中文强调全部漏报**；而中文正是本项目的正文语种，
+#    用 `\w` 等于把守卫关掉大半（`tests/mobile/test_ui_copy_plain_text.py`
+#    的注释里记着同一个坑）。
+_ALNUM = r"[A-Za-z0-9_]"
+
+#: 会被浏览器**原样显示**的 Markdown 标记，三种形态
+_MD_BOLD = re.compile(r"\*\*[^\s*][^*\n]*\*\*")
+_MD_ITALIC = re.compile(rf"(?<![*{_ALNUM}])\*[^\s*][^*\n]*\*(?!\*)")
+#: 行内代码。**只在 HTML 骨架里判** —— JS 里反引号是模板字面量分隔符
+_MD_CODE = re.compile(r"`[^\n`]+`")
+
+
+def _html_visible_text(html: str) -> str:
+    """管理台 HTML 骨架里**用户能看到的文本**。
+
+    剥四样东西，少剥一样就会误报：
+    - `<script>` 及其后（靠 `_html_part`）：JS 里有大量 `'<div id="'` 拼接
+    - `<style>`：CSS 注释里写着 `/* 金色底纹 */` 这类说明
+    - `<!-- -->`：HTML 注释同上（文件里用 `<!-- 概览 -->` 分节）
+    - HTML 实体：见 `_HTML_ENTITY`
+    """
+    text = _html_part(html)
+    text = _STYLE_BLOCK.sub(" ", text)
+    text = _HTML_COMMENT.sub(" ", text)
+    return _HTML_ENTITY.sub(" ", text)
+
+
+#: 正则字面量只在"期待一个值"的位置出现（`.replace(/"/g, ...)` 的 `(` 之后）。
+#: 用它把 `/` 是"除号"还是"正则开头"分开。
+_PREV_ALLOWS_REGEX = set("(,=:[!&|?{};+-*%~^<>")
+
+
+def _js_string_literals(src: str) -> list[str]:
+    """JS 里会拼进 DOM 的**字符串字面量**内容（注释跳过，正则字面量跳过）。
+
+    🔴 **必须先穿正则字面量**，否则会被 `/"/g` 骗到：扫描器在 `"` 处开一个
+    字符串，一路吞到下一个 `"`（在 `'<div class="'` 里），这段里夹着
+    `// ...**不能用 toISOString()**...` 这样的**注释** —— 于是注释里的星号
+    全被当成界面文案报出来，逼人去删掉有用的注释。这条不是假想：
+    本文件 `esc()` 里的 `.replace(/"/g, '&quot;')` 就是原文。
+    """
+    out: list[str] = []
+    i, n = 0, len(src)
+    prev = ""  # 上一个有意义的非空白字符，供正则字面量判据用
+    while i < n:
+        c = src[i]
+
+        if c == "/" and i + 1 < n and src[i + 1] == "/":  # 行注释
+            while i < n and src[i] != "\n":
+                i += 1
+            continue
+        if c == "/" and i + 1 < n and src[i + 1] == "*":  # 块注释
+            i += 2
+            while i < n and not (src[i] == "*" and i + 1 < n and src[i + 1] == "/"):
+                i += 1
+            i += 2
+            continue
+        if c == "/" and (prev == "" or prev in _PREV_ALLOWS_REGEX):  # 正则字面量
+            i += 1
+            in_class = False
+            while i < n and src[i] != "\n":
+                if src[i] == "\\":
+                    i += 2
+                    continue
+                if src[i] == "[":
+                    in_class = True
+                elif src[i] == "]":
+                    in_class = False
+                elif src[i] == "/" and not in_class:
+                    i += 1
+                    break
+                i += 1
+            while i < n and src[i] in "gimsuy":
+                i += 1
+            prev = "x"
+            continue
+
+        if c in "'\"`":  # 字符串 / 模板字面量
+            quote = c
+            i += 1
+            buf: list[str] = []
+            while i < n:
+                if src[i] == "\\":
+                    buf.append(src[i : i + 2])
+                    i += 2
+                    continue
+                if src[i] == quote:
+                    i += 1
+                    break
+                buf.append(src[i])
+                i += 1
+            out.append("".join(buf))
+            prev = "x"
+            continue
+
+        if not c.isspace():
+            prev = c
+        i += 1
+    return out
+
+
+class TestStaticCopy:
+    """页面里写死的文案不得含 Markdown 标记 —— 用户看到的是两个星号。"""
+
+    def test_html_骨架剥离没写崩(self) -> None:
+        r"""自检：剥离逻辑一旦写崩，下面的断言会变成**假绿**。
+
+        这正是 PITFALLS §2 记的那类坑：「什么都没扫到 → 通过」。
+
+        锚点**刻意用结构，不用文案** —— 用具体句子当锚点，将来合法改一次文案
+        就会误报；误报会训练人忽略这条测试，那时它就真的失效了。
+        """
+        text = _html_visible_text(_read_page())
+        navs = text.count('role="tabpanel"')
+        ids = text.count('id="')
+
+        assert len(text) > 3000, f"剥完只剩 {len(text)} 字符，剥离逻辑可能坏了"
+        assert "<style" not in text and "<script" not in text, "CSS / JS 没被剥掉"
+        assert navs >= 4, f"只读到 {navs} 个 tabpanel 区块 —— 切分或剥离可能错了"
+        assert ids >= 10, f"只读到 {ids} 个 id —— 可能根本没读到页面"
+        assert "function " not in text, "JS 漏进扫描面了（`_html_part` 没生效？）"
+
+    def test_html_可见文案无_markdown_标记(self) -> None:
+        text = _html_visible_text(_read_page())
+        hits = [m.group(0) for pat in (_MD_BOLD, _MD_ITALIC, _MD_CODE) for m in pat.finditer(text)]
+        assert not hits, (
+            "HTML 文案里出现了 Markdown 标记，浏览器会原样显示这些符号：\n"
+            + "\n".join(f"  {h}" for h in hits)
+            + "\n改法：用 HTML 原生 `<strong>`，或直接去掉标记。"
+        )
+
+    def test_js_字面量无_markdown_标记(self) -> None:
+        """JS 拼出来的文案同样会进 DOM（错误提示、保存回执都在这里）。
+
+        只判 `**`：反引号在 JS 里是模板字面量分隔符，判它必然误伤。
+        """
+        literals = _js_string_literals(_script(_read_page()))
+        assert len(literals) > 100, (
+            f"只提到 {len(literals)} 个字符串字面量 —— 扫描器可能被正则/注释骗住了"
+        )
+        hits = [m.group(0) for lit in literals for m in _MD_BOLD.finditer(lit)]
+        assert not hits, (
+            "JS 字符串字面量里出现了 Markdown 强调标记：\n"
+            + "\n".join(f"  {h}" for h in hits)
+        )
+
+    def test_判据该报的报不该报的不报(self) -> None:
+        r"""变异验证：判据必须**能命中中文强调**，也必须**不误伤**。
+
+        没有这条，`_MD_BOLD` 一旦写错（比如用 `\w` 做边界、或要求两侧是空格），
+        上面两条断言就会永远通过 —— 比没有守卫更糟。
+        """
+        # 该报 —— 注意第 3 条：**两侧是中文**，`\w` 版判据会把它漏掉
+        assert _MD_BOLD.search("这里是**只读试算台**：")
+        assert _MD_BOLD.search("**逐宫错位**是刻意的")
+        assert _MD_BOLD.search("页**刻**分")
+        assert _MD_ITALIC.search("它是*确定性*的")
+        assert _MD_CODE.search("跑 `npm install`")
+
+        # 不该报 —— 幂运算 / 环境变量名 / 单个必需星号
+        assert not _MD_BOLD.search("2 ** 3")
+        assert not _MD_ITALIC.search("x**2")
+        assert not _MD_ITALIC.search("计算 2 * 3 = 6")
+        assert not _MD_CODE.search("XUANPAN_ADMIN_TOKEN")
+        assert not _MD_BOLD.search("admin_token")
+
+    def test_扫描器不被状态骗住(self) -> None:
+        """扫描器必须穿过**正则字面量**，且不能把字符串内容当注释剥掉。
+
+        样本直接照抄本文件的真实形态（`esc()` 里的 `.replace(/"/g, ...)`
+        紧跟一条含 `**` 的中文行注释）—— 这是本扫描器唯一已知的翻车点。
+        """
+        sample = """
+        function esc(s) {
+          return String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+        }
+        // 本地日期串。**不能用 toISOString()**：它先转 UTC（注释里的星号不报）
+        const t = '错误：请先填写年份';      // 行尾注释里的 ** 也不报
+        const u = '文案里的 **强调** 要报';
+        """
+        hits = [m.group(0) for lit in _js_string_literals(sample) for m in _MD_BOLD.finditer(lit)]
+        assert hits == ["**强调**"], f"期望恰好命中 1 处，实得 {hits}"
+
+
 __all__: list[str] = []
