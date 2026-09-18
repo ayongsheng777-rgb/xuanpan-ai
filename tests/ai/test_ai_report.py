@@ -23,6 +23,9 @@ from xuanpan_ai import (
     LLMResponse,
     ProviderCallError,
     ProviderUnavailableError,
+    REGISTER_EXPERT,
+    REGISTER_PLAIN,
+    REGISTER_TITLES,
     REQUIRED_SECTIONS,
     RouterConfig,
     UNCERTAINTY_SECTION_TITLE,
@@ -33,10 +36,16 @@ from xuanpan_ai import (
     list_providers,
     missing_sections,
     parse_sections,
+    split_registers,
     unmentioned_uncertainties,
 )
 from xuanpan_ai.providers import CAPABILITY_MATRIX, list_endpoint_presets
 from xuanpan_ai.providers.openai_compat import OpenAICompatProvider, _redact
+from xuanpan_ai.providers.template import (
+    _CATEGORY_ANGLE,
+    _CATEGORY_ANGLE_PLAIN,
+    _TERM_GLOSSARY,
+)
 
 
 # ==========================================================================
@@ -227,6 +236,53 @@ class TestParseSections:
         assert got == ["罗盘识别结果尚未经用户确认"]
 
 
+class TestSplitRegisters:
+    """文体切分 —— 两个文体内部用的是**同一套区块标题**，故必须先切再解析。
+
+    若不切而整体解析：两套标题（事实 / 传统解释 / 针对问题 / 参考建议）会混成
+    8 个区块且顺序被打乱，之后再也无法还原"哪一段属于哪个文体"。
+    """
+
+    def test_both_registers_split_cleanly(self) -> None:
+        text = (
+            f"【{REGISTER_EXPERT}】\n【事实】甲\n【传统解释】乙\n"
+            f"\n【{REGISTER_PLAIN}】\n【事实】丙\n【传统解释】丁\n"
+        )
+        expert, plain = split_registers(text)
+        assert "甲" in expert and "乙" in expert
+        assert "丙" not in expert, "白话块的内容漏进了专业块"
+        assert "丙" in plain and "丁" in plain
+        assert "甲" not in plain, "专业块的内容漏进了白话块"
+        # 标记本身必须被摘掉：留着它，parse_sections 会把它当成一个多余区块
+        assert REGISTER_EXPERT not in expert
+        assert REGISTER_PLAIN not in plain
+
+    def test_plain_only_still_parses(self) -> None:
+        expert, plain = split_registers(f"【{REGISTER_PLAIN}】\n【事实】乙")
+        assert expert.strip() == ""
+        assert "乙" in plain
+
+    def test_no_marker_means_no_plain_register(self) -> None:
+        """认不出白话块时返回空串 —— 由调用方记 warning，**不得拿专业版顶上**。"""
+        expert, plain = split_registers(FULL_TEXT)
+        assert expert == FULL_TEXT
+        assert plain == ""
+
+    def test_preamble_before_expert_marker_is_kept(self) -> None:
+        """标记之前的文字不能因为切分而丢 —— 丢了就是内容损失。"""
+        expert, _ = split_registers(
+            f"下面开始分析。\n\n【{REGISTER_EXPERT}】\n【事实】甲\n【{REGISTER_PLAIN}】\n【事实】乙"
+        )
+        assert "下面开始分析" in expert
+        assert "甲" in expert
+
+    def test_markdown_and_bold_marker_forms(self) -> None:
+        """模型不会总是用【】。认不出的表现是"白话版凭空消失"。"""
+        for form in (f"## {REGISTER_PLAIN}", f"**{REGISTER_PLAIN}**", f"{REGISTER_PLAIN}："):
+            _, plain = split_registers(f"【事实】甲\n\n{form}\n【事实】乙")
+            assert "乙" in plain, f"{form!r} 这种写法没有被认出"
+
+
 # ==========================================================================
 # 模板 provider（离线兜底）
 # ==========================================================================
@@ -334,6 +390,198 @@ class TestTemplateProvider:
         report = build_report(build_context("sess-empty"))
         assert "尚未产生任何确定性计算结果" in report.interpretation.text
         assert report.facts == {}
+
+
+# ==========================================================================
+# 双文体（专业分析 / 白话讲解）
+# ==========================================================================
+#
+# 这组测试守的是"两种文体**真的都存在、且真的不同**"。
+# 最容易出现的假绿是：实现者偷懒把 plain_sections 直接指向 sections ——
+# 那样界面上的切换按钮点了之后内容一模一样，看起来"功能做好了"。
+
+
+class TestTwoRegisters:
+    def test_template_provider_has_both_registers(self) -> None:
+        """零成本路径也必须有两文体 —— 不配 key 的用户走的就是这条路。
+
+        少了它，这个能力在默认配置下等于不存在（界面会一直显示"本篇没有白话版"）。
+        """
+        report = build_report(_context())
+        assert report.interpretation.has_plain is True
+        titles = [s.title for s in report.interpretation.plain_sections]
+        for title in REQUIRED_SECTIONS:
+            assert title in titles, f"白话版缺少区块「{title}」"
+
+    def test_plain_register_is_not_a_copy_of_the_expert_one(self) -> None:
+        """两个文体的正文必须**真的不同**。
+
+        防的正是"直接把 sections 赋给 plain_sections"这种实现 ——
+        那种情况下界面切换按钮点了没变化，而任何结构断言都照样通过。
+
+        「不确定性说明」区块刻意排除在外：它由系统**逐字**追加、两种文体里
+        本就应当一模一样（见下一条用例）。把它算进来，这条断言会恒假。
+        """
+        report = build_report(_context())
+
+        def model_sections(sections) -> dict[str, str]:  # type: ignore[no-untyped-def]
+            return {s.title: s.body for s in sections if s.title != UNCERTAINTY_SECTION_TITLE}
+
+        expert = model_sections(report.interpretation.sections)
+        plain = model_sections(report.interpretation.plain_sections)
+        shared = set(expert) & set(plain)
+        assert shared, "两个文体没有任何同名区块，本测试无从比较（实现可能坏了）"
+        same = [t for t in shared if expert[t] == plain[t]]
+        assert not same, f"以下区块在两种文体里逐字相同，等于没有白话版：{same}"
+
+    def test_plain_register_actually_explains_the_jargon(self) -> None:
+        """白话版要**解释**术语，而不只是换个词说同一句。
+
+        取最容易验证的一处：坐山/向山。白话版必须把「坐 = 背面、向 = 正面」
+        说出来 —— 否则读者仍然不知道这两个字指什么。
+        """
+        report = build_report(_context())
+        fact = next(s for s in report.interpretation.plain_sections if s.title == "事实")
+        assert "背面" in fact.body and "正面" in fact.body
+
+    def test_jargon_in_plain_register_is_always_explained(self) -> None:
+        """白话版里出现的术语，必须在同一篇里被解释过。
+
+        🔴 这条守的是"照录"策略的漏洞：白话版会照录核心层的结论原话（照录才
+        不走样），而原话里必然带术语（日主、喜用、身弱…）。只照录不解释，
+        等于把看不懂的句子原样再贴一遍 —— 界面看起来完全正常，
+        但这一版对它的目标读者毫无用处。所以照录之后必须配术语解释。
+
+        「不确定性说明」区块**不在扫描范围内**：它是系统从计算层**逐字**粘来的，
+        两种文体里完全相同（见下一条用例），且刻意不加解释 ——
+        那一段的价值恰恰在于"与我算出来的原文一字不差"，动它才是错的。
+        因此其中的术语（如「身强」）不出现在本断言里是预期行为。
+        """
+        report = build_report(_context())
+        plain_all = "\n".join(
+            s.body
+            for s in report.interpretation.plain_sections
+            if s.title != UNCERTAINTY_SECTION_TITLE
+        )
+
+        assert "日主" in plain_all, "本用例的前提是原话里确实出现了「日主」"
+        unexplained = [
+            term
+            for term, gloss in _TERM_GLOSSARY.items()
+            if term in plain_all and gloss not in plain_all
+        ]
+        assert not unexplained, f"白话版用了这些词却没有解释：{unexplained}"
+
+    def test_uncertainty_block_is_identical_in_both_registers(self) -> None:
+        """系统追加的不确定性区块在两种文体里逐字相同 —— 这是刻意的，不是巧合。
+
+        它是计算层结果的直接粘贴，与文体无关。任何"让它随文体改写"的改动
+        都会引入模型/模板改写风险，而它恰恰是最不该被改写的那一段。
+        """
+        report = build_report(_context())
+
+        def block_of(sections) -> str:  # type: ignore[no-untyped-def]
+            return next(s.body for s in sections if s.title == UNCERTAINTY_SECTION_TITLE)
+
+        assert block_of(report.interpretation.sections) == block_of(
+            report.interpretation.plain_sections
+        )
+
+    def test_both_registers_carry_the_uncertainty_block(self) -> None:
+        """两种文体**各自**都要带不确定性区块。
+
+        🔴 只给专业版追加是错的：白话版的读者恰恰是最容易把结论当承诺的人
+        （他看不懂术语、只看结论）。把风险提示只放在他看不懂的那一版里，
+        等于没放 —— 而报告看起来完全合规。
+        """
+        report = build_report(_context())
+        assert report.uncertainties, "本用例的前提是这次会话确实有不确定性"
+        for name, sections in (
+            ("专业分析", report.interpretation.sections),
+            ("白话讲解", report.interpretation.plain_sections),
+        ):
+            block = next(
+                (s for s in sections if s.title == UNCERTAINTY_SECTION_TITLE), None
+            )
+            assert block is not None, f"「{name}」里没有不确定性区块"
+            assert report.uncertainties[0][:8] in block.body
+
+    def test_missing_plain_register_is_reported_not_substituted(self) -> None:
+        """模型没写白话块时：如实报，**不拿专业版冒充**。
+
+        冒充的表现是界面显示"有白话版"、点进去与专业版一字不差 ——
+        读者会以为白话功能坏了，而任何一层都不会报错。
+        """
+        model = ScriptedProvider("only-expert", text=FULL_TEXT)
+        report = build_report(_context(), router=AIRouter([model]))
+        assert report.interpretation.has_plain is False
+        assert report.interpretation.plain_sections == ()
+        assert any(REGISTER_PLAIN in w for w in report.interpretation.warnings), (
+            f"没有说明白话版缺失：{report.interpretation.warnings}"
+        )
+        # 专业版照常解析（不能因为缺白话就整体降级）
+        assert [s.title for s in report.interpretation.sections][:1] == ["事实"]
+
+    def test_scripted_two_register_text_lands_in_the_right_fields(self) -> None:
+        """模型按格式输出时，两块内容必须各归各位。"""
+        model = ScriptedProvider(
+            "two-reg",
+            text=(
+                f"【{REGISTER_EXPERT}】\n【事实】专业的事实\n【传统解释】专业的解释\n"
+                "【针对问题】专业的回答\n【参考建议】专业的建议\n"
+                f"\n【{REGISTER_PLAIN}】\n【事实】白话的事实\n【传统解释】白话的解释\n"
+                "【针对问题】白话的回答\n【参考建议】白话的建议\n"
+            ),
+        )
+        report = build_report(_context(), router=AIRouter([model]))
+        expert = {s.title: s.body for s in report.interpretation.sections}
+        plain = {s.title: s.body for s in report.interpretation.plain_sections}
+        assert "专业的事实" in expert["事实"]
+        assert "白话的事实" not in expert["事实"]
+        assert "白话的事实" in plain["事实"]
+        assert "专业的事实" not in plain["事实"]
+
+    def test_serialized_payload_exposes_both_registers(self) -> None:
+        """接口契约：`to_dict()` 必须同时给出两份区块与 has_plain。
+
+        前端靠 `has_plain` 决定显示切换还是显示"没有白话版"的说明。
+        少了这个键，前端要么报错、要么自己算（然后漏算）——
+        漏算的表现就是"切换按钮点了没反应"。
+        """
+        body = build_report(_context()).to_dict()
+        interp = body["interpretation"]
+        assert interp["has_plain"] is True
+        assert interp["plain_sections"], "序列化后白话区块为空"
+        assert [s["title"] for s in interp["plain_sections"]] == [
+            s["title"] for s in interp["sections"]
+        ], "两种文体的区块标题与顺序应当一致，否则界面无法并排对照"
+
+    def test_prompt_asks_for_both_registers(self) -> None:
+        prompt = build_system_prompt(_context().to_ai_payload())  # type: ignore[attr-defined]
+        for title in REGISTER_TITLES:
+            assert f"【{title}】" in prompt, f"提示词里没有要求写「{title}」"
+        # 白话版必须被明确要求"讲同一件事、不得含糊掉不确定性"
+        assert "同一" in prompt and "不确定性" in prompt
+
+    def test_category_angle_tables_are_in_sync(self) -> None:
+        """专业版与白话版的问题类别表必须键集合一致。
+
+        只加了一边，表现是那一类问题在白话版里退回一句空话（走 `.get(...)` 兜底），
+        而专业版照常有内容 —— 界面上看不出任何异常。
+        """
+        assert set(_CATEGORY_ANGLE) == set(_CATEGORY_ANGLE_PLAIN)
+
+    def test_report_text_property_is_the_expert_register_only(self) -> None:
+        """`text` 只拼专业版：它要回灌给模型当上下文，白话版是给人看的。
+
+        这条钉住契约 —— 哪天有人把白话版也拼进 `text`，
+        对话历史会平白翻倍，而看不出任何异常（只是越来越贵、越来越慢）。
+        """
+        report = build_report(_context())
+        assert report.interpretation.text == "\n\n".join(
+            f"【{s.title}】\n{s.body}" for s in report.interpretation.sections
+        )
+        assert report.interpretation.plain_text, "白话版的整段文本应当非空"
 
 
 # ==========================================================================

@@ -491,6 +491,33 @@ def test_interpretation_sections_are_objects(responses: dict[str, Any]) -> None:
         assert set(s) >= {"title", "body"}, f"区块缺少 title/body：{s}"
 
 
+def test_interpretation_exposes_both_registers(responses: dict[str, Any]) -> None:
+    """接口必须同时给出 `plain_sections` 与 `has_plain`（双文体）。
+
+    🔴 前端 `has_plain` 是**唯一**的文体切换判据（见 `types.ts` 的注释）。
+    这个键一旦缺失，前端的 `report.interpretation.has_plain` 恒为 `undefined`，
+    于是切换控件永远不显示 —— 用户看到的是"这份报告没有白话版"，
+    而报告其实有。**不报错、不崩、只是功能静默消失**，正是本文件守的那一类问题。
+    """
+    interp = responses["Interpretation"]
+    assert "has_plain" in interp, "接口没有 has_plain，前端文体切换会静默失效"
+    assert "plain_sections" in interp, "接口没有 plain_sections"
+
+    assert interp["has_plain"] is True, (
+        "模板 provider 走的是零成本默认路径，它必须产出白话版；"
+        "否则不配 key 的用户根本看不到这个能力"
+    )
+    plain = interp["plain_sections"]
+    assert plain, "has_plain 为真但白话区块为空，前后矛盾"
+    for s in plain:
+        assert set(s) >= {"title", "body"}, f"白话区块缺少 title/body：{s}"
+
+    # 两种文体的区块标题与顺序要一致，界面才能并排对照
+    assert [s["title"] for s in plain] == [s["title"] for s in interp["sections"]], (
+        "白话版与专业版的区块标题/顺序不一致，界面无法对照阅读"
+    )
+
+
 def test_report_sqlite_payload_roundtrip(responses: dict[str, Any]) -> None:
     """报告落库再取回，字段必须与直接生成时一致。
 

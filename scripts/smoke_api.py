@@ -224,6 +224,45 @@ def _run(client: "httpx.Client", base: str, args: argparse.Namespace) -> int:
         print("\n---- AI 解读正文 ----")
         for s in rep["interpretation"]["sections"]:
             print(f"【{s['title']}】{s['body'][:200]}")
+
+        # ---------------------------------------------------- 双文体（专业分析 / 白话讲解）
+        #
+        # 这一段的意义：白话版是**独立的一整套区块**，不是专业版的复述。
+        # 只断言"有 plain 字段"是不够的 —— 把 sections 原样复制一份进 plain_sections
+        # 也能让字段存在，但用户在界面上切过去会发现两边一模一样（切换形同虚设）。
+        # 所以这里必须同时证明「存在」「不空」「不等于专业版」「白话也带风险提示」。
+        from xuanpan_ai.report import UNCERTAINTY_SECTION_TITLE
+
+        it = rep["interpretation"]
+        plain = it.get("plain_sections") or []
+        check("双文体：has_plain 为真", it.get("has_plain") is True, str(it.get("has_plain")))
+        check("双文体：白话版非空", len(plain) > 0, f"{len(plain)} 块")
+
+        def _body_map(sections):  # type: (list[dict]) -> dict[str, str]
+            return {s["title"]: s["body"] for s in sections}
+
+        expert_map, plain_map = _body_map(it["sections"]), _body_map(plain)
+        check("双文体：区块集合一致", set(expert_map) == set(plain_map),
+              f"专业 {sorted(expert_map)} vs 白话 {sorted(plain_map)}")
+
+        # 不确定性区块由系统逐字粘贴进两种文体，**按设计就该相同**，比对时要排除。
+        # 把它算进"是否复制"会让这条断言恒假（或恒真，取决于怎么改），失去判别力。
+        differing = [
+            t for t in set(expert_map) & set(plain_map)
+            if t != UNCERTAINTY_SECTION_TITLE and expert_map[t] != plain_map[t]
+        ]
+        check("双文体：白话不是专业版的复制", len(differing) > 0,
+              f"逐字相同的区块：{sorted((set(expert_map) & set(plain_map)) - set(differing))}")
+
+        # 风险提示要跟着读者走 —— 最需要看懂风险的人，恰恰是只看白话的那位。
+        check("双文体：白话版也带不确定性说明", UNCERTAINTY_SECTION_TITLE in plain_map,
+              str(sorted(plain_map)))
+
+        print(f"  [INFO] 白话版区块：{[s['title'] for s in plain]}")
+        print("\n---- 白话讲解正文 ----")
+        for s in plain:
+            if s["title"] != UNCERTAINTY_SECTION_TITLE:
+                print(f"【{s['title']}】{s['body'][:200]}")
         print("---- 系统保证的不确定性 ----")
         for u in rep["uncertainties"]:
             print(f"  · {u}")
