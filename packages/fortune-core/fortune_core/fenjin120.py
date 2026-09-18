@@ -22,6 +22,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -35,6 +36,8 @@ FENJIN_SPAN: Final[float] = 360.0 / (24 * FENJIN_PER_MOUNTAIN)  # 3°
 FENJIN_HALF: Final[float] = FENJIN_SPAN / 2.0  # 1.5°
 
 DEFAULT_TABLE_PATH: Final[Path] = Path(__file__).resolve().parent.parent / "data" / "fenjin120.json"
+
+_LOG = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,7 +78,14 @@ def _cell_geometry(index: int) -> tuple[Mountain, int, float, float, float]:
 
 @lru_cache(maxsize=8)
 def load_fenjin_table(path: str | None = None) -> dict[str, dict[str, list[str | None]]]:
-    """加载分金干支规则表。文件不存在 → 返回空表（**不编造**）。"""
+    """加载分金干支规则表 —— **严格接口**。
+
+    文件不存在 → 返回空表（**不编造**）；**格式错误 → 抛异常**。
+
+    这里刻意不吞异常，因为它是**校验脚本与测试**的入口：一张写错的表必须
+    在补表环节就被拦下，而不是被悄悄当成"没有表"。运行期请走
+    `_load_or_error()` —— 那条路径把格式错误降级为「空表 + 一条告警」。
+    """
     p = Path(path) if path else DEFAULT_TABLE_PATH
     if not p.exists():
         return {}
@@ -86,14 +96,78 @@ def load_fenjin_table(path: str | None = None) -> dict[str, dict[str, list[str |
 
     # 启动期校验：干支合法性 + 每山 5 格
     for school, table in data.items():
+        if not isinstance(table, dict):
+            raise ValueError(f"分金规则表 [{school}] 应为 dict（山名 -> 5 格干支）")
         for mountain_name, cells in table.items():
             get_mountain(mountain_name)  # 山名非法直接抛错
+            if not isinstance(cells, list):
+                raise ValueError(f"[{school}] {mountain_name}山 应为 list，实为 {type(cells).__name__}")
             if len(cells) != FENJIN_PER_MOUNTAIN:
                 raise ValueError(f"[{school}] {mountain_name}山 应有 {FENJIN_PER_MOUNTAIN} 格，实为 {len(cells)}")
             for gz in cells:
                 if gz is not None:
+                    if not isinstance(gz, str):
+                        raise ValueError(
+                            f"[{school}] {mountain_name}山 的格值应为 str 或 null，"
+                            f"实为 {type(gz).__name__}"
+                        )
                     jiazi_index(gz)  # 干支非法直接抛错
     return data
+
+
+def _cache_key(path: str | None) -> str:
+    return str(Path(path)) if path else str(DEFAULT_TABLE_PATH)
+
+
+@lru_cache(maxsize=8)
+def _load_or_error(
+    path: str,
+) -> tuple[dict[str, dict[str, list[str | None]]] | None, str | None]:
+    """**运行期**加载：不可用 → `(None, 原因)`，并只告警一次。
+
+    为什么必须有这一层：`load_fenjin_table()` 的启动期校验会抛
+    `KeyError`（山名非法）/`ValueError`（顶层非 dict、格数≠5、干支非法），
+    而调用方 `compass.py`、`context.py`、`meta.py` **都没有 try/except** ——
+    一张写错的表会让罗盘整个接口 500（实测：某山少写一格即复现；
+    只有管理台的 `admin.py` 包了 try/except）。
+
+    降级为「几何格位 + `available=False`」而不是崩溃，与 RULE-003
+    「无法确认时返回不确定」一致。**但不是静默**：告警日志 + `table_load_error()`
+    都能给出具体原因，管理台据此显示"表坏了"而不是"表没有"。
+
+    告警只打一次是**借 lru_cache 实现的**：函数体只执行一次，日志自然只出现一次
+    （否则坏表会在每个请求上刷屏）。
+    """
+    try:
+        return load_fenjin_table(path), None
+    except Exception as exc:  # noqa: BLE001 - 规则表是外部数据，任何解析/校验失败都应降级
+        reason = f"{type(exc).__name__}: {exc}"
+        _LOG.warning(
+            "分金规则表加载失败，分金退化为「仅几何格位」：%s（%s）", path, reason
+        )
+        return None, reason
+
+
+def table_load_error(table_path: str | None = None) -> str | None:
+    """规则表不可用的原因；正常时返回 `None`。供管理台区分「表没提供」与「表写坏了」。"""
+    return _load_or_error(_cache_key(table_path))[1]
+
+
+def clear_fenjin_cache() -> None:
+    """清空规则表缓存。
+
+    测试必须调它，否则上一用例的坏表结果会被缓存到下一用例
+    （`lru_cache` 不区分测试边界）——那正是"假绿"的经典来源。
+
+    用 `getattr` 取 `cache_clear` 而不是直接调：测试常用 `monkeypatch`
+    把 `load_fenjin_table` 换成普通函数来模拟"磁盘上的表写坏了"，
+    此时那个名字上没有 `cache_clear`。少清一层不影响正确性 ——
+    `_load_or_error` 清掉后就会重新走到被替换的严格加载器。
+    """
+    for fn in (load_fenjin_table, _load_or_error):
+        clear = getattr(fn, "cache_clear", None)
+        if clear is not None:
+            clear()
 
 
 def fenjin_cell(index: int, *, school: str = "default", table_path: str | None = None) -> FenjinCell:
@@ -105,8 +179,9 @@ def fenjin_cell(index: int, *, school: str = "default", table_path: str | None =
     ganzhi: str | None = None
     usable: bool | None = None
 
-    table = load_fenjin_table(table_path)
-    school_table = table.get(school)
+    # 走 fail-soft 入口：表缺失或**写坏**都只降级为"无干支"，不打断几何层
+    table, _ = _load_or_error(_cache_key(table_path))
+    school_table = (table or {}).get(school)
     if school_table and mountain.name in school_table:
         ganzhi = school_table[mountain.name][sub]
         usable = ganzhi is not None
@@ -163,12 +238,20 @@ def _geometry_only(index: int) -> FenjinCell:
 
 
 def table_available(school: str = "default", table_path: str | None = None) -> bool:
-    """该流派的干支规则表是否已就绪。UI 据此决定是否展示分金干支。"""
-    return school in load_fenjin_table(table_path)
+    """该流派的干支规则表是否已就绪。UI 据此决定是否展示分金干支。
+
+    **表写坏时返回 `False` 而不抛异常** —— 三个运行期调用点
+    （`compass.py:122`、`context.py:238`、`meta.py:115`）都是裸调用，
+    抛出去就是整个罗盘接口 500。具体原因用 `table_load_error()` 取，
+    管理台据此区分「表没提供」与「表写坏了」。
+    """
+    table, _ = _load_or_error(_cache_key(table_path))
+    return bool(table) and school in table
 
 
 __all__ = [
     "FENJIN_PER_MOUNTAIN", "FENJIN_SPAN", "FENJIN_HALF",
     "DEFAULT_TABLE_PATH", "FenjinCell",
-    "load_fenjin_table", "fenjin_cell", "fenjin_at", "fenjin_cells_of", "table_available",
+    "load_fenjin_table", "fenjin_cell", "fenjin_at", "fenjin_cells_of",
+    "table_available", "table_load_error", "clear_fenjin_cache",
 ]

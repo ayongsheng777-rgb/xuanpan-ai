@@ -29,7 +29,7 @@ from .exceptions import (
     OrientationConflictError,
     SchoolNotFoundError,
 )
-from .fenjin120 import FenjinCell, fenjin_at, fenjin_cells_of, table_available
+from .fenjin120 import FenjinCell, fenjin_at, fenjin_cells_of, table_available, table_load_error
 from .liuyao import LiuYaoResult, cast_liuyao
 from .mountain24 import (
     MOUNTAIN_ORDER,
@@ -64,7 +64,7 @@ __all__ = [
     "angular_distance", "mountains_in_span", "normalize_degree",
     "CompassOrientation", "calculate_orientation", "element_relation",
     # 分金
-    "FenjinCell", "fenjin_at", "fenjin_cells_of", "table_available",
+    "FenjinCell", "fenjin_at", "fenjin_cells_of", "table_available", "table_load_error",
     # 八字
     "BirthInput", "BaziChart", "calculate_bazi",
     # 黄历 / 择日

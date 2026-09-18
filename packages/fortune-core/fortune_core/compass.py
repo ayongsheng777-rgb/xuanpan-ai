@@ -17,7 +17,7 @@ from typing import Any, Literal
 
 from .constants import ELEMENT_CN, ELEMENT_CONTROLS, ELEMENT_GENERATES
 from .exceptions import InvalidInputError, OrientationConflictError
-from .fenjin120 import FenjinCell, fenjin_at, table_available
+from .fenjin120 import FenjinCell, fenjin_at, table_available, table_load_error
 from .mountain24 import (
     Mountain,
     angular_distance,
@@ -231,7 +231,15 @@ def calculate_orientation(
     # ---- 分金：仅当有精确角度时才有意义 ----
     fenjin = fenjin_at(degree, school=school) if degree is not None else None
     if fenjin and fenjin.ganzhi is None:
-        warnings.append("一百二十分金干支规则表未提供，仅输出几何格位（见 fenjin120.py）")
+        # 「表没提供」与「表写坏了」必须分开报：后者是运维事故，
+        # 一律说"未提供"会让人去找一张根本不缺的表 —— 方向从第一步就错。
+        _fenjin_err = table_load_error()
+        if _fenjin_err:
+            warnings.append(
+                f"一百二十分金规则表加载失败，仅输出几何格位：{_fenjin_err}"
+            )
+        else:
+            warnings.append("一百二十分金干支规则表未提供，仅输出几何格位（见 fenjin120.py）")
 
     # ---- 置信度低 → 显式提示 ----
     if confidence < 0.75:
