@@ -76,7 +76,10 @@ export default function TabsLayout(): React.JSX.Element {
         options={{
           title: '测盘',
           headerShown: false,
-          tabBarIcon: tabIcon('locate', 'locate-outline'),
+          /* `scan`（取景框）而不是原来的 `locate`（准星）——
+             原图标与「罗盘」的 `compass` 都是"圆 + 十字"家族，5 栏里两栏长得像亲戚，
+             扫一眼分不出哪个是哪个。取景框直指本页的真实动作（拍盘 / 导图）。 */
+          tabBarIcon: tabIcon('scan', 'scan-outline'),
         }}
       />
       <Tabs.Screen
@@ -85,7 +88,11 @@ export default function TabsLayout(): React.JSX.Element {
           title: '分析',
           headerTitle: '分析',
           headerRight: helpHeaderRight('analysis'),
-          tabBarIcon: tabIcon('sparkles', 'sparkles-outline'),
+          /* `shapes`（多种形状）而不是 `sparkles`（✨）——
+             星芒在 2026 年已经是"这是 AI 生成的内容"的通用符号，
+             而本 tab 装的是六爻 / 八字 / 三式等**确定性术式**，不是生成式内容。
+             用星芒既误导（用户会以为是 AI 现编的），又削弱了"计算层是真源"这个核心承诺。 */
+          tabBarIcon: tabIcon('shapes', 'shapes-outline'),
         }}
       />
       <Tabs.Screen
