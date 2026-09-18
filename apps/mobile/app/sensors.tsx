@@ -333,7 +333,13 @@ function MetricCard({
         {label}
       </AppText>
       <View style={styles.metricValueRow}>
-        <AppText size="xl" weight="bold" color={empty ? instrument.muted : instrument.text}>
+        <AppText
+          size="xl"
+          weight="bold"
+          color={empty ? instrument.muted : instrument.text}
+          track="tight"
+          numeric
+        >
           {value}
         </AppText>
         {empty ? null : (

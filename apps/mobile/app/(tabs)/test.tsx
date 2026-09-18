@@ -20,9 +20,10 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import React from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 
 import { AppText } from '@/components/AppText';
+import { PressablePanel } from '@/components/Card';
 import { HelpButton } from '@/components/HelpButton';
 import { Screen } from '@/components/Screen';
 import { instrument, radius, space } from '@/theme/tokens';
@@ -94,7 +95,7 @@ export default function TestScreen(): React.JSX.Element {
       {/* 标题栏由页面自己画 —— tab 的浅色标题栏压在这个深色页面上会割裂。
           故 _layout.tsx 把本 tab 的 header 关掉（与首页同一处理）。 */}
       <View style={styles.headerRow}>
-        <AppText size="xl" weight="bold" color={instrument.text}>
+        <AppText size="xl" weight="bold" color={instrument.text} track="tight">
           测盘
         </AppText>
         <HelpButton topic="test" color={instrument.textSecondary} />
@@ -126,17 +127,17 @@ export default function TestScreen(): React.JSX.Element {
 
 function SourceCard({ source, onPress }: { source: Source; onPress: () => void }): React.JSX.Element {
   return (
-    <Pressable
+    <PressablePanel
       onPress={onPress}
-      accessibilityRole="button"
       accessibilityLabel={`${source.title}：${source.desc}`}
-      style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}
+      style={styles.cardWrap}
+      contentStyle={styles.card}
     >
       <View style={styles.iconWrap}>
         <Ionicons name={source.icon} size={22} color={instrument.accent} />
       </View>
       <View style={styles.body}>
-        <AppText size="md" weight="medium" color={instrument.text}>
+        <AppText size="md" weight="semibold" color={instrument.text}>
           {source.title}
         </AppText>
         <AppText size="xs" color={instrument.textSecondary} style={styles.desc}>
@@ -149,7 +150,7 @@ function SourceCard({ source, onPress }: { source: Source; onPress: () => void }
         ) : null}
       </View>
       <Ionicons name="chevron-forward" size={18} color={instrument.muted} />
-    </Pressable>
+    </PressablePanel>
   );
 }
 
@@ -161,23 +162,20 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   sectionLead: { marginTop: space[4] },
-  lead: { marginTop: space[2], marginBottom: space[3], lineHeight: 18 },
+  lead: { marginTop: space[2], marginBottom: space[3] },
+  /* 外框只管定位；底/边/圆角/内边距由 `PressablePanel` 给 —— 见 Card.tsx「三个表面原语」 */
+  cardWrap: { marginTop: space[2] },
   card: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: space[3],
-    marginTop: space[2],
-    padding: space[3],
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    borderColor: instrument.border,
-    backgroundColor: instrument.surface,
+    marginBottom: 0,
   },
-  cardPressed: { backgroundColor: instrument.surfaceAlt },
   iconWrap: {
     width: 40,
     height: 40,
-    borderRadius: radius.md,
+    /* 内嵌图形用 radius.sm，比外层容器的 lg 紧一档 */
+    borderRadius: radius.sm,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: instrument.surfaceAlt,

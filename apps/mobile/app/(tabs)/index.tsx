@@ -25,16 +25,16 @@ import React, { useCallback, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import { getApiClient } from '@/api/client';
-import { AppText } from '@/components/AppText';
+import { AppText, Label, Metric } from '@/components/AppText';
 import { Banner } from '@/components/Banner';
-import { Button, Card } from '@/components/Card';
+import { Button, Panel, PressablePanel } from '@/components/Card';
 import { CompassDial, DIAL_DARK } from '@/components/CompassDial';
 import { HelpButton } from '@/components/HelpButton';
 import { Screen } from '@/components/Screen';
 import { azimuthAtTop } from '@/lib/compassDial';
 import { useAsync } from '@/lib/useAsync';
 import { useSensorSnapshot } from '@/services/useSensors';
-import { instrument, radius, space } from '@/theme/tokens';
+import { instrument, radius, space, tracking } from '@/theme/tokens';
 
 interface HomeStats {
   total: number;
@@ -64,7 +64,7 @@ export default function CompassHomeScreen(): React.JSX.Element {
     <Screen scroll style={styles.root} onRefresh={reload} refreshing={false}>
       {/* ---------- 标题栏 ---------- */}
       <View style={styles.headerRow}>
-        <AppText size="xl" weight="bold" color={instrument.text}>
+        <AppText size="xl" weight="bold" color={instrument.text} track="tight">
           玄盘 AI
         </AppText>
         <View style={styles.headerActions}>
@@ -89,9 +89,7 @@ export default function CompassHomeScreen(): React.JSX.Element {
 
       {/* ---------- 真北指示 ---------- */}
       <View style={styles.northRow}>
-        <AppText size="xs" color={instrument.textSecondary}>
-          真北 0°
-        </AppText>
+        <Label color={instrument.textSecondary}>真北 0°</Label>
         <View style={styles.northArrow} />
       </View>
 
@@ -110,24 +108,28 @@ export default function CompassHomeScreen(): React.JSX.Element {
         />
       </View>
 
-      {/* ---------- 核心读数 ---------- */}
+      {/* ---------- 核心读数 ----------
+          「一屏一个主角」：整个首页只有方位角用 `Metric`（40px/特粗/等宽数字），
+          磁场强度降一档到 xl —— 两块读数原本同为大字，用户看不出该先看哪个。
+          `numberOfLines={1}` 兜住窄屏：读数宁可缩小也不能折行，
+          折了行就不是"仪表"了。 */}
       <View style={styles.readoutRow}>
-        <View style={[styles.readoutCard, styles.readoutMain]}>
-          <AppText size="xs" color={instrument.textSecondary}>
-            当前方位（仿真）
-          </AppText>
-          <AppText size="display" weight="bold" color={instrument.accent} style={styles.azimuth}>
+        <Panel style={[styles.readoutCard, styles.readoutMain]}>
+          <Label color={instrument.textSecondary}>当前方位（仿真）</Label>
+          <Metric color={instrument.accent} numberOfLines={1} style={styles.azimuth}>
             {azimuth.toFixed(2)}°
-          </AppText>
-          <AppText size="xs" color={instrument.muted}>
-            拖动罗盘改变方向
-          </AppText>
-        </View>
-        <View style={styles.readoutCard}>
-          <AppText size="xs" color={instrument.textSecondary}>
-            磁场强度
-          </AppText>
-          <AppText size="xl" weight="bold" color={instrument.text} style={styles.magValue}>
+          </Metric>
+          <Label color={instrument.muted}>拖动罗盘改变方向</Label>
+        </Panel>
+        <Panel style={styles.readoutCard}>
+          <Label color={instrument.textSecondary}>磁场强度</Label>
+          <AppText
+            size="xl"
+            weight="bold"
+            color={instrument.text}
+            numeric
+            style={styles.magValue}
+          >
             {sensor.magneticMagnitude === null
               ? '—'
               : `${sensor.magneticMagnitude.toFixed(1)} μT`}
@@ -146,27 +148,27 @@ export default function CompassHomeScreen(): React.JSX.Element {
                 },
               ]}
             />
-            <AppText size="xs" color={instrument.textSecondary}>
+            <Label color={instrument.textSecondary}>
               {sensor.magneticMagnitude === null ? '无数据' : `磁场${sensor.quality.magneticLabel}`}
-            </AppText>
+            </Label>
           </View>
-        </View>
+        </Panel>
       </View>
 
       {/* ---------- 去测盘（本页唯一的采集入口） ----------
           五条数据来源统一收在「测盘」tab，此处只跳转、不重复列出。
           故意**不在这里显示任何读数**：那属于测盘流程（一页一事）。 */}
-      <Pressable
+      <PressablePanel
         onPress={() => router.push('/test')}
-        accessibilityRole="button"
         accessibilityLabel="去测盘，选择数据来源"
-        style={({ pressed }) => [styles.cta, pressed && styles.ctaPressed]}
+        style={styles.ctaWrap}
+        contentStyle={styles.ctaContent}
       >
         <View style={styles.ctaIcon}>
           <Ionicons name="locate" size={22} color={instrument.accent} />
         </View>
         <View style={styles.ctaBody}>
-          <AppText size="md" weight="medium" color={instrument.text}>
+          <AppText size="md" weight="semibold" color={instrument.text}>
             去测盘
           </AppText>
           <AppText size="xs" color={instrument.textSecondary} style={styles.ctaDesc}>
@@ -174,20 +176,30 @@ export default function CompassHomeScreen(): React.JSX.Element {
           </AppText>
         </View>
         <Ionicons name="chevron-forward" size={18} color={instrument.muted} />
-      </Pressable>
+      </PressablePanel>
 
       {/* ---------- 今日状态 ---------- */}
       {data && data.total > 0 ? (
-        <Pressable onPress={() => router.push('/history')} style={styles.statsCard}>
-          <AppText size="sm" weight="semibold" color={instrument.text}>
-            已保存 {data.total} 个盘面
-          </AppText>
-          {data.latestTitle ? (
-            <AppText size="xs" color={instrument.textSecondary} style={styles.latest}>
-              最近：{data.latestTitle}
-            </AppText>
-          ) : null}
-        </Pressable>
+        <PressablePanel
+          onPress={() => router.push('/history')}
+          accessibilityLabel={`查看已保存的 ${data.total} 个盘面`}
+          style={styles.statsWrap}
+          contentStyle={styles.statsContent}
+        >
+          <View style={styles.statsInner}>
+            <View style={styles.statsText}>
+              <AppText size="sm" weight="semibold" color={instrument.text}>
+                已保存 {data.total} 个盘面
+              </AppText>
+              {data.latestTitle ? (
+                <AppText size="xs" color={instrument.textSecondary} style={styles.latest}>
+                  最近：{data.latestTitle}
+                </AppText>
+              ) : null}
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={instrument.muted} />
+          </View>
+        </PressablePanel>
       ) : null}
 
       <AppText size="xs" color={instrument.muted} center style={styles.disclaimer}>
@@ -221,48 +233,42 @@ const styles = StyleSheet.create({
   },
   dialWrap: { alignItems: 'center', marginTop: space[1] },
   readoutRow: { flexDirection: 'row', gap: space[3], marginTop: space[4] },
-  readoutCard: {
-    backgroundColor: instrument.surface,
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    borderColor: instrument.border,
-    padding: space[3],
-  },
-  readoutMain: { flex: 1.4 },
-  azimuth: { marginTop: space[1], fontVariant: ['tabular-nums'] },
-  magValue: { marginTop: space[2], fontVariant: ['tabular-nums'] },
-  magStatus: { flexDirection: 'row', alignItems: 'center', gap: space[1], marginTop: space[1] },
+  /* 面板的底/边/圆角/内边距一律由 `Panel` 给，这里只留布局 —— 见 Card.tsx 的「三个表面原语」 */
+  readoutCard: { flex: 1, marginBottom: 0 },
+  readoutMain: { flex: 1.5 },
+  azimuth: { marginTop: space[2], marginBottom: space[1] },
+  magValue: { marginTop: space[2] },
+  magStatus: { flexDirection: 'row', alignItems: 'center', gap: space[1], marginTop: space[2] },
   dot: { width: 6, height: 6, borderRadius: 3 },
-  cta: {
+
+  ctaWrap: { marginTop: space[4] },
+  ctaContent: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: space[3],
-    marginTop: space[4],
-    padding: space[3],
-    borderRadius: radius.lg,
-    backgroundColor: instrument.surface,
-    borderWidth: 1,
-    borderColor: instrument.border,
+    marginBottom: 0,
   },
-  ctaPressed: { backgroundColor: instrument.surfaceAlt },
   ctaIcon: {
     width: 40,
     height: 40,
-    borderRadius: radius.md,
+    /* 内嵌图形用 radius.sm，比外层容器的 lg 紧一档（内紧外松） */
+    borderRadius: radius.sm,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: instrument.surfaceAlt,
   },
   ctaBody: { flex: 1 },
-  ctaDesc: { marginTop: 2, lineHeight: 17 },
-  statsCard: {
-    marginTop: space[4],
-    backgroundColor: instrument.surface,
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    borderColor: instrument.border,
-    padding: space[3],
+  ctaDesc: { marginTop: 2 },
+
+  statsWrap: { marginTop: space[3] },
+  statsContent: { marginBottom: 0 },
+  statsInner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: space[2],
   },
+  statsText: { flex: 1 },
   latest: { marginTop: 2 },
-  disclaimer: { marginTop: space[4] },
+  disclaimer: { marginTop: space[4], letterSpacing: tracking.normal },
 });

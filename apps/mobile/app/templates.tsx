@@ -118,7 +118,7 @@ export default function TemplatesScreen(): React.JSX.Element {
       <Stack.Screen options={{ headerShown: false }} />
 
       <View style={styles.head}>
-        <AppText size="xl" weight="bold" color={instrument.text}>
+        <AppText size="xl" weight="bold" color={instrument.text} track="tight">
           我的罗盘
         </AppText>
         <View style={styles.headActions}>
