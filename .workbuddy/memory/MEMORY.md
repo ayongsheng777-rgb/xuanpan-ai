@@ -43,6 +43,12 @@
 🔴 **全量 >190s 超 Bash 默认 120s 前台超时** —— 会被截断且**无任何输出**（易误判成崩溃）。用 `run_in_background` 或分模块跑。
 🔴 **`.workbuddy/` 是项目数据，非缓存，不得删除。**
 
+🔴 **Chrome 在沙箱内/受限 shell 下静默 exit 0** —— 跑无头浏览器（截图/PDF/自动化）时；表现是**退出码 0、零输出、零产物**，极易误判成"参数写错了"。必须沙箱外执行，`--no-sandbox` 救不了（实测）。
+🔴 **`chrome --headless --screenshot --window-size=390,844` 在本机不生效** —— 做"手机尺寸截图"时；实测页面 `innerWidth=500`，截出的 390px 图是把 500px 布局**裁掉右边**，看着像横向溢出、实为假象。要用 CDP 的 `Emulation.setDeviceMetricsOverride`。
+🔴 **同一轮批量截图不要每页重启 Chrome** —— 批量任务；实例间互相干扰，实测**第二页起永久挂起**（20 分钟只出一页、无任何报错）。改为启动一次 Chrome + 每页独立 target。
+🔴 **CDP/WebSocket 脚本结束必须 `process.exit()`** —— 写 Node 浏览器自动化时；不关 WebSocket 会让事件循环一直存活 → 进程永不退出 → 调用方（pytest/shell）跟着挂死（实测卡过 14 分钟）。杀 Chrome 要用 `spawnSync('taskkill',['/F','/T','/PID',pid])`，`spawn` 异步派发不够。
+🔴 **`expo export --clear` 会被 `[safe-delete]` 拦** —— 重新导出产物时；报 `checkBulkDeleteGuard`（大批量删除保护），与吞 pytest 汇总行同一机制。改成输出到**新目录**、不加 `--clear`。
+
 ## 材料与裁定
 
 - 🔴 **演示图：配色已采纳（像素实测），但术数数据不可采信** —— 实算已证其八字「日柱 / 时柱 / 日主」三项错误
@@ -95,6 +101,10 @@
 🔴 **`FortuneError` 不继承 `ValueError`** —— `app.py` 注册了全局处理器转 400；删掉它，本该是"你传错了"的错误会全变成 500。
 🔴 **APK 内联的是「候选地址表」而非单个地址** —— 本机 3 块网卡分属 3 个网段，旧脚本只内联一个，手机不在该网段就**只是"一直转圈"**。现在启动**并发探活**自动选线（`lib/apiCandidates.ts` + `_layout.tsx`），换网段不必重打包；`oc.ayong.qzz.io` 实测**已无法解析**，已降为候选末位。
 🔴 **`apiCandidates.ts` 刻意不依赖 React Native** —— 抽成纯模块才能被裸 node 探针真跑。凡"决定能不能连上"的逻辑都该这样。
+
+🔴 **平台不支持某原生模块时，订阅必须兜住异常** —— 任何 `addListener` 类订阅；`expo-sensors` 无 web 实现，`Magnetometer.addListener` 内部抛 `this._nativeModule.addListener is not a function`，**未捕获异常让整棵 React 树渲染失败 → 整页白屏**，而 tsc/export/单元测试全绿。判据**不能用 `typeof x.addListener === 'function'`**（web 上它确实是函数，抛错在其内部 `_nativeModule` 上），只能真调用一次 + try/catch。
+🟢 **离线看界面已可行**：`scripts/ui_render/`（CDP 精确手机视口 + SPA 回落 + 渲染探针），快照 `docs/ui-render/`（11 页），回归 `tests/mobile/test_ui_render.py`（设 `XP_WEB_DIST` 启用）。它渲染的是**同一套 React 组件树**，可替代真机走查里"布局/折行/配色/空态"那部分；键盘遮挡、传感器真实数据、真机字体与安全区仍只能真机。
+🔵 **V2 那一轮没碰后台管理台**：`services/api/xuanpan_api/static/admin.html`（1043 行）仍是浅色工程风，与 APP 深色仪器风分属两套体系 —— 是范围使然（V2 = 罗盘域），不是遗漏；要做需单独立项。
 
 ## 外部项目（勿重复调研）
 
