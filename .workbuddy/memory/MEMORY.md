@@ -39,8 +39,8 @@ Token：`primary #013A6C` `gold #DAB37D` `sand #E5D7C7` `jade #3C7066` `cinnabar
 
 ## 界面工艺（索引，详版 §8）
 
-共同点：**看着不丑、但说不上哪里不对，且不会让任何测试失败**。最易违反的 12 条：
-标题不得比它管的正文更小更淡｜表面原语只有三个 `Card`(浅)/`Panel`(深仪器)/`Pressable*`，别手写第四个｜深色域不用投影（靠底差+1px 描边）｜按压只有 `usePressScale`（`scale` 不换底色）｜不引 `react-native-reanimated`｜一屏一个 `Metric`｜数值等宽｜不内嵌中文字体｜图标语义不撞脸（`sparkles`→`shapes`、`locate`→`scan`）｜改 UI 后重渲染快照+登记分卷白名单｜管理台快照必须先 `docker compose up -d --build`｜**界面文案不得含 Markdown 标记**（守卫 `tests/mobile/test_ui_copy_plain_text.py`）
+共同点：**看着不丑、但说不上哪里不对，且不会让任何测试失败**。最易违反的 13 条：
+标题不得比它管的正文更小更淡｜表面原语只有三个 `Card`(浅)/`Panel`(深仪器)/`Pressable*`，别手写第四个｜深色域不用投影（靠底差+1px 描边）｜按压只有 `usePressScale`（`scale` 不换底色）｜不引 `react-native-reanimated`｜一屏一个 `Metric`｜数值等宽｜不内嵌中文字体｜图标语义不撞脸（`sparkles`→`shapes`、`locate`→`scan`）｜**图标资源必量「墨量」**：`adaptive-icon` 前景不透明占比须 >25%（线条型图形缩到桌面 48dp 后线宽不足 1dp 会彻底消失 —— 旧版细线罗盘仅 2%，桌面看到的是一个纯蓝圆，而 tsc/打包/安装全绿、零报警）｜改 UI 后重渲染快照+登记分卷白名单｜管理台快照必须先 `docker compose up -d --build`｜**界面文案不得含 Markdown 标记**（守卫 `tests/mobile/test_ui_copy_plain_text.py`）
 管理台专项：CSS 变量层/HTML/JS **三块一起改**；文字只做三级；禁用态用中性灰不 `opacity`；焦点环用主色 outline；`role=tablist/tab/tabpanel`+**roving tabindex**。
 
 ## 详版指针（动手前先读 PITFALLS）

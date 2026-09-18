@@ -335,6 +335,55 @@ HTTP 层无路由、App 里 0 处引用。本轮把三条链路打通：
 
 ---
 
+### 2.8 品牌 logo（桌面图标 + 启动界面）+ 深色域质感（2026-09-19，已推送）
+
+#### APK
+
+`dist/玄盘AI-v0.1.0-brand-logo.apk`（101,971,345 B，sha256 `6d33ade14e67af470d2ec2a1fe86c91367c80e79c08077ba832ecf8efd1d2127`）
+含本轮品牌图标 + 深色域质感。构建 `bash apps/mobile/scripts/build-apk.sh`，实测 **3m 22s**（增量）。
+
+- 🔴 脚本自检通过：JS bundle 内含全部 4 个候选地址。
+- 🔴 仍是 **Android Debug 签名**，对外分发必须换正式签名（沿用 §2.7 结论）。
+
+#### 图标：根因是「生成了但看不见」，不是「没生成」
+
+阿勇反馈「把应用LOGO补上」。查证后**不是生成失败** —— 三张 assets 都存在且已定制、
+`android/` 里 prebuild 产物齐全、解包 APK 后图标资源同样存在。
+
+真根因靠**解包 APK 量化**才看出来：`ic_launcher_foreground` (432×432) 的
+**不透明像素只占 2%**（3876 / 186624），换算到 108dp 画布线宽约 **0.5dp** ——
+桌面 48dp 图标上，肉眼看到的就是**一个纯蓝色圆**。
+
+`tsc` 全绿、打包成功、能装能启，**没有任何检查会发现它不可见**。
+
+修复：改用阿勇给的品牌设计稿裁切，桌面图标取**圆形盘面**（与 Android 72/108 圆裁切 100% 契合）。
+实测 APK 内前景不透明占比 **2% → 34.5%**（162 / 216 / 324 / 432 px 四档一致）。
+
+- 整只木盒做前景实测不可用：完整放只能占画布 46%（桌面 48dp 里剩 22dp，糊成一团）；撑满则四角被圆切掉。
+- 裁切参数为实测值：**圆底必须落进「红印章底 y≈403 / 铭牌顶 y≈409」之间那条 6px 的缝**，
+  否则要么切印章、要么露铭牌残影。半径下限 165 由「水平须覆盖外圈青绿纹样 x 325~695」决定。
+- 配置：顶层 `splash` 字段在 SDK 52 已废弃 → 改用 `expo-splash-screen` plugin（`imageWidth: 256`）；
+  新增 web favicon。🔴 **启动图必须透明底**（plugin 会把它叠在 `backgroundColor` 上）。
+- 守卫：`tests/mobile/test_app_assets.py`（10 条，含**反面对照** —— 喂细线图标必须抛错）。
+
+#### 深色域质感（同一批交付）
+
+`instrument` 新增 `dialBodyGradient` 三档（同色相不同明度，不引新色相）；`DIAL_DARK` 启用径向渐变底，
+**`DIAL_LIGHT` 不设** —— 浅色页（确认坐向等）盘面像素不变。传感器曲线加 `LinearGradient` 面积填充。
+`tests/mobile/test_dial_palette.py` 守这条双轨边界。
+
+> 阿勇给的「玄墨金阙」方案要求全站深色化并替换色板，但那是 SSOT 已裁定的两项
+> （配色取演示图 / 不做全局深色化），故只取其与现有深色域吻合的**手法**，色值全部走 token。
+
+#### 未做（接手请先补）
+
+- 🔴 **UI 快照与导出包未重渲染**：深色域改动**改了 UI**，`dist/ui-design-export/` 的 19 张快照已过期。
+  测试不会红（快照测试需 `XP_WEB_DIST` 才跑），属**交付物陈旧而非回归**。补跑：
+  `cd apps/mobile && npx expo export --platform web --output-dir ../../dist-web`
+  然后 `"$PY" scripts/export_ui_design.py --zip`。
+
+---
+
 ## 3. 技术栈速查（以 MEMORY.md 为准，勿信 AGENTS.md 旧表）
 
 | 层 | 实际 | 位置 |
