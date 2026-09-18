@@ -27,6 +27,15 @@
 
 🔴 **提交说明含反引号时一律走 `git commit -F <文件>`** —— 写带行内代码的 commit message 时；`git commit -m "…`x`…"` 里的反引号会被 **bash 当命令替换执行**，内容不进说明（本次「只删 `**` 这 2 个字符」变成「只删  这 2 个字符」，并额外打出一行 `AGENTS.md: command not found`）。**commit 照样成功、`git log` 才看得出缺字**。修法：用 Write 工具写消息文件再 `-F`，不让 shell 碰它。
 
+🔴 **判推送成败只问远端，别用管道后的 `$?`、也别信 `origin/main`** —— 交付收尾核对是否已推时；
+`git push ... 2>&1 | tail -5` 的 `$?` 是 **`tail` 的**，永远是 0；而本机还出现过
+`.git/refs/remotes/` **被清空**（`git branch -vv` 显示 `[origin/main: gone]`、
+`git rev-parse origin/main` 报 `unknown revision`）—— 但**推送其实是成功的**。
+两条一起会得出"推送失败"的完全错误结论，而 git 的报错看着像真的。
+**权威判据：`git ls-remote origin refs/heads/main` 与 `git rev-parse HEAD` 比 sha**（远端状态无法伪造），
+或看 `.git/FETCH_HEAD`。补本地追踪引用：`mkdir -p .git/refs/remotes/origin && echo <sha> > .git/refs/remotes/origin/main`
+（本轮 `git update-ref` 报了退出码 0 却没落盘，直接写文件才成）。
+
 🔴 **`.workbuddy/` 是项目数据，非缓存，不得删除。**
 
 
