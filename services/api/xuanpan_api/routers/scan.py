@@ -16,7 +16,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 
 from ..config import Settings
-from ..deps import get_settings, get_store
+from ..deps import get_active_settings, get_store
 from ..schemas import ScanAccepted
 from ..storage import Store
 
@@ -28,7 +28,8 @@ async def scan_compass(
     image: UploadFile = File(..., description="罗盘照片（JPEG/PNG/WebP）"),
     provider: str = Query("classical", description="识别 provider：classical / openai_compat"),
     store: Store = Depends(get_store),
-    settings: Settings = Depends(get_settings),
+    # 取**生效配置**（含管理台覆盖）：上传上限与是否留原件都要能从界面改即时生效。
+    settings: Settings = Depends(get_active_settings),
 ) -> ScanAccepted:
     """识别照片中的罗盘，返回**候选**坐向。
 

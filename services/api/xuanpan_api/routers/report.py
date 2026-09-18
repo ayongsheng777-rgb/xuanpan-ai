@@ -14,7 +14,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from ..context_builder import ContextBuildError, rebuild_context
-from ..deps import get_store
+from ..deps import get_ai_router, get_store
 from ..schemas import AskRequest, ReportRequest
 from ..storage import Store
 
@@ -28,12 +28,23 @@ def _require(store: Store, session_id: str) -> dict[str, Any]:
     return session
 
 
-def _resolve_router(request: Request, mode: str | None, force_template: bool):
+def _resolve_router(
+    request: Request,
+    mode: str | None,
+    force_template: bool,
+    store: Store,
+):
     """取 AI 路由器。
 
     `force_template` 用于两类场景：
     1. 用户显式要求"离线、零成本、可复现"
     2. 自动化测试与端到端校验（结果必须可复现）
+
+    非 force_template 时走 `deps.get_ai_router`，它读的是**生效配置**
+    （含管理台覆盖）并在配置变化时重建路由器。此前这里直接读
+    `request.app.state.ai_router`（启动时构造一次的旧对象），
+    结果是管理台改了模型名、报告仍然按老模型生成 —— 接口返回成功，
+    行为毫无变化，比报错更难发现。
     """
     if force_template:
         from xuanpan_ai import AIRouter, RouterConfig, get_provider
@@ -43,7 +54,7 @@ def _resolve_router(request: Request, mode: str | None, force_template: bool):
             config=RouterConfig(mode="cost"),
         )
 
-    base = getattr(request.app.state, "ai_router", None)
+    base = get_ai_router(request, store)
     if base is None:
         from xuanpan_ai import AIRouter
 
@@ -83,7 +94,7 @@ def generate_report(
 
     from xuanpan_ai import AllProvidersFailedError, build_report
 
-    ai_router = _resolve_router(request, payload.mode, payload.force_template)
+    ai_router = _resolve_router(request, payload.mode, payload.force_template, store)
     question = (payload.question_text if payload.question_text is not None else session.get("question_text")) or ""
 
     try:
@@ -142,7 +153,7 @@ def ask(
         if t["role"] in ("user", "assistant")
     )
 
-    ai_router = _resolve_router(request, payload.mode, payload.force_template)
+    ai_router = _resolve_router(request, payload.mode, payload.force_template, store)
     try:
         report = build_report(
             ctx,

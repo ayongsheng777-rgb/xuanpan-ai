@@ -16,12 +16,14 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from .config import Settings
-from .deps import get_settings
+from .deps import get_settings, get_store
+from .runtime_config import RuntimeConfig
+from .storage import Store
 
 logger = logging.getLogger("xuanpan.api")
 
@@ -52,18 +54,37 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     _register_error_handlers(app)
     _mount_routers(app)
 
-    # AI 路由器：进程内单例（挂在 state 上，供 deps.get_ai_router 取用）
+    # 运行时配置：环境基线 + 管理台覆盖的合成点。
+    # AI 路由器**不在这里构造** —— 它由 RuntimeConfig 按需构建并在配置变化时
+    # 自动重建（见 runtime_config.ai_router）。在这里构造一次的话，管理台里
+    # 改模型要重启服务才生效，等于"改配置"这个功能只是看起来能用。
     app.state.settings = cfg
-    app.state.ai_router = _build_ai_router(cfg)
+    app.state.runtime_config = RuntimeConfig(cfg)
 
     @app.get("/healthz", tags=["ops"], summary="健康检查")
-    def healthz() -> dict[str, Any]:
-        """健康检查：只报告"进程活着 + 依赖是否齐备"，不触发任何计算。"""
+    def healthz(store: Store = Depends(get_store)) -> dict[str, Any]:
+        """健康检查：只报告"进程活着 + 依赖是否齐备"，不触发任何计算。
+
+        报告的是**生效配置**（含管理台覆盖），不是启动时的环境值 ——
+        否则改完配置后健康检查还在报告旧值，会让人以为改动没生效。
+
+        取值失败时退回环境基线而不是报错：健康检查本身挂了，容器会被判成
+        unhealthy 并重启，而真正的问题可能只是设置表读不出来 —— 用"重启"
+        去应对一个配置读取问题，只会把现场冲掉。
+        """
+        try:
+            active = app.state.runtime_config.effective_settings(store)
+            cloud_ready = app.state.runtime_config.cloud_ready(store)
+            db_ok = True
+        except Exception:  # noqa: BLE001
+            active, cloud_ready, db_ok = cfg, False, False
         return {
             "status": "ok",
             "db": str(cfg.db_path),
-            "ai_mode": cfg.ai_mode,
-            "keep_photos": cfg.keep_photos,
+            "settings_db": db_ok,
+            "ai_mode": active.ai_mode,
+            "cloud_ai_ready": cloud_ready,
+            "keep_photos": active.keep_photos,
         }
 
     return app
@@ -110,17 +131,14 @@ def _mount_routers(app: FastAPI) -> None:
 
 
 def _build_ai_router(cfg: Settings):  # type: ignore[no-untyped-def]
-    """按配置构造 AI 路由器。导入失败时返回 None，让纯计算功能仍可用。"""
-    try:
-        from xuanpan_ai import AIRouter, RouterConfig
-    except ImportError:  # pragma: no cover
-        logger.warning("xuanpan_ai 不可用：报告功能将不可用，计算功能不受影响")
-        return None
-    try:
-        return AIRouter(config=RouterConfig(mode=cfg.ai_mode))
-    except ValueError:
-        logger.warning("XUANPAN_AI_MODE=%r 非法，回退 auto", cfg.ai_mode)
-        return AIRouter(config=RouterConfig(mode="auto"))
+    """（已弃用）启动时构造 AI 路由器。
+
+    保留这个薄壳只为兼容外部引用；应用内部一律走
+    `RuntimeConfig.ai_router`，它会在配置变化时自动重建。
+    """
+    from .runtime_config import build_ai_router
+
+    return build_ai_router(mode=cfg.ai_mode)
 
 
 def _register_error_handlers(app: FastAPI) -> None:

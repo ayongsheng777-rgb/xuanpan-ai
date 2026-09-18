@@ -24,9 +24,9 @@ import uuid
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any, Iterable, Iterator, Mapping
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS schema_meta (
@@ -84,6 +84,12 @@ CREATE TABLE IF NOT EXISTS compass_templates (
     is_favorite  INTEGER NOT NULL DEFAULT 0,
     use_count    INTEGER NOT NULL DEFAULT 0,
     last_used_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS app_settings (
+    key        TEXT PRIMARY KEY,
+    value      TEXT NOT NULL,
+    updated_at TEXT NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_reports_session ON reports(session_id, created_at DESC);
@@ -455,6 +461,53 @@ class Store:
                 "SELECT * FROM compass_templates WHERE template_id=?", (template_id,)
             ).fetchone()
         return _decode_template(row)
+
+    # ---------------- 运行时配置覆盖 ----------------
+
+    def list_setting_overrides(self) -> dict[str, str]:
+        """全部管理台覆盖（**原始值**，含密钥明文）。
+
+        仅供内部解析配置用。任何要返回给接口的地方都必须先过脱敏 ——
+        这个方法的名字里没有 "raw" 是刻意的：它有且只有一个用途，
+        叫 raw 反而容易被当成"可以拿去返回值"。
+        """
+        with self.connect() as conn:
+            rows = conn.execute("SELECT key, value FROM app_settings").fetchall()
+        return {r["key"]: r["value"] for r in rows}
+
+    def setting_overrides_meta(self) -> dict[str, str]:
+        """覆盖项的写入时间，供界面显示"这项是什么时候被谁改的"。"""
+        with self.connect() as conn:
+            rows = conn.execute("SELECT key, updated_at FROM app_settings").fetchall()
+        return {r["key"]: r["updated_at"] for r in rows}
+
+    def set_setting_overrides(self, items: Mapping[str, str]) -> None:
+        """整批写入覆盖（单事务）。空 dict 是合法的无操作。"""
+        if not items:
+            return
+        stamp = _now()
+        with self.connect() as conn:
+            conn.executemany(
+                "INSERT INTO app_settings(key, value, updated_at) VALUES(?,?,?) "
+                "ON CONFLICT(key) DO UPDATE SET value=excluded.value,"
+                " updated_at=excluded.updated_at",
+                [(k, v, stamp) for k, v in items.items()],
+            )
+
+    def delete_setting_overrides(self, keys: Iterable[str]) -> int:
+        """删除指定键的覆盖（回落环境变量/默认值）。返回实际删除条数。
+
+        返回条数而不是 `None`：界面上「清除覆盖」与「本来就没覆盖」必须能分辨，
+        否则用户点了没反应会以为按钮坏了。
+        """
+        keys = list(keys)
+        if not keys:
+            return 0
+        with self.connect() as conn:
+            cur = conn.executemany(
+                "DELETE FROM app_settings WHERE key=?", [(k,) for k in keys]
+            )
+            return int(cur.rowcount or 0)
 
 
 def _decode_template(row: sqlite3.Row) -> dict[str, Any]:

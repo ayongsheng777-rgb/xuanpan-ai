@@ -6,6 +6,10 @@
 在现象上完全一样，是最难排查的一类问题（本次新增 XUANPAN_ADMIN_TOKEN
 就同时要改 config.py / .env.example / docker-compose.yml 三处）。
 
+自「运行时可调配置」（`runtime_config.SPECS`）落地后，新增一个变量要看 **4 处**：
+`config.py`（环境基线解析）、`runtime_config.SPECS`（注册表，决定能否从管理台改）、
+`.env.example`（声明）、`docker-compose.yml`（透传进容器）。本测试守住第 3、4 处。
+
 本测试**直接扫源码**而不是数数：数出来的结论第二天就会过期。
 """
 
@@ -16,12 +20,17 @@ from pathlib import Path
 
 ENV_EXAMPLE = Path(__file__).parents[2] / ".env.example"
 
-#：代码里读取环境变量的三种写法。漏掉一种就会让某个变量隐形 ——
-#：而"隐形"恰恰是本测试要防的东西，所以三种都要覆盖。
+#：代码里读取环境变量的写法。漏掉一种就会让某个变量隐形 ——
+#：而"隐形"恰恰是本测试要防的东西，所以每一种都要覆盖。
 _PATTERNS = (
     re.compile(r"os\.environ\.get\(\s*[\"'](XUANPAN_[A-Z0-9_]+)[\"']"),
     re.compile(r"os\.environ\[\s*[\"'](XUANPAN_[A-Z0-9_]+)[\"']"),
     re.compile(r"_env_(?:bool|int|float|str)\(\s*[\"'](XUANPAN_[A-Z0-9_]+)[\"']"),
+    #：第四种：在 `runtime_config.SPECS` 注册表里声明（`env_var="XUANPAN_…"`）。
+    #：读取发生在 `_baseline()` 的 `env.get(spec.env_var)`，变量名不再以字面量
+    #：出现在 `os.environ` 调用里。少了这一条，**整套可调配置的变量都会被
+    #：误判成"没人读"**，于是守卫会反过来逼人删掉 .env.example 里正确的条目。
+    re.compile(r"env_var\s*=\s*[\"'](XUANPAN_[A-Z0-9_]+)[\"']"),
 )
 
 
