@@ -38,6 +38,9 @@
 | 三式 · 奇门遁甲 | ✅ **全链路已交付** | 批次 6：`6eee59a` → `8226b62` |
 | 三式 · 大六壬 | ✅ **全链路已交付** | 批次 7：`ff2d7c8` → `86a5a22` |
 | 三式 · 太乙神数 | ✅ **全链路已交付**（年局/岁计） | 批次 8 |
+| **V2 产品改造（演示图深色仪器风）** | 🔴 **进行中，断点见 §2.5** | `6b3a27f` → `e90f135`（6 个，已推送） |
+
+> 🔴 **当前主线 = V2 改造**。新账号接手后第一件事是读 §2.5，把 `/sensors` 页收尾。
 
 > 🔴 **一个容易踩的心智陷阱**：「内核做完了」≠「用户用得上」。
 > 2026-09-17 下午做过一轮专项排查（§2.3）：`almanac` / `zeri` / `duangua`
@@ -143,6 +146,54 @@ HTTP 层无路由、App 里 0 处引用。本轮把三条链路打通：
 
 ---
 
+### 2.5 V2 产品改造（演示图深色仪器风）—— 🔴 进行中，断点交接（2026-09-18 早）
+
+> **本节是给下一个账号的核心交接。** 前一账号积分耗尽，改造做到一半。
+> 工作区干净、无未提交改动；V2 的 6 个 commit 已全部推送到 remote。
+
+**背景**：阿勇提供 V2 规范（`docs/玄盘_AI_V2_产品改造与实施规范.md`，2307 行）+ 8 屏演示图。
+差距分析、冲突裁决、本轮范围已全部固化在 **`docs/玄盘 AI — V2 评估与实施路线.md`（动手前先读它）**。
+改造前基线已打 tag：**`v0.1.0-pre-v2`**（三式收官、1372 测全绿），出问题可对照回滚。
+
+**已完成（6 个 commit，已推送）**：
+
+| 内容 | commit |
+|---|---|
+| V2 规范入库 + 评估与实施路线 | `6b3a27f` |
+| tokens.ts 增加 `instrument` 深色仪器色域（仅罗盘域用） | `6b9666f` |
+| CompassDial 双轨调色板（`DIAL_LIGHT` 默认 / `DIAL_DARK`） | `ff57318` |
+| `sensorQuality.ts` 质量评估纯函数库 + 22 锚点测试（含变异验证） | `da1472b` |
+| 罗盘首页改深色仪器风（演示图第 1 屏 · 仿真模式） | `09be135` |
+| `/adjust` 手动调节罗盘页（演示图第 2 屏） | `e90f135` |
+
+**断点：还剩 3 件事，按顺序做**
+
+1. **`/sensors` 传感器测量页（演示图第 3 屏）—— 基础设施已全部就绪，只差页面文件本身**：
+   - ✅ `apps/mobile/src/services/useSensors.ts`：三路订阅 Hook（Magnetometer /
+     Accelerometer / Gyroscope + 环形缓冲 + 随页面生命周期启停）已提交，直接 `useSensors()` 用
+   - ✅ `apps/mobile/src/lib/sensorQuality.ts`：磁场强度 / 方位角 / 姿态 / 三维度质量分级
+     （overall + 可操作提示文案）已提交，22 锚点测试全绿
+   - 页面要素（按演示图第 3 屏）：方位角大字 + 磁北针盘 + 传感器状态卡
+     （磁场强度 / 设备水平 / 磁场精度）+ 三轴数据表 + 磁场强度变化曲线
+   - 配色用 `instrument` 色域；针盘可用 `CompassDial` + `DIAL_DARK`
+   - 🔴 **模拟器无传感器数据是一等状态**：显示「—」+ 可操作提示，**不编造、不转圈等数据**
+   - 新建 `apps/mobile/app/sensors.tsx`（根 Stack，与 `adjust.tsx` 同级）；
+     首页「传感器测量」按钮已指向 `/sensors`，建页即通
+2. **验证**（AGENTS.md 铁律 2，缺一不算完成）：
+   - `cd apps/mobile && npm run typecheck`（零容忍）
+   - `cd apps/mobile && npx expo export --platform android --output-dir /tmp/xp-export-v2`
+   - `"$PY" -m pytest tests/mobile -p no:warnings`（传感器 22 测 + 布局/契约测试）
+3. **文档/记忆更新 + 分逻辑单元提交**：`/sensors` 页单独一个 commit；
+   更新 HANDOFF（本节标完成）、MEMORY.md、当日日志 `.workbuddy/memory/YYYY-MM-DD.md`。
+
+**V2 本轮明确不做（别越界，裁决理由见评估文档）**：
+- 底部导航**不动**（产品基线规范已裁定 5 栏：罗盘/命盘/占测/历史/我的）
+- **不做全局深色化** —— 双轨并存：罗盘域深色（instrument）、其余页面保持浅色，
+  待真机走查后再定是否推广
+- 「自动水平 / 盘体跟随」、相机扫描增强、V2 Phase 3+ 全部暂缓
+
+---
+
 ## 3. 技术栈速查（以 MEMORY.md 为准，勿信 AGENTS.md 旧表）
 
 | 层 | 实际 | 位置 |
@@ -152,7 +203,7 @@ HTTP 层无路由、App 里 0 处引用。本轮把三条链路打通：
 | 计算内核 | 自研 `packages/fortune-core`（Python 纯函数） | `packages/fortune-core/fortune_core` |
 | 历法引擎 | `lunar-python`（`sxtwl` 在 Py3.13 无 wheel，已弃） | — |
 | 存储 | **SQLite 单文件**（PostgreSQL/Redis/S3 只是报告 `[推测]`，未落地） | 根 `data/` 运行时产物 |
-| MCP 暴露层 | `services/mcp/server.py`，9 工具，stdio | `services/mcp` |
+| MCP 暴露层 | `services/mcp/server.py`，**12 工具**（含三式 qimen/liuren/taiyi），stdio | `services/mcp` |
 | 识别 | 本地 CV（classical，零成本）默认；云端 opt-in | `services/vision` |
 
 🔴 **领域数据表在 `packages/fortune-core/data/`**，不是根 `data/`。
@@ -174,17 +225,20 @@ packages/fortune-core/fortune_core/
 
 services/api/xuanpan_api/
   ├── routers/     # calc / sessions / report / scan / meta ＋ almanac / zeri / duan / admin
+  │                # ＋ qimen / liuren / taiyi（三式）
   ├── static/admin.html   # 管理台（单文件、零依赖、**无 CDN** —— 容器没有外网）
   └── schemas.py / storage.py / config.py / app.py
-services/mcp/server.py   # 9 个 MCP 工具
+services/mcp/server.py   # 12 个 MCP 工具
 
 apps/mobile/
-  ├── app/(tabs)/  # 底部 5 栏：index(罗盘) / chart(命盘) / divine(占测) / history / mine
-  ├── app/         # 根 Stack：scan / almanac / confirm/[id] / report/[id] / session/[id]
+  ├── app/(tabs)/  # 底部 5 栏：index(罗盘·V2深色仪器风) / chart(命盘) / divine(占测) / history / mine
+  ├── app/         # 根 Stack：scan / almanac / sanshi(三式) / adjust(V2调节) / confirm/[id] / report/[id] / session/[id]
   └── src/
       ├── api/         # client.ts + types.ts（**手写**，与后端 schemas 对应）
-      ├── components/  # DuanCard(断卦展示) / Chip+Tag / CompassDial / Card / …
-      ├── lib/date.ts  # 本地日期**唯一实现点**（别在页面里另写一份）
+      ├── components/  # DuanCard(断卦展示) / Chip+Tag / CompassDial(双轨调色板) / Card / …
+      ├── lib/         # date.ts(本地日期唯一实现点) / sensorQuality.ts(V2) / compassDial.ts / taiyiLayout.ts …
+      ├── services/    # useSensors.ts（V2 传感器 Hook，三路订阅）
+      ├── theme/tokens.ts  # 含 instrument 深色仪器色域（仅罗盘域用）
       └── content/help.ts  # 每页右上角讲解文案
 ```
 
@@ -220,7 +274,7 @@ apps/mobile/
 
 ```bash
 # $PY = C:/Users/anyong/.workbuddy/binaries/python/envs/default/Scripts/python.exe（managed venv）
-# 全量测试（当前 940 passed）
+# 全量测试（三式收官时 1372 passed；V2 传感器库 +22 后应为 1394，断点未重跑，接手验证时确认）
 "$PY" -m pytest
 
 # 分层
@@ -260,12 +314,13 @@ PYTHONPATH=packages/fortune-core "$PY" services/mcp/server.py   # stdio 模式�
 
 ## 6. 环境事实（接手即用）
 
-- git 身份：`ayongsheng777-rgb`；**尚无 remote 仓库**（如需跨账号协作，建议先建 remote 推上去）
+- git 身份：`ayongsheng777-rgb`；**remote 已建**：`https://github.com/ayongsheng777-rgb/xuanpan-ai`（**私有**，main 已推送至 `e90f135`）
 - 端口：本地联调统一 **8360**（8352 被本机 SysCenter 占用）
 - npm 源：`apps/mobile/.npmrc` 固定 `registry.npmmirror.com`
 - pip 源：容器内 `PIP_INDEX_URL` 默认清华源（本机连宿主都解析不了 pypi.org）
 - Python：3.13.12（managed venv）；Node：22.22.2（managed）
 - 测试无需 `pip install -e`，`conftest.py` 已注入 5 个包路径
+- 管理台令牌：本机 `.env` 已配 `XUANPAN_ADMIN_TOKEN`（`.env` 被 .gitignore 挡住，未入库）
 
 ---
 
@@ -273,12 +328,14 @@ PYTHONPATH=packages/fortune-core "$PY" services/mcp/server.py   # stdio 模式�
 
 按性价比（详见 MEMORY.md「待办」与路线图 §4）：
 
+0. 🔴 **先完成 V2 断点**（§2.5）：`/sensors` 页 → 验证 → 文档提交
 1. **真实罗盘照片取证**（Gate 1 唯一卡点，需阿勇提供照片）：`real_photos/` + `labels.csv`，跑 `scripts/gate1_eval.py photos`
 2. 修 R8 假阳性（识别山名错误 15/96）—— 先建假阳性回归基线
-3. **真机 UI 走查** —— 本轮之后**比之前更必要**，理由见下
+3. **真机 UI 走查** —— V2 之后又增 3 个新页面（首页改版 / adjust / sensors），更必要了
 4. SKILL.md 打包（让仓库同时是 MCP Server + Agent Skill，可抄 suanming-mcp 的 Agent 入口）
 5. 神煞吉凶分级（建议留给 AI 层，内核只给 FACT）
-6. 建 remote 仓库
+6. ~~建 remote 仓库~~ ✅ 已完成（2026-09-17，GitHub 私有库）
+7. V2 全量验证后**重打 APK**（当前 dist 里的包不含 V2 罗盘域改版）
 
 ### 7.1 🔴 本轮未验证项（接手时别当成"已经验过了"）
 
