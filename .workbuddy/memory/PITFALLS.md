@@ -23,6 +23,8 @@
 
 🔴 **全量测试 >190s 超 Bash 默认 120s 前台超时** —— 会被截断且**无任何输出**（易误判成崩溃）。用 `run_in_background` 或分模块跑。
 
+🔴 **提交说明含反引号时一律走 `git commit -F <文件>`** —— 写带行内代码的 commit message 时；`git commit -m "…`x`…"` 里的反引号会被 **bash 当命令替换执行**，内容不进说明（本次「只删 `**` 这 2 个字符」变成「只删  这 2 个字符」，并额外打出一行 `AGENTS.md: command not found`）。**commit 照样成功、`git log` 才看得出缺字**。修法：用 Write 工具写消息文件再 `-F`，不让 shell 碰它。
+
 🔴 **`.workbuddy/` 是项目数据，非缓存，不得删除。**
 
 ---
@@ -34,6 +36,10 @@
 🔴 **变异还原禁用「插入式 replace」** —— 从文件里删掉一行做变异、之后要还原时；因为用 replace 把该行插回别的位置会让**顺序改变而内容不变**：grep 查得到、测试也全绿，但那不是字节级还原（实测把 `templates.tsx` 插到了 `almanac.tsx` 之前）。正确做法：变异前先备份原始字节，还原时整体 `write_bytes` 回写。
 
 🔴 **`Path.write_text()` 在 Windows 把 LF 转 CRLF** —— 做「读-改-写」还原文件时；用 `read_bytes`/`write_bytes` 才字节级还原。
+**而且 `git diff` 看不见它**：`.gitattributes` 声明 `*.ts/tsx text eol=lf`，git 比对前会先规范化，于是整文件行尾被换掉也不显示任何差异，只在输出里留一句 `CRLF will be replaced by LF` 的告警（很容易当成噪音略过）。本次 5 个文件 582/386/291/665/1009 处行尾被换。**判据：改完立刻数 `read_bytes().count(b'\r\n')`，不要只看 diff。** 修法：`write_text(..., newline='\n')`，或改完二进制回写。
+
+🔴 **静态扫描类守卫自己要能被验证，否则它会「永远通过」** —— 写"扫源码找某特征"的测试时；第一版幂运算符判据用了 `[\w\)\]]\s*\*\*\s*[\w\(\[]`，而 **Python 的 `\w` 含 CJK**，于是中文句子中间的 `**标记**` 被判成 `2 ** 3` 整段跳过 —— 中文正是本项目正文语种，等于守卫关掉一大半（症状：只有行首的标记报得出来，句中的静默漏掉，最坏情况全绿而缺陷全在）。
+两道修法都要做：① 显式写 ASCII 字符类 `[A-Za-z0-9_]`；② **给守卫本身写"守卫的守卫"断言**（该报的报 / 不该报的不报 / 剥注释不剥过头，见 `tests/mobile/test_ui_copy_plain_text.py`）—— 本轮正是这两条断言当场抓到了它自己。
 
 🔴 **变异验证不能只看退出码** —— `-k` 写错会以 exit=4 退出、`-k` 无匹配也返回非零，两者都与"测试失败"同貌 → **假的 N/N**。须同时断言「真的收集并执行了用例」；`-k` 布尔语法是 `and/or/not`（**不是 `|`**）；变异锚点必须**唯一**。
 
@@ -46,6 +52,8 @@
 🔴 **`expo export --output-dir /tmp/x` 落在「当前盘符」的 `\tmp\x`** —— 核验打包产物时；因为 Node 按 Windows 路径解析，cwd 在 D 盘就是 `D:\tmp\`（**不是** Git Bash 的 `/tmp`，也不是 `C:\tmp`）。随后 `cd /tmp/x` 报 No such file → 会**误判成"打包失败"**。
 
 🔴 **`.hbc` 里的中文串是 UTF-16LE** —— 想证明「页面真进了包」时；用 utf-8 grep 得 **0 命中（假阴性）**。用 `bytes.count(s.encode('utf-16-le'))`，并**带一个旧页面的串做对照组**自证探测方法有效。
+
+🔴 **web 产物（`expo export --platform web`）里的中文是 `\uXXXX` 转义** —— 核验 web bundle 时；直接 `grep 中文` 同样得到 **0 命中假阴性**（本次差点据此得出"已无星号"的错误结论，其实是因为压根匹配不到中文）。修法：先 `re.sub(r'\\u([0-9a-fA-F]{4})', …)` 解回中文再断言；**并且一定要拿改动前的旧产物做对照**（v4 应报 60 处、v5 报 0 处，两组数字都拿到才算验过）。
 
 🔴 **`expo export --clear` 会被 `[safe-delete]` 拦** —— 重新导出产物时；报 `checkBulkDeleteGuard`（大批量删除保护），与吞 pytest 汇总行同一机制。改成输出到**新目录**、不加 `--clear`。
 
@@ -101,6 +109,8 @@
 🔴 **零成本模板 provider 也必须产出两文体** —— 改 `providers/template.py` 时；不配 key 的用户走的就是这条路径，少了白话版，双文体能力在零成本路径上等于不存在（界面永远显示"本篇只有专业分析"）。白话版要**真的解释术语**（术语表就地注解），否则是"标题白话、正文照旧"的假白话。
 
 🔴 **`content/help.ts` 必须与页面逐字对齐** —— 未登记的 topic 不渲染入口；文案里写了**已不存在的按钮**会把人引到死路（实测首页讲解还写着 V2 已删掉的「拍摄罗盘」）。
+
+🔴 **界面文案里不得出现 Markdown 标记（`**强调**` / 反引号）** —— 写任何会渲染的文案时；RN 的 `<Text>` 把 children 当**纯文本**，`**这样**` 会原样显示两个星号。三处旧防线全看不到它：`tsc` 只管类型、单元测试不渲染、离线快照只回传**布局诊断**（溢出量 / JS 错误）不核对正文。本仓库**已发生过两次**（先管理台 `static/admin.html`、后 App 的 5 个文件 63 对，其中 `content/help.ts` 占 53 对 = 每页「讲解」抽屉的全部正文）。守卫：`tests/mobile/test_ui_copy_plain_text.py`。**改法沿用管理台裁定 —— 删标记，不加粗体渲染器**（同类问题一种解法，见 `tests/api/test_admin_config.py::TestCopyIsPlainText`）。
 
 🔴 **改 `lib/` 里的规则必须配「Node 探针 + Python 锚点测试」并做变异验证**（现有 compassDial / ring24 / sensorQuality / sparkline / qimen / liuren / taiyi / date / apiCandidates）。
 
