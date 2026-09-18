@@ -91,6 +91,27 @@ const PAGES = [
     'viewport',
     'button[data-view="config"]',
   ],
+  // 会话记录 / 能力调试台：同样是懒渲染，要点导航才建 DOM。
+  //
+  // 这两个视图此前**一张快照都没有** —— 而「能力调试台」恰好是管理台最大的
+  // 单一界面（12 张卡、约 40 个控件），却从未被任何评审看过。缺快照的后果不是
+  // 「少一张图」，是这块界面的工艺水平**没有任何回归基线**：改坏了也无人知晓。
+  [
+    '16-admin-sessions',
+    `http://127.0.0.1:8360/admin${ADMIN_TOKEN ? '?token=' + encodeURIComponent(ADMIN_TOKEN) : ''}`,
+    1440,
+    900,
+    'viewport',
+    'button[data-view="sessions"]',
+  ],
+  [
+    '16-admin-lab',
+    `http://127.0.0.1:8360/admin${ADMIN_TOKEN ? '?token=' + encodeURIComponent(ADMIN_TOKEN) : ''}`,
+    1440,
+    900,
+    'viewport',
+    'button[data-view="lab"]',
+  ],
   // 会话链路的三页（确认坐向 → 会话详情 → AI 报告）：动态路由，需要真实 id。
   // 它们覆盖了产品最关键的两道机制 —— RULE-004 的用户确认闸门、
   // 报告页三标签的物理分离；缺了这三张，主链路的快照是断的。
