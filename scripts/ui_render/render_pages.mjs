@@ -31,7 +31,10 @@ if (!CHROME || !OUT) {
 const ADMIN_TOKEN = process.env.XP_ADMIN_TOKEN || '';
 
 /**
- * 待渲染页面：name|path|w|h|mode
+ * 待渲染页面：name|path|w|h|mode|click（click 可选，CSS 选择器）
+ *
+ * `click` 用于懒渲染的视图：页面初始视图之外的面板要点了才建 DOM，
+ * 不点就只能截到初始页（会误判成「面板没做」）。见 `16-admin-config`。
  *
  * 一律用 `viewport` 而不是 `full`（captureBeyondViewport），两个理由：
  *   1. 实测全部移动页面 `contentH === 844`（恰等于视口高）—— 本来就是单屏设计；
@@ -66,6 +69,16 @@ const PAGES = [
     1440,
     900,
     'viewport',
+  ],
+  // 管理台配置面板：`switchView` 是懒渲染，初始视图是「总览」，
+  // 必须先点导航才建 DOM —— 所以这里用到第 6 个元素（点击选择器）。
+  [
+    '16-admin-config',
+    `http://127.0.0.1:8360/admin${ADMIN_TOKEN ? '?token=' + encodeURIComponent(ADMIN_TOKEN) : ''}`,
+    1440,
+    900,
+    'viewport',
+    'button[data-view="config"]',
   ],
 ].filter((p) => !ONLY || ONLY.split(',').map((s) => s.trim()).includes(p[0]));
 
@@ -138,8 +151,24 @@ async function waitForDevtools(port, timeoutMs = 40000) {
   throw new Error('DevTools 未就绪（port ' + port + '）');
 }
 
-/** 渲染单页，返回诊断对象 */
-async function renderOne(cdp, name, path, w, h, mode) {
+/** 收集未捕获 JS 错误。
+ *
+ *  expo 页面靠 `preview_server.py` 注入 `window.__xpErrors`，但 `11-admin` 这类
+ *  **由后端直接提供**的页面没有那层注入 —— 不自己注入的话 `errors` 恒为空，
+ *  等于一个永远绿的假断言。对所有页面统一注入，两种来源互不冲突。
+ */
+const ERROR_COLLECTOR =
+  'window.__xpErrors=window.__xpErrors||[];' +
+  "window.addEventListener('error',function(e){window.__xpErrors.push(String(e.message))});" +
+  "window.addEventListener('unhandledrejection',function(e){window.__xpErrors.push('rejection: '+String(e.reason))});";
+
+/** 渲染单页，返回诊断对象。
+ *
+ *  `click` 可选：CSS 选择器。用于**懒渲染**的视图 —— 页面初始视图之外的面板
+ *  （如管理台配置面板）要点了才建 DOM，只截初始页会误判成「面板没做」。
+ *  点击失败（找不到 / 不可见）直接抛错，不允许静默拍一张「没点成功」的图。
+ */
+async function renderOne(cdp, name, path, w, h, mode, click = '') {
   const sessionId = `s-${name}`;
   // 用扁平会话：attach 时指定 sessionId，省掉一层消息包装
   const { targetId } = await cdp.send('Target.createTarget', { url: 'about:blank' });
@@ -150,6 +179,11 @@ async function renderOne(cdp, name, path, w, h, mode) {
     });
     await cdp.send('Page.enable', {}, sid);
     await cdp.send('Runtime.enable', {}, sid);
+    await cdp.send(
+      'Page.addScriptToEvaluateOnNewDocument',
+      { source: ERROR_COLLECTOR },
+      sid
+    );
     await cdp.send(
       'Emulation.setDeviceMetricsOverride',
       { width: w, height: h, deviceScaleFactor: 2, mobile: w < 600 },
@@ -162,18 +196,34 @@ async function renderOne(cdp, name, path, w, h, mode) {
     );
 
     // 等渲染稳定：先静置，再等 innerText 长度连续两次一致
-    await sleep(4000);
-    let last = -1;
-    for (let i = 0; i < 8; i++) {
-      const r = await cdp.send(
-        'Runtime.evaluate',
-        { expression: 'document.body?document.body.innerText.length:-1', returnByValue: true },
-        sid
-      );
-      const len = r.result.value ?? -1;
-      if (len > 0 && len === last) break;
-      last = len;
-      await sleep(900);
+    const settle = async (initial) => {
+      await sleep(initial);
+      let last = -1;
+      for (let i = 0; i < 8; i++) {
+        const r = await cdp.send(
+          'Runtime.evaluate',
+          { expression: 'document.body?document.body.innerText.length:-1', returnByValue: true },
+          sid
+        );
+        const len = r.result.value ?? -1;
+        if (len > 0 && len === last) break;
+        last = len;
+        await sleep(900);
+      }
+    };
+    await settle(4000);
+
+    let clicked = null;
+    if (click) {
+      const expr =
+        `(()=>{const el=document.querySelector(${JSON.stringify(click)});` +
+        `if(!el)return 'not-found';` +
+        `if(getComputedStyle(el).display==='none')return 'hidden';` +
+        `el.click();return 'clicked';})()`;
+      const r = await cdp.send('Runtime.evaluate', { expression: expr, returnByValue: true }, sid);
+      clicked = r.result.value ?? 'no-result';
+      if (clicked !== 'clicked') throw new Error(`点击 ${click} 失败：${clicked}`);
+      await settle(2500);
     }
 
     const diagExpr = `(()=>{const d=document.documentElement,b=document.body;return JSON.stringify({
@@ -203,6 +253,7 @@ async function renderOne(cdp, name, path, w, h, mode) {
       ok: true,
       viewport: `${w}x${h}`,
       mode,
+      clicked,
       overflowX: diag.scrollW - diag.innerW,
       contentH: diag.scrollH,
       textLen: diag.textLen,
@@ -248,9 +299,9 @@ try {
   const cdp = await CDP.connect(version.webSocketDebuggerUrl);
   console.log(`connected: ${version.Browser}`);
 
-  for (const [name, path, w, h, mode] of PAGES) {
+  for (const [name, path, w, h, mode, click] of PAGES) {
     try {
-      const r = await withTimeout(renderOne(cdp, name, path, w, h, mode), 70000, name);
+      const r = await withTimeout(renderOne(cdp, name, path, w, h, mode, click), 70000, name);
       console.log('OK   ' + JSON.stringify(r));
     } catch (e) {
       console.log('FAIL ' + name + ' :: ' + (e && e.message ? e.message : String(e)));
