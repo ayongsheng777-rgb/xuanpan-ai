@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from pathlib import Path
 
 import pytest
 
@@ -275,10 +276,16 @@ class TestFenjinGeometry:
         with pytest.raises(ValueError):
             fenjin_cell(-1)
 
-    def test_ganzhi_absent_without_rule_table(self) -> None:
-        """规则表未提供时，干支必须为 None —— 不得凭理论推算（RULE-001/008）。"""
-        assert table_available() is False
-        cell = fenjin_at(180.0)
+    def test_ganzhi_absent_without_rule_table(self, tmp_path: Path) -> None:
+        """规则表未提供时，干支必须为 None —— 不得凭理论推算（RULE-001/008）。
+
+        **显式指向一个不存在的路径**，而不是靠「仓库里恰好没有这张表」：
+        后者描述的是今天的巧合 —— 真把表补上时它会报「回归」，
+        而它想守的东西（缺表不编造）其实完好。
+        """
+        missing = str(tmp_path / "no-such-fenjin120.json")
+        assert table_available(table_path=missing) is False
+        cell = fenjin_at(180.0, table_path=missing)
         assert cell.ganzhi is None
         assert cell.usable is None
         assert "分金" in cell.label or "格" in cell.label
@@ -372,7 +379,10 @@ class TestCalculateOrientation:
         assert f["confirmed_by_user"] is True
         assert f["source"] == "vision"
         assert f["fenjin"]["index"] == 62
-        assert f["fenjin_table_available"] is False
+        # 只锁**形状**（字段在、类型对）不锁值：本用例的主题是 facts 层结构，
+        # 而这一位的值取决于分金规则表在不在 —— 见过它写成 `is False` 的版本，
+        # 那等于把"今天的巧合"写进了测试，补表时会报出一个毫无道理的回归。
+        assert isinstance(f["fenjin_table_available"], bool)
 
     def test_tradition_layer_shape(self) -> None:
         o = calculate_orientation(sitting="午", facing="子")

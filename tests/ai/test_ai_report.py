@@ -10,6 +10,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from fortune_core.bazi import BirthInput, calculate_bazi
@@ -360,8 +362,24 @@ class TestTemplateProvider:
         # 姓名
         assert facts["name"]["name"] in text
 
-    def test_unknown_domain_values_never_fabricated(self) -> None:
-        """缺规则表时必须说"未提供"，不得编造一个干支填进去。"""
+    def test_unknown_domain_values_never_fabricated(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """缺规则表时必须说「未提供」，不得编造一个干支填进去。
+
+        **显式**把默认表指到一个不存在的路径，而不是靠「仓库里恰好没这文件」——
+        后者会让本用例在补表之后从「测行为」变成「报回归」。
+
+        用 `tmp_path` 下的唯一路径还有个好处：缓存键天然隔离，
+        不会把结果漏给别的用例（`lru_cache` 不认测试边界）。
+        """
+        from fortune_core import fenjin120
+
+        monkeypatch.setattr(
+            fenjin120, "DEFAULT_TABLE_PATH", tmp_path / "absent.json", raising=False
+        )
+        fenjin120.clear_fenjin_cache()
+
         ctx = build_context("s", compass=calculate_orientation(sitting="午", degree=177.0))
         facts = ctx.to_facts()                 # type: ignore[attr-defined]
         assert facts["compass"]["fenjin_table_available"] is False

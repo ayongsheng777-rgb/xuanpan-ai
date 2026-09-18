@@ -187,7 +187,10 @@ class TestCalculationContext:
         assert c.school == DEFAULT_SCHOOL
         assert c.school_name == get_school().name
         assert c.engine == "fortune-core"
-        assert c.fenjin_table_available is False
+        # 只锁**类型**不锁值：本用例的主题是 school 元数据，而这一位的值
+        # 取决于分金规则表在不在 —— 那件事由 test_fenjin120.py 显式构造输入来测。
+        # 写成 `is False` 会把它变成"锁现状"：真把表补上时，本用例会第一个报回归。
+        assert isinstance(c.fenjin_table_available, bool)
 
     def test_missing_degree_warns(self) -> None:
         ctx = build_context("s5", compass=calculate_orientation(sitting="午", facing="子"))
