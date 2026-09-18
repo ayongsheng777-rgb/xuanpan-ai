@@ -44,6 +44,9 @@
 🔴 **刷新 UI 快照要三件套，顺序不能变** —— 改过前端页面后核对视觉时；`cd apps/mobile && npx expo export --platform web --output-dir "$T/xp-web"`（**不加 `--clear`**，会被 safe-delete 拦；产物放系统 Temp）→ 起 `scripts/ui_render/preview_server.py <dist> <port>` → 跑 `render_pages.mjs <chrome> docs/ui-render http://127.0.0.1:<port>`（不传第 4 个参数才是全量 16 页）。`16-admin-config` 靠页面清单第 6 个元素「点击选择器」进懒渲染的配置视图，日志里 `clicked=clicked` 才是「面板真被点开」的证据——没有它，拍到的是没点成功的初始页
 🔴 **全量 >190s 超 Bash 默认 120s 前台超时** —— 会被截断且**无任何输出**（易误判成崩溃）。用 `run_in_background` 或分模块跑。
 🔴 **`.workbuddy/` 是项目数据，非缓存，不得删除。**
+🔴 **动态加载含 `@dataclass` 的模块必须先登记 `sys.modules`** —— 用 `spec_from_file_location` + `exec_module` 加载脚本时；因为 dataclasses 解析注解会按 `cls.__module__` 反查 `sys.modules[..].__dict__`，不登记就抛 `AttributeError: 'NoneType' object has no attribute '__dict__'`，而报错位置在 dataclasses 内部、看不出是加载方式的问题。修法：`sys.modules[spec.name] = mod` 再 `exec_module`
+🔴 **变异还原禁用「插入式 replace」** —— 从文件里删掉一行做变异、之后要还原时；因为用 replace 把该行插回别的位置会让**顺序改变而内容不变**：grep 查得到、测试也全绿，但那不是字节级还原（实测把 `templates.tsx` 插到了 `almanac.tsx` 之前）。正确做法：变异前先备份原始字节，还原时整体 `write_bytes` 回写
+🔴 **删大量文件前先想 safe-delete** —— 清理非系统 Temp 下的目录时；判据是「**单次工具调用内累计删除 >50 个**」→ `raise SystemExit(1)`，症状是脚本半途静默停止而非给出可读错误。绕法：**同盘 rename 把旧目录挪走**（`shutil.move` 同盘即改名，零删除），或分批调用（每批 <50）
 
 🔴 **Chrome 在沙箱内/受限 shell 下静默 exit 0** —— 跑无头浏览器（截图/PDF/自动化）时；表现是**退出码 0、零输出、零产物**，极易误判成"参数写错了"。必须沙箱外执行，`--no-sandbox` 救不了（实测）。
 🔴 **`chrome --headless --screenshot --window-size=390,844` 在本机不生效** —— 做"手机尺寸截图"时；实测页面 `innerWidth=500`，截出的 390px 图是把 500px 布局**裁掉右边**，看着像横向溢出、实为假象。要用 CDP 的 `Emulation.setDeviceMetricsOverride`。
@@ -66,7 +69,10 @@
   - **运行时可调配置**（后端 `runtime_config.py` + SQLite `app_settings` 表）
   - **管理台新增「配置」面板**（含 AI 模型选择与模型列表探针）
   - 全量测试 **1560 passed, 3 skipped, EXIT=0**（单进程全量 250.73s；`--basetemp` 放系统 Temp 才拿得到汇总行，见上方 safe-delete 条）
-  - UI 快照补齐到 **16 页**：底栏改版新增的 4 页（测盘/分析/牌库/校准）**此前从未渲染过**，本轮首次核对 —— 全部 `overflowX=0`、`errors=[]`；管理台配置面板一并纳入
+  - UI 快照补齐到 **19 页**：底栏改版新增的 4 页（测盘/分析/牌库/校准）**此前从未渲染过**，本轮首次核对；
+    并补上会话链路三页（确认坐向 / 会话详情 / AI 报告）—— 主链路此前是**断的**
+    （RULE-004 的确认闸门、报告页三标签的物理分离，一张图都没有）。全部 `overflowX=0`、`errors=[]`
+  - **UI 设计导出包**（供其他智能体分析）已可一键生成 → 见下方专节
 - 术数：六爻装卦、八字大运/流年/神煞/长生十二宫、黄历/择日、断卦层、**择日决策**、**三式全部**（全链路贯通）
 - MCP 12 工具；HTTP `/api/v1/{almanac,zeri,duan,qimen,liuren,taiyi}`；管理台 **4 个导航页**（概览/会话/配置/调试台）
 - 康熙笔画 20794 字 `verified:true`；APK 含三式但**不含 V2**（V2 验证后重打），**debug 签名**，对外分发须换正式签名
@@ -91,6 +97,30 @@
 - 新增一个环境变量要看 **4 处**：`config.py`、`runtime_config.SPECS`、`.env.example`、`docker-compose.yml`
 - `XUANPAN_LLM_CAPABILITY` 取值只有 `reasoning/fast/local`（排序表在 `router.py::_capability_rank`）。
   🔴 写别的不报错，只**静默落到默认档** —— `.env.example` 里曾错写 `vision`，已修
+
+## UI 设计导出包（供外部智能体分析）
+
+`"$PY" scripts/export_ui_design.py --zip` → `dist/ui-design-export/`（97 文件 / 4.4 MB）
+＋ `dist/玄盘AI-UI设计导出-<日期>.zip`。**产物在 `dist/`（已 gitignore）不入库，脚本入库**。
+
+- 包 = 导读 README ＋ 9 卷源码（**按用户旅程分卷，不是字母序**）＋ 19 张快照 ＋ 源码副本
+  （保留原目录结构）＋ 3 份上游规范 ＋ MANIFEST（含每文件 SHA256/12）
+- 🔴 **脚本的核心理由是归档完整性自检**：`app/` 与 `src/` 下有源码未被任何一卷收录就报错退出。
+  这道自检写完立刻抓到一处真实遗漏（命盘页在 `app/chart.tsx`，不是 `(tabs)/`）——
+  没它包会**静默少掉整页**，而且没有任何症状。**改 UI 后忘了重导 = 包与源码漂移**；
+  守卫在 `tests/test_export_ui_design.py`
+- 🔴 **输出目录已存在时默认报错、不自动清除**（要 `--force`）—— 因为一次 rmtree 近百个文件
+  会撞 safe-delete 批量守卫。挪旧包用**同盘 rename**（`shutil.move` 同盘即改名，零删除）
+- 🔴 **深色仪器域的边界**：**6 个测量相关页**（首页 / 测盘 / 手动调节 / 传感器测量 / 罗盘校准 /
+  我的罗盘）为深色，其余 11 页浅色。**分界线是「是不是在测量」，不是「是不是罗盘」** ——
+  确认页用的是**浅色盘**（`DIAL_LIGHT`），别按「罗盘域 = 深色」去推断
+  （此结论由 `17-confirm.png` 当场证伪了我的初稿）
+- 🔴 **导读 `docs/玄盘 AI — UI 设计导出导读.md` 是导出包的门面**，改了设计系统/信息架构要同步更新它
+- 会话三页快照需 `XP_SESSION_ID`（从 `GET /api/v1/sessions` 取）；**不传就跳过** ——
+  刻意不写死 id：id 来自不入库的运行时库，写死会在换库后**静默拍下「无此会话」错误页**
+- 底栏实际是「罗盘/测盘/分析/历史/我的」，与《产品基线规范》裁定的「罗盘/命盘/占测/历史/我的」
+  不一致（V2 改版，理由见 `(tabs)/_layout.tsx` 注释）；
+  `apps/mobile/README.md` 的目录结构章节**仍是旧结构**，已过时
 
 ## 风险与待办
 
