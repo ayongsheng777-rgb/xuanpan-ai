@@ -19,7 +19,7 @@
 import React from 'react';
 import { StyleSheet, View } from 'react-native';
 
-import { alpha, colors, radius, space } from '@/theme/tokens';
+import { alpha, colors, element, radius, space } from '@/theme/tokens';
 
 import { AppText } from './AppText';
 import { Divider, KeyValueRow } from './Card';
@@ -310,12 +310,13 @@ function Undetermined(): React.JSX.Element {
 // 五行条
 // ==========================================================================
 
+/** 五行本色改由 `theme/tokens` 的 `element` 给 —— 见那里的注释（领域常量，不该散在组件里） */
 const ELEMENT_COLORS: Record<string, string> = {
-  木: '#4A7C59',
-  火: colors.cinnabar,
-  土: '#A8722B',
-  金: colors.gold,
-  水: colors.primary,
+  木: element.木,
+  火: element.火,
+  土: element.土,
+  金: element.金,
+  水: element.水,
 };
 
 //：展示顺序固定为 木火土金水（相生序），不按数值排 —— 顺序稳定才能一眼对比

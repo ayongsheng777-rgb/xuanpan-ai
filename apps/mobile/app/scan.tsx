@@ -437,6 +437,8 @@ const styles = StyleSheet.create({
     marginHorizontal: -layout.gutter,
     marginBottom: space[3],
     overflow: 'hidden',
+    /* 刻意用纯黑而非暖黑 token —— 取景器是"关掉的屏幕"，
+       任何暖调都会让用户以为画面已经在预览了。 */
     backgroundColor: '#000',
   },
   overlay: {
@@ -449,7 +451,7 @@ const styles = StyleSheet.create({
     height: 230,
     borderRadius: 115,
     borderWidth: 1,
-    borderColor: 'rgba(218, 179, 125, 0.55)',
+    borderColor: alpha.goldRing,
   },
   bracket: { position: 'absolute', width: 26, height: 26, borderColor: brand.gold },
   bracketTL: { top: -1, left: -1, borderTopWidth: 3, borderLeftWidth: 3 },
@@ -490,7 +492,7 @@ const styles = StyleSheet.create({
     borderColor: brand.gold,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.22)',
+    backgroundColor: alpha.whiteSoft,
   },
   shutterPressed: { backgroundColor: alpha.goldSoft },
   shutterInner: {

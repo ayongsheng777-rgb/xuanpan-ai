@@ -19,7 +19,7 @@ import { Banner } from '@/components/Banner';
 import { Button, Card, Divider, KeyValueRow } from '@/components/Card';
 import { Screen } from '@/components/Screen';
 import { useAsync, useSubmit } from '@/lib/useAsync';
-import { colors, radius, space } from '@/theme/tokens';
+import { colors, radius, space, tint } from '@/theme/tokens';
 
 const APP_VERSION = '0.1.0';
 
@@ -80,7 +80,7 @@ function AiModelCard({ data }: { data: AiProvidersResponse | null }): React.JSX.
               <View
                 style={[
                   styles.statusPill,
-                  { backgroundColor: p.available ? '#EAF3EF' : colors.surfaceAlt },
+                  { backgroundColor: p.available ? tint.jadePill : colors.surfaceAlt },
                 ]}
               >
                 <AppText size="xs" color={p.available ? 'success' : 'muted'}>

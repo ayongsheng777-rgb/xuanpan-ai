@@ -15,7 +15,7 @@
 import React, { type ReactNode } from 'react';
 import { StyleSheet, View } from 'react-native';
 
-import { colors, radius, space } from '@/theme/tokens';
+import { radius, space, tone } from '@/theme/tokens';
 
 import { AppText } from './AppText';
 
@@ -28,11 +28,18 @@ export interface BannerProps {
   style?: object;
 }
 
+/**
+ * 色值全部来自 `theme/tokens` 的 `tone` 三件套。
+ *
+ * 🔴 这里原先手写了 8 个色值（4 组 bg + border），而前景色在 `semantic` 里 ——
+ *    同一个语义的色值被拆在两个文件，改一处忘一处就会出现
+ *    "警示条描边变了、标题字色没变"，且**没有任何检查会报错**（都是合法色值）。
+ */
 const TONE: Record<BannerTone, { bg: string; border: string; fg: string; icon: string }> = {
-  info: { bg: '#F1F5F8', border: '#C9D6DE', fg: colors.info, icon: 'ⓘ' },
-  warning: { bg: '#FDF7EC', border: '#E8D5AC', fg: colors.warning, icon: '⚠' },
-  error: { bg: '#FDF4F3', border: '#EFC9C5', fg: colors.danger, icon: '✕' },
-  success: { bg: '#F2F7F5', border: '#C6DCD5', fg: colors.success, icon: '✓' },
+  info: { ...tone.info, icon: 'ⓘ' },
+  warning: { ...tone.warning, icon: '⚠' },
+  error: { ...tone.danger, icon: '✕' },
+  success: { ...tone.success, icon: '✓' },
 };
 
 export function Banner({ tone = 'info', title, children, style }: BannerProps): React.JSX.Element {
