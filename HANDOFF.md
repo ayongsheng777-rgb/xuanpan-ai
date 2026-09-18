@@ -143,7 +143,19 @@ HTTP 层无路由、App 里 0 处引用。本轮把三条链路打通：
 - `/qimen/pan` 与 `/liuren/cast` **命名不一致**（一个 `pan`、一个 `cast`）。
   不影响功能，但 Agent 与新人容易猜错路径（本轮就猜错了一次）。
 - `fenjin120` 规则表缺失（管理台 `available=False`）—— 已知数据缺口，
-  当前退化为「只输出几何格位 + 警告」。
+  当前退化为「只输出几何格位 + 警告」。**根因已查明（2026-09-18 夜）**：
+  `packages/fortune-core/data/fenjin120.json` **从未被创建**（全仓无此文件）。
+  🔴 **补表不是"扔个 json 进去"就完事** —— 有 **4 处测试断言 `fenjin_table_available is False`**，
+  补完立刻全红。其中 2 处**根本不是测这件事**（`test_compass.py::test_facts_layer_shape`、
+  `test_context.py::test_school_metadata`），是在锁现状 → 应直接删掉那行；
+  另 2 处（`test_compass.py::test_ganzhi_absent_without_rule_table`、
+  `test_ai_report.py::test_unknown_domain_values_never_fabricated`）主题正确但**构造方式脆**
+  —— 靠"仓库里恰好没这文件"来制造缺表场景，应改为**显式传不存在的 path**
+  （`fenjin_at(..., table_path=...)` / `build_context(..., fenjin_table=...)` 都有现成注入点）。
+  🔴 补表后必须 `docker compose up -d --build` —— 表在 `packages/fortune-core/data/`，
+  由 Dockerfile `COPY packages/` 进镜像（领域数据，不是运行时产物）。
+  表格式见 `fenjin120.py` 模块 docstring：`{"default": {"子": ["甲子","丙子",null,"庚子",null], ...}}`，
+  每山恰好 5 格，`null` = 该流派下空亡/不用。**属流派规则（RULE-006），不能由代码推算。**
 
 ---
 
