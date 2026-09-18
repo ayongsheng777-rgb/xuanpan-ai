@@ -57,6 +57,11 @@ const out = {
   survivesDirtyData: buildSparkline([40, Number.NaN, 42]) !== null,
   /** 脏数据被剔除后剩下的点数（应为 2） */
   dirtyPointCount: buildSparkline([40, Number.NaN, 42])?.d.split('L').length ?? 0,
+  /**
+   * 单点围不出面积 → `areaD` 必须是 `null`，**不能是空字符串**。
+   * 空串会被调用方的 `? :` 判成"有值"，从而渲染一条看不见的零宽路径。
+   */
+  areaNullForSingle: buildSparkline([45], OPTIONS)?.areaD === null,
   geometry,
 };
 

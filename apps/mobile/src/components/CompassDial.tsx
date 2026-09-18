@@ -37,6 +37,8 @@ import Svg, {
   Image as SvgImage,
   Line,
   Path,
+  RadialGradient,
+  Stop,
   Text as SvgText,
 } from 'react-native-svg';
 
@@ -84,8 +86,22 @@ const SECTOR_GAP_DEG = 0.6;
  * 几何是事实，配色是视角，不能混为一谈。
  */
 export interface DialPalette {
-  /** 盘体底色 */
+  /** 盘体底色（未设 `bodyGradient` 时按此平涂） */
   body: string;
+  /**
+   * 盘体径向渐变（由内向外三档），**可选**。
+   *
+   * 只有深色仪器盘设它。原因：深底上的单色盘体会读成一整块均匀色块，
+   * 二十四山的分层感只能靠描边硬撑，看着是"平"的；径向渐变让中心（天池）
+   * 自然成为视觉焦点、边缘自然退后。
+   *
+   * 浅色盘**刻意不设** —— 暖米色盘面本身已有纸质感，再叠径向渐变会显脏，
+   * 而且会改掉确认坐向等既有页面的视觉。这条是"双轨制"的具体落地：
+   * 两轨共用同一套几何，只在**深色轨**上多做一层明暗。
+   *
+   * 几何完全不受影响：渐变只决定底盘怎么填色，不参与任何角度与分层换算。
+   */
+  bodyGradient?: readonly [string, string, string];
   /** 金环/外框 */
   rim: string;
   /** 细分隔线 */
@@ -161,6 +177,7 @@ export const DIAL_LIGHT: DialPalette = {
 
 export const DIAL_DARK: DialPalette = {
   body: instrument.dialBody,
+  bodyGradient: instrument.dialBodyGradient,
   rim: instrument.dialGold,
   hairline: instrument.border,
   sectorStroke: instrument.border,
@@ -280,9 +297,12 @@ export function CompassDial({
 
   const poolRadius = radiusOf('pool') ?? { outer: L.pool, inner: 0, mid: L.pool / 2 };
 
-  // ClipPath 的 id 必须唯一：同页多盘时若共用 id，后一个盘面的照片会裁进前一个
+  // SVG 内的 id 必须唯一：同页多盘时若共用 id，
+  // 后一个盘面的照片会裁进前一个，径向渐变的底也会串到对方身上
   const rawId = useId();
-  const clipId = `dial-clip-${rawId.replace(/[^a-zA-Z0-9]/g, '')}`;
+  const svgId = rawId.replace(/[^a-zA-Z0-9]/g, '');
+  const clipId = `dial-clip-${svgId}`;
+  const bodyGradientId = `dial-body-${svgId}`;
 
   // ---- 手势：PanResponder 需要稳定的 handler，故用 ref 透传最新值 ----
   const rotationRef = useRef(rotation);
@@ -347,10 +367,28 @@ export function CompassDial({
           <ClipPath id={clipId}>
             <Circle cx={center.x} cy={center.y} r={L.rim - 1} />
           </ClipPath>
+          {/*
+            盘体径向渐变 —— 只有深色盘设了 bodyGradient 时才生成。
+            三档 stop 的落点：中心光晕占约 55%，外圈大面积压暗，
+            于是天池周围亮、盘缘沉 —— 与实物罗盘"中心受光"的观感一致。
+            浅色盘走 `palette.body` 平涂，渲染结果与改动前**逐像素相同**。
+          */}
+          {palette.bodyGradient ? (
+            <RadialGradient id={bodyGradientId} cx="50%" cy="50%" r="50%">
+              <Stop offset="0" stopColor={palette.bodyGradient[0]} />
+              <Stop offset="0.55" stopColor={palette.bodyGradient[1]} />
+              <Stop offset="1" stopColor={palette.bodyGradient[2]} />
+            </RadialGradient>
+          ) : null}
         </Defs>
 
         {/* ---------- 底盘 ---------- */}
-        <Circle cx={center.x} cy={center.y} r={L.rim - 1} fill={palette.body} />
+        <Circle
+          cx={center.x}
+          cy={center.y}
+          r={L.rim - 1}
+          fill={palette.bodyGradient ? `url(#${bodyGradientId})` : palette.body}
+        />
 
         {/* ---------- 照片打底（最底层，被矢量层盖住） ---------- */}
         {photo ? (

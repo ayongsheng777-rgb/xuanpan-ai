@@ -23,9 +23,9 @@
 
 import { Ionicons } from '@expo/vector-icons';
 import { Stack } from 'expo-router';
-import React from 'react';
+import React, { useId } from 'react';
 import { StyleSheet, View } from 'react-native';
-import Svg, { Line, Path } from 'react-native-svg';
+import Svg, { Defs, LinearGradient, Line, Path, Stop } from 'react-native-svg';
 
 import { AppText } from '@/components/AppText';
 import { CompassDial, DIAL_DARK } from '@/components/CompassDial';
@@ -61,6 +61,12 @@ export default function SensorsScreen(): React.JSX.Element {
   const maxTilt = sensor.tilt
     ? Math.max(Math.abs(sensor.tilt.pitch), Math.abs(sensor.tilt.roll))
     : null;
+
+  /**
+   * 渐变 id 必须唯一 —— 与 CompassDial 同一条理由：同页若出现两条曲线而共用 id，
+   * 后渲染的那条会把前一条的面积填充也改成自己的。
+   */
+  const areaGradientId = `ml-area-${useId().replace(/[^a-zA-Z0-9]/g, '')}`;
 
   // 曲线几何在纯函数里算（含恒定信号的除零保护，见 lib/sparkline）
   const curve = buildSparkline(sensor.magneticSeries, {
@@ -236,7 +242,18 @@ export default function SensorsScreen(): React.JSX.Element {
                 height={DEFAULT_SPARKLINE_HEIGHT}
                 viewBox={`0 0 ${DEFAULT_SPARKLINE_WIDTH} ${DEFAULT_SPARKLINE_HEIGHT}`}
               >
-                {/* 量程中线：没有它，一段被跨度保护压平的曲线看不出站在哪个刻度上 */}
+                {/* 面积渐变 —— 衬在折线之下，给波形一点"体积"。
+                    顶部淡金、底部全透明，越往下越沉，因此不会抢折线本身。 */}
+                <Defs>
+                  <LinearGradient id={areaGradientId} x1="0" y1="0" x2="0" y2="1">
+                    <Stop offset="0" stopColor={instrument.curveFill} stopOpacity={0.28} />
+                    <Stop offset="1" stopColor={instrument.curveFill} stopOpacity={0} />
+                  </LinearGradient>
+                </Defs>
+                {/* 单点时 areaD 为 null（一个点围不出面积），故先判空 */}
+                {curve.areaD ? <Path d={curve.areaD} fill={`url(#${areaGradientId})`} /> : null}
+                {/* 量程中线：没有它，一段被跨度保护压平的曲线看不出站在哪个刻度上。
+                    必须画在面积之上，否则会被填充盖住。 */}
                 <Line
                   x1={0}
                   y1={DEFAULT_SPARKLINE_HEIGHT / 2}

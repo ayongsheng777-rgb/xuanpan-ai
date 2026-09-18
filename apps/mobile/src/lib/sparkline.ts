@@ -37,8 +37,19 @@ const DEFAULT_PADDING_Y = 6;
 export const DEFAULT_MIN_SPAN = 4;
 
 export interface SparklineGeometry {
-  /** SVG path 的 `d` 属性（`M x y L x y …`） */
+  /** SVG path 的 `d` 属性（`M x y L x y …`）—— 描边用的折线 */
   d: string;
+  /**
+   * 面积填充路径 —— 折线再接「右下 → 左下 → 闭合」。
+   *
+   * 用途：在折线下方铺一层渐变，把"工程折线"读成"有体积的波形"。
+   * 视觉上它属**衬底**，不得比折线本身更抢眼（透明度由调用方给）。
+   *
+   * **单点时为 `null`** —— 一个点围不出面积，硬画只会得到一条零宽矩形：
+   * 看不见，却让调用方以为"填充已经生效了"。这与本模块对空序列返回 `null`
+   * 是同一条原则：没有就是没有，不要给一个"看起来画过了"的东西。
+   */
+  areaD: string | null;
   /** 数据自身的最小值 */
   min: number;
   /** 数据自身的最大值 */
@@ -105,5 +116,18 @@ export function buildSparkline(
       ? `M ${pts[0]![0]} ${pts[0]![1]} L ${pts[0]![0]} ${pts[0]![1]}`
       : pts.map(([x, y], i) => `${i === 0 ? 'M' : 'L'} ${x} ${y}`).join(' ');
 
-  return { d, min, max, lo: round2(lo), hi: round2(hi) };
+  /**
+   * 面积路径：折线本身，再沿底边回到起点闭合。
+   *
+   * 底边取 `height` 而不是 `height - paddingY`：让填充与绘图区下缘齐平。
+   * 若停在 padding 处，填充底下会露出一条底色缝，看着像渲染残影。
+   * 注意 x 用 `pts[0][0]` / `pts[last][0]` 而非 0 / width —— 两点序列的
+   * x 本来就铺满，但保持与折线端点严格同源，任何一端被 clamp 过也不会错位。
+   */
+  const areaD =
+    pts.length === 1
+      ? null
+      : `${d} L ${pts[pts.length - 1]![0]} ${height} L ${pts[0]![0]} ${height} Z`;
+
+  return { d, areaD, min, max, lo: round2(lo), hi: round2(hi) };
 }

@@ -201,3 +201,83 @@ class TestPointCount:
         """采样点只做剔除、不做插值：画出的点数 = 输入点数（单点例外，占两个坐标）。"""
         pts = _points(_geo(probe, name)["d"])
         assert len(pts) == (2 if count == 1 else count)
+
+
+# ==========================================================================
+# 面积填充（折线下方铺渐变用）
+# ==========================================================================
+
+#: 围得出面积的用例（单点除外）
+_AREA_CASES = ["constant", "rising", "narrow", "wide", "twoPoint"]
+
+
+class TestAreaPath:
+    """`areaD` —— 折线下方那块渐变填充的几何。
+
+    这一组守护的三件事都属于**"错了也画得出来"**：面积照样会渲染，
+    只是位置或形状不对，而深底上的色块本来就很淡，肉眼很难判断对错。
+    """
+
+    @pytest.mark.parametrize("name", _AREA_CASES)
+    def test_area_reuses_the_line_vertices(self, probe: dict, name: str) -> None:
+        """面积的前 N 个顶点必须**逐个等于**折线的顶点。
+
+        若为了画面积另算一套坐标，填充就会与曲线错开一点 ——
+        表现是"曲线浮在色块上方"或"色块冒出曲线"，很像一种渲染故障，
+        却不报任何错。直接比坐标而不是比字符串，才能抓到"数字相同但顺序不同"。
+        """
+        geo = _geo(probe, name)
+        line_pts = _points(geo["d"])
+        area_pts = _points(geo["areaD"])
+        assert area_pts[: len(line_pts)] == line_pts, f"{name}: 面积顶点与折线不一致"
+
+    @pytest.mark.parametrize("name", _AREA_CASES)
+    def test_area_closes_along_the_bottom_edge(self, probe: dict, name: str) -> None:
+        """底边必须落在绘图区下缘（y = height），且路径以 Z 闭合。
+
+        写成 `height - paddingY` 是很容易顺手写出的版本：填充底下会露出一条
+        底色缝，看着像渲染残影 —— 而曲线本身完全正常，很难归因到这里。
+        """
+        geo = _geo(probe, name)
+        line_pts = _points(geo["d"])
+        area_pts = _points(geo["areaD"])
+        height = probe["options"]["height"]
+
+        assert len(area_pts) == len(line_pts) + 2, f"{name}: 面积应比折线多出两个底角"
+        assert area_pts[-2][1] == pytest.approx(height, abs=0.01), f"{name}: 第一底角未落到下缘"
+        assert area_pts[-1][1] == pytest.approx(height, abs=0.01), f"{name}: 第二底角未落到下缘"
+        assert geo["areaD"].rstrip().endswith("Z"), f"{name}: 路径没有闭合"
+
+    @pytest.mark.parametrize("name", _AREA_CASES)
+    def test_area_corners_align_with_line_endpoints(self, probe: dict, name: str) -> None:
+        """两个底角的 x 必须与折线首尾点的 x 相同，否则填充会比曲线多出一截或短一截。"""
+        geo = _geo(probe, name)
+        line_pts = _points(geo["d"])
+        area_pts = _points(geo["areaD"])
+        # 闭合顺序：折线末点垂直落到下缘（第一个底角），再横跨到首点正下方（第二个底角）
+        assert area_pts[-2][0] == pytest.approx(line_pts[-1][0], abs=0.01), f"{name}: 第一底角 x 未接折线末点"
+        assert area_pts[-1][0] == pytest.approx(line_pts[0][0], abs=0.01), f"{name}: 第二底角 x 未接折线首点"
+
+    @pytest.mark.parametrize("name", _AREA_CASES)
+    def test_area_has_no_non_finite(self, probe: dict, name: str) -> None:
+        """与折线同一条底线：面积里也不许出现 NaN / Infinity。
+
+        恒定序列（手机静止平放）是这里最容易翻车的输入 —— 它同时是
+        `test_constant_series_has_no_nan_and_sits_on_midline` 守的那条路。
+        """
+        area_d = _geo(probe, name)["areaD"]
+        assert "NaN" not in area_d and "Infinity" not in area_d, f"{name}: {area_d}"
+
+    def test_single_point_has_no_area(self, probe: dict) -> None:
+        """单点围不出面积，必须明确返回 `null`。
+
+        返回**空字符串**比返回 null 更糟：调用方 `curve.areaD ? … : null` 会把空串
+        当成"有值"而去渲染一条零宽路径 —— 看不见，却让排查者以为填充已经生效。
+        """
+        assert probe["areaNullForSingle"] is True, "单点的 areaD 不是 null"
+        assert _geo(probe, "single")["areaD"] is None
+
+    def test_no_data_yields_no_geometry_at_all(self, probe: dict) -> None:
+        """整条曲线都没有时，连几何对象都不该有（与 `d` 同进同退）。"""
+        assert probe["nullCases"]["empty"] is True
+        assert probe["nullCases"]["allNonFinite"] is True
