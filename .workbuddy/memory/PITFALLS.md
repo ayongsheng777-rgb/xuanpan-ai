@@ -35,6 +35,12 @@
 **权威判据：`git ls-remote origin refs/heads/main` 与 `git rev-parse HEAD` 比 sha**（远端状态无法伪造），
 或看 `.git/FETCH_HEAD`。补本地追踪引用：`mkdir -p .git/refs/remotes/origin && echo <sha> > .git/refs/remotes/origin/main`
 （本轮 `git update-ref` 报了退出码 0 却没落盘，直接写文件才成）。
+🔴 **补 ref 时内容必须是合法 sha** —— 因为写进非法内容会造出 **broken ref**，它比"没有 ref"更糟：
+`git rev-parse` 报 `warning: ignoring broken ref ...` + `fatal: ambiguous argument`，**同时把 ref 名回显到 stdout**
+（这一行极易被误读成"解析成功"）；`git update-ref` 则直接 `cannot lock ref ... reference broken`（exit=128），
+**连正确值都写不进去**，必须先 `rm -f` 掉坏文件。
+🔴 **`fetch` 成功 ≠ 追踪引用存在**（已复现两次）—— `git fetch origin` 会打印 `* [new branch] main -> origin/main`，
+紧接着 `ls .git/refs/remotes/origin/` 却是空的。所以收尾核对一律回到 `git ls-remote origin refs/heads/main` 比 sha。
 
 🔴 **`.workbuddy/` 是项目数据，非缓存，不得删除。**
 
