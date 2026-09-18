@@ -31,7 +31,7 @@ import { Button, Card } from '@/components/Card';
 import { CompassDial, DIAL_DARK } from '@/components/CompassDial';
 import { HelpButton } from '@/components/HelpButton';
 import { Screen } from '@/components/Screen';
-import { normalizeSigned } from '@/lib/compassDial';
+import { azimuthAtTop } from '@/lib/compassDial';
 import { useAsync } from '@/lib/useAsync';
 import { useSensorSnapshot } from '@/services/useSensors';
 import { instrument, radius, space } from '@/theme/tokens';
@@ -54,8 +54,11 @@ export default function CompassHomeScreen(): React.JSX.Element {
   }, []);
   const { data, error, reload } = useAsync(load, []);
 
-  // 方位按 0..360 显示（负角如 -12.72° 显示为 347.28°，与实物罗盘读法一致）
-  const azimuth = ((normalizeSigned(rotation) % 360) + 360) % 360;
+  // 方位按 0..360 显示（负角如 -12.72° 显示为 347.28°，与实物罗盘读法一致）。
+  //
+  // 🔴 必须走 `azimuthAtTop`：顶部读数 = **−rotation**。原先写的是 `+rotation`，
+  //    于是把盘拖到东边读数显示西边 —— 界面一切正常，且在 0°/180° 上看起来还对。
+  const azimuth = azimuthAtTop(rotation);
 
   return (
     <Screen scroll style={styles.root} onRefresh={reload} refreshing={false}>

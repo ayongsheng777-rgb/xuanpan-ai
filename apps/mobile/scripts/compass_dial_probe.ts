@@ -23,6 +23,7 @@ import {
   FENJIN_SPAN_DEGREE,
   TRIGRAM_HOUTIAN,
   buildTicks,
+  azimuthAtTop,
   dialDegreeAt,
   dialLayout,
   displayedDegree,
@@ -37,6 +38,7 @@ import {
   MOUNTAIN_NAMES,
   degreeToIndex,
   indexToDegree,
+  normalizeDeg,
 } from '../src/lib/ring24.ts';
 
 // ==========================================================================
@@ -117,7 +119,35 @@ for (let d = 0; d < 360; d += 1) {
   if (Math.abs(normalizeSigned(back - d)) > 1e-6) pointer_errors.push(`d=${d} → ${back}`);
 }
 
-/** 6) 归一化到 (−180, 180] */
+/** 6) 顶部读数（方位）：屏幕正上方对应的盘面角 = −rotation，写成 +rotation 就是反的 */
+const azimuth_at_top_errors: string[] = [];
+for (let r = -720; r <= 720; r += 2.5) {
+  const got = azimuthAtTop(r);
+  const want = normalizeDeg(-r);
+  if (Math.abs(normalizeSigned(got - want)) > 1e-9) {
+    azimuth_at_top_errors.push(`rotation=${r} → ${got}，应为 ${want}`);
+  }
+}
+// 语义断言：把 θ 转到顶部后，顶部读数必须**就是** θ（这条才是页面真正依赖的性质）
+for (let d = 0; d < 360; d += 1) {
+  const atTop = azimuthAtTop(rotationToAlign(d));
+  if (Math.abs(normalizeSigned(atTop - d)) > 1e-9) {
+    azimuth_at_top_errors.push(`rotationToAlign(${d}) 后顶部读数为 ${atTop}`);
+  }
+}
+// 反面对照：确认「少一个负号」的写法真的会被上面两条抓到（否则自检是假的）
+{
+  const rot = rotationToAlign(90); // = -90
+  const rightTop = azimuthAtTop(rot); // 正确：90
+  const wrongTop = normalizeDeg(rot); // 错误：漏掉负号 → 270
+  if (Math.abs(normalizeSigned(wrongTop - rightTop)) < 1e-9) {
+    azimuth_at_top_errors.push(
+      '对照失败：漏负号的写法与正确写法在 90° 上竟然相等，本自检无法区分两者',
+    );
+  }
+}
+
+/** 7) 归一化到 (−180, 180] */
 const signed_errors: string[] = [];
 for (let d = -720; d <= 720; d += 5) {
   const v = normalizeSigned(d);
@@ -182,6 +212,7 @@ const report = {
     rotation_roundtrip_errors,
     align_errors,
     rotation_select_errors,
+    azimuth_at_top_errors,
     snap_errors,
     pointer_errors,
     signed_errors,

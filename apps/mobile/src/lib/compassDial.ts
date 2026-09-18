@@ -240,3 +240,25 @@ export function displayedDegree(mountainDegree: number, rotation: number): numbe
 export function dialDegreeAt(screenDegree: number, rotation: number): number {
   return normalizeDeg(screenDegree - rotation);
 }
+
+/**
+ * 「当前方位」= 屏幕正上方（12 点方向）那一格对应的盘面角。
+ *
+ * 🔴 凡是要把 `rotation` 显示成**方位读数**的地方，必须走这个函数。
+ *
+ * 为什么单独抽一个函数，而不是各处自己写一遍：
+ * 这个换算很容易写成 `normalizeDeg(rotation)`（**少一个负号**），
+ * 而错了以后界面完全正常 —— 只是拖盘到东边读数显示西边，
+ * 且在 0°/180° 两个点上"看起来是对的"，肉眼抽查极易放过。
+ * 本项目已实测发生过：`index.tsx` 用的是 `+rotation`（反的），
+ * 而 `adjust.tsx` / `CompassAdjuster` 用的是 `-rotation`（对的）。
+ *
+ * 几何依据：盘面角 θ 显示在屏幕角 `θ + rotation`（`displayedDegree`）。
+ * 令其等于 0 得 θ = −rotation。等价于 `dialDegreeAt(0, rotation)`。
+ *
+ * ⚠️ `CompassAdjuster` 里那个标着「盘面旋转」的读数**不该**用本函数 ——
+ * 它显示的就是旋转量本身，语义不同（那是"盘转了多少"，不是"朝哪边"）。
+ */
+export function azimuthAtTop(rotation: number): number {
+  return dialDegreeAt(0, rotation);
+}

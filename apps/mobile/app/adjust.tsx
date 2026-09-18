@@ -81,8 +81,15 @@ export default function AdjustCompassScreen(): React.JSX.Element {
   }, [params.degree, params.sitting]);
 
   const [mode, setMode] = useState<Mode>('simulation');
-  /** 仿真模式下的手动角度（盘面旋转量） */
-  const [manual, setManual] = useState(templateManual ?? 0);
+  /**
+   * 仿真模式的**方位角**（不是盘面旋转量）。
+   *
+   * 存方位角而非旋转量是刻意的：用户在这一页做的是"把读数调到我要的值"，
+   * 状态与目标同向，步进按钮也就直接 +delta。
+   * 盘面旋转量由 `rotation = −方位角` 推出（顶部读数 = −rotation，
+   * 见 `lib/compassDial.ts` 的 `azimuthAtTop`）。
+   */
+  const [manualAzimuth, setManualAzimuth] = useState(templateManual ?? 0);
   const [lockPool, setLockPool] = useState(false);
   const [lockNorth, setLockNorth] = useState(false);
 
@@ -93,12 +100,12 @@ export default function AdjustCompassScreen(): React.JSX.Element {
   const sensor = useSensorSnapshot(mode === 'sensor');
   const sensorDriven = mode === 'sensor' && sensor.azimuth !== null;
 
-  // 显示方位：锁北 → 0；真实磁针 → 传感器方位；否则手动角度
+  // 显示方位：锁北 → 0；真实磁针 → 传感器方位；否则手工方位角
   const azimuth = lockNorth
     ? 0
     : sensorDriven
       ? sensor.azimuth!
-      : ((normalizeSigned(manual) % 360) + 360) % 360;
+      : ((normalizeSigned(manualAzimuth) % 360) + 360) % 360;
   // 盘面旋转量：让盘面角 = azimuth 的刻度转到屏幕上方 → rotation = -azimuth
   const rotation = -azimuth;
 
@@ -107,7 +114,7 @@ export default function AdjustCompassScreen(): React.JSX.Element {
   const nudge = useCallback(
     (delta: number) => {
       if (locked) return;
-      setManual((m) => m + delta);
+      setManualAzimuth((m) => m + delta);
     },
     [locked],
   );
@@ -147,7 +154,7 @@ export default function AdjustCompassScreen(): React.JSX.Element {
             style={dialStyle}
             rotation={rotation}
             interactive={!locked}
-            onRotate={(r) => setManual(-r)}
+            onRotate={(r) => setManualAzimuth(-r)}
           />
         </View>
 
@@ -240,7 +247,7 @@ export default function AdjustCompassScreen(): React.JSX.Element {
             value={lockNorth}
             onChange={(v) => {
               setLockNorth(v);
-              if (v) setManual(0);
+              if (v) setManualAzimuth(0);
             }}
           />
         </View>

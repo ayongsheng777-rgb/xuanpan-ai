@@ -86,11 +86,11 @@ def probe() -> dict:
 
 
 def test_probe_self_checks_all_pass(probe: dict) -> None:
-    """探针自带的 8 项几何自检必须全空。
+    """探针自带的几何自检必须全空。
 
     这些与后端无关，是"盘面几何自己就该成立"的性质：旋转往返、
-    一键对齐、旋转不改变选山、吸附落在格点、指针角、归一化范围、
-    层级计数、环半径不重叠。它们失败说明公式本身写错了。
+    一键对齐、旋转不改变选山、吸附落在格点、指针角、顶部读数、
+    归一化范围、层级计数、环半径不重叠。它们失败说明公式本身写错了。
     """
     c = probe["checks"]
     assert c["rotation_roundtrip_errors"] == [], f"旋转往返失败：{c['rotation_roundtrip_errors']}"
@@ -98,10 +98,68 @@ def test_probe_self_checks_all_pass(probe: dict) -> None:
     assert c["rotation_select_errors"] == [], (
         f"旋转后选山漂移（视角改变不应改事实）：{c['rotation_select_errors']}"
     )
+    assert c["azimuth_at_top_errors"] == [], f"顶部读数错误：{c['azimuth_at_top_errors'][:10]}"
     assert c["snap_errors"] == [], f"吸附失败：{c['snap_errors'][:10]}"
     assert c["pointer_errors"] == [], f"指针角失败：{c['pointer_errors'][:10]}"
     assert c["signed_errors"] == [], f"归一化越界：{c['signed_errors'][:10]}"
     assert c["radius_order_errors"] == [], f"环半径排布错误：{c['radius_order_errors']}"
+
+
+def test_azimuth_at_top_is_minus_rotation_by_geometry() -> None:
+    """「顶部读数 = −rotation」这条结论，用**第一性几何**在 Python 侧独立复算一遍。
+
+    为什么不直接信探针：探针里的自检和它自己的实现出自同一双手，
+    写错符号时两边会一起错。这里不复用任何 JS 结果 —— 从
+    「屏幕 0° 在正上方、顺时针为正」这条定义出发，用旋转矩阵算
+    「盘面角 θ 转 rotation 后落在屏幕哪里」，再解出屏幕 0° 处对应哪个 θ。
+
+    这条被上游页面直接依赖：写反了（用 +rotation）界面完全正常，
+    只是把盘拖到东边读数显示西边，且在 0°/180° 上"看起来是对的"。
+    """
+    import math
+
+    def normalize_deg(d: float) -> float:
+        r = d % 360.0
+        return r + 360.0 if r < 0 else r
+
+    def screen_angle_of_marking(deg: float, rotation: float) -> float:
+        """盘面角 deg 处的刻度，盘体顺时针转 rotation 后落在屏幕的哪个角。"""
+        # 盘面角 → 屏幕单位向量（x 向右、y 向下；0° 朝上）
+        x, y = math.sin(math.radians(deg)), -math.cos(math.radians(deg))
+        c, s = math.cos(math.radians(rotation)), math.sin(math.radians(rotation))
+        # y 轴向下时，该矩阵在视觉上表现为顺时针旋转
+        rx, ry = x * c - y * s, x * s + y * c
+        return normalize_deg(math.degrees(math.atan2(rx, -ry)))
+
+    for deg in range(0, 360, 15):
+        for rotation in (-180.0, -37.5, 0.0, 12.5, 90.0, 181.5, 359.0):
+            got = screen_angle_of_marking(deg, rotation)
+            want = normalize_deg(deg + rotation)
+            delta = abs(((got - want) + 180.0) % 360.0 - 180.0)
+            assert delta < 1e-6, f"θ={deg} rotation={rotation} → 屏幕角 {got}，应为 {want}"
+
+    # 正面反解：满足 −rotation 的那个盘面角，必须正好落在屏幕正上方（0°）
+    for rotation in (-180.0, -37.5, 0.0, 12.5, 90.0, 181.5, 359.0):
+        top_marking = normalize_deg(-rotation)
+        on_screen = screen_angle_of_marking(top_marking, rotation)
+        assert abs(((on_screen - 0.0) + 180.0) % 360.0 - 180.0) < 1e-6, (
+            f"rotation={rotation} 时，盘面角 {top_marking} 并未落在屏幕正上方（落在 {on_screen}）"
+        )
+
+    # 语义断言（页面真正依赖的那条）：把 θ 转到顶部后，顶部读数必须就是 θ
+    for deg in range(0, 360, 15):
+        rotation = normalize_deg(-deg)  # rotationToAlign
+        back = normalize_deg(-rotation)
+        assert abs(((back - deg) + 180.0) % 360.0 - 180.0) < 1e-9, (
+            f"rotationToAlign({deg}) 后顶部读数变成 {back}"
+        )
+    # 反面对照：证明"+rotation"这个错误写法会被上面抓到，本条测试不是假绿
+    rotation = normalize_deg(-90.0)
+    wrong = normalize_deg(rotation)
+    right = normalize_deg(-rotation)
+    assert abs(((wrong - right) + 180.0) % 360.0 - 180.0) > 90.0, (
+        "对照失败：+rotation 与 −rotation 在 90° 上竟然接近，本测试无法区分两者"
+    )
 
 
 # ==========================================================================
