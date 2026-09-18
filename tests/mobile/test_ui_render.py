@@ -284,3 +284,55 @@ def test_page_has_no_horizontal_overflow(rendered: dict[str, dict], name: str) -
         f"文档高 {row['contentH']}px）：右侧内容会被推出屏幕外。\n"
         f"渲染文本：{(row.get('text') or '')[:200]}"
     )
+
+
+# ==========================================================================
+# 懒渲染视图：管理台配置面板（需本机后端 + 令牌，缺则跳过）
+# ==========================================================================
+
+_API_HEALTHZ = "http://127.0.0.1:8360/healthz"
+
+
+def _api_is_up() -> bool:
+    try:
+        with urllib.request.urlopen(_API_HEALTHZ, timeout=1) as resp:
+            return resp.status == 200
+    except (urllib.error.URLError, OSError):
+        return False
+
+
+def test_admin_config_view_renders_after_click(
+    preview_base: str, tmp_path_factory: pytest.TempPathFactory
+) -> None:
+    """管理台配置面板是**懒渲染**的，必须点一下导航才建 DOM —— 守住这条通路。
+
+    只截初始视图只拿得到「概览」，会误判成「配置面板没做」。两个前提缺一不可，
+    缺了**跳过而非失败**：
+      1. 本机 8360 有后端在跑（管理台由后端直接提供，不在 expo web 产物里）
+      2. 设了 `XP_ADMIN_TOKEN`（没有令牌只能拍到令牌门那一屏）
+
+    `clicked == "clicked"` 是本测试的关键断言：渲染器对「找不到 / 不可见」的元素
+    直接抛错，所以只要这个值回来了，就说明那次点击**真的发生了** ——
+    否则拍到的可能只是「没点成功的初始页」，而初始页同样"有内容"，
+    仅断言 textLen > 0 是拦不住的。
+    """
+    if not _api_is_up():
+        pytest.skip(f"{_API_HEALTHZ} 不可达，跳过管理台渲染（需先起后端）")
+    if not os.environ.get("XP_ADMIN_TOKEN"):
+        pytest.skip("未设 XP_ADMIN_TOKEN，只能拍到令牌门，跳过")
+
+    outdir = tmp_path_factory.mktemp("ui-render-admin")
+    rows = _render("16-admin-config", preview_base, outdir)
+    assert rows, "渲染器未返回任何结果"
+    row = rows[0]
+    assert row.get("ok"), f"渲染失败：{row.get('detail')}"
+    assert row.get("clicked") == "clicked", (
+        f"点击没真正生效（clicked={row.get('clicked')}）—— 拍到的是初始页而不是配置面板：\n"
+        f"{(row.get('text') or '')[:300]}"
+    )
+    text = row.get("text") or ""
+    assert "改完即时生效" in text, (
+        "点击后仍看不到配置面板的说明文案 —— 面板没有渲染出来：\n" f"{text[:300]}"
+    )
+    assert row["errors"] == [], f"配置面板存在未捕获异常：{row['errors']}"
+    assert row["overflowX"] <= 0, f"配置面板横向溢出 {row['overflowX']}px"
