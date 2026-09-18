@@ -87,8 +87,10 @@ _PREVIEW = _REPO_ROOT / "scripts/ui_render/preview_server.py"
 #: 已导出的 expo web 产物目录（含 index.html）。未设置则默认找 dist-web。
 _WEB_DIST = Path(os.environ.get("XP_WEB_DIST") or (_REPO_ROOT / "dist-web"))
 
-#: 哨兵页面：这两页正是 2026-09-18 白屏故障的现场。
-_SENTINELS = ("01-home", "03-sensors")
+#: 哨兵页面。前两页是 2026-09-18 白屏故障的现场；
+#: 后三页是底栏改版新增的页面 —— 新页面是白屏风险最高的地方
+#: （没有历史截图可对照，坏了也没人看得出来）。
+_SENTINELS = ("01-home", "03-sensors", "12-test", "13-analysis", "14-templates")
 
 #: 渲染单页的上限。CDP 命令自身另有超时，这里是兜底。
 _RENDER_TIMEOUT_S = 240

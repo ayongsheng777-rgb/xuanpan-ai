@@ -52,6 +52,10 @@ const PAGES = [
   ['08-divine', '/divine', 390, 844, 'viewport'],
   ['09-history', '/history', 390, 844, 'viewport'],
   ['10-mine', '/mine', 390, 844, 'viewport'],
+  // 底栏改版后的新增页（罗盘 / 测盘 / 分析 / 历史 / 我的）
+  ['12-test', '/test', 390, 844, 'viewport'],
+  ['13-analysis', '/analysis', 390, 844, 'viewport'],
+  ['14-templates', '/templates', 390, 844, 'viewport'],
   // 后台管理台：不在 expo web 产物里，由后端服务提供，故用绝对 URL、桌面视口。
   // 带令牌直入，否则只能截到令牌门那一屏（看不到真实面板）。
   [
