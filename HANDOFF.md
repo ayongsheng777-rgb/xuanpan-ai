@@ -145,13 +145,23 @@ HTTP 层无路由、App 里 0 处引用。本轮把三条链路打通：
 - `fenjin120` 规则表缺失（管理台 `available=False`）—— 已知数据缺口，
   当前退化为「只输出几何格位 + 警告」。**根因已查明（2026-09-18 夜）**：
   `packages/fortune-core/data/fenjin120.json` **从未被创建**（全仓无此文件）。
-  🔴 **补表不是"扔个 json 进去"就完事** —— 有 **4 处测试断言 `fenjin_table_available is False`**，
-  补完立刻全红。其中 2 处**根本不是测这件事**（`test_compass.py::test_facts_layer_shape`、
-  `test_context.py::test_school_metadata`），是在锁现状 → 应直接删掉那行；
+  🔴 **补表不是"扔个 json 进去"就完事 —— 以下两条已实测（2026-09-19 凌晨），非推测**：
+  **① 恰 4 个测试会红**（临时放入格式合法的表 → 精确报 4 个 FAILED，不多不少）。
+  其中 2 处**根本不是测这件事**（`test_compass.py::test_facts_layer_shape`、
+  `test_context.py::test_school_metadata`；主题分别是 facts 层结构 / school 元数据）→ 锁现状，删断言即可；
   另 2 处（`test_compass.py::test_ganzhi_absent_without_rule_table`、
   `test_ai_report.py::test_unknown_domain_values_never_fabricated`）主题正确但**构造方式脆**
-  —— 靠"仓库里恰好没这文件"来制造缺表场景，应改为**显式传不存在的 path**
-  （`fenjin_at(..., table_path=...)` / `build_context(..., fenjin_table=...)` 都有现成注入点）。
+  —— 靠"仓库里恰好没这文件"制造缺表场景。
+  ⚠️ **修正上轮的一处错误结论**：上轮写"可改为显式传不存在的 path"，**这是错的** ——
+  `build_context` 只接受**流派名**（内部 `table_available(profile.fenjin_table)`），
+  **没有路径注入点** → 这两处只能用 `monkeypatch`。仅 `fenjin120.fenjin_at(..., table_path=)` 支持路径。
+  **② 表写错 → 罗盘主链路 500**（不是降级）：`load_fenjin_table()` 的启动期校验抛
+  `KeyError`（山名错）/`ValueError`（格数≠5、干支非法、顶层非 dict），而
+  `compass.py:122`、`context.py:238`、`meta.py:115` 全是**裸调用** → 异常直接冒到接口；
+  实测某山写成 4 格 → `calculate_orientation()` 抛 `ValueError: [default] 子山 应有 5 格，实为 4`。
+  只有 `admin.py:87` 包了 try/except。→ **补表前先加校验脚本**（参照 `scripts/verify_zeri_table.py`）。
+  🔴 **表内容无法从项目内推导**：6 张 `samples/compass/*.jpg` 是**灰度合成几何图、无任何文字**
+  （已读图确认），读不出排法 → 须阿勇给依据（罗盘书 / 实物照片 / 直接给数据）。
   🔴 补表后必须 `docker compose up -d --build` —— 表在 `packages/fortune-core/data/`，
   由 Dockerfile `COPY packages/` 进镜像（领域数据，不是运行时产物）。
   表格式见 `fenjin120.py` 模块 docstring：`{"default": {"子": ["甲子","丙子",null,"庚子",null], ...}}`，

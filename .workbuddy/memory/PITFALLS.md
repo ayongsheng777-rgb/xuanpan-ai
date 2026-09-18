@@ -244,3 +244,37 @@
 🔴 **改事件词必须跑 `scripts/verify_zeri_table.py --check-veto`** —— 词目写错**不报错、只静默失效**，筛选看似正常却少一道否决。
 🔴 **别把「忌行丧 / 忌分居」加进嫁娶否决** —— 实测误杀 **14%** 婚嫁吉日。**教训：设计 veto 前先量化它影响多少天，别凭语义直觉**。
 **加事件后必须同步 MCP 工具 docstring**（`tests/test_mcp_server.py` 有防漂移守卫）。
+
+### 一百二十分金（fenjin120）专项
+
+🔴 **`fenjin120.json` 缺失是「已声明的未完成」，不是故障** —— 见到管理台 `fenjin120 available=False` 时。
+根因：`packages/fortune-core/data/fenjin120.json` **从未被创建**（全仓无此文件）；`schools.py` 的
+`default` profile 已在 `unverified` 里写明「一百二十分金的干支与旺相孤虚标注需规则表，当前未提供」，
+生产路线报告 L191 亦记「接口（V1 仅接口，V2 补规则表）」。
+**几何层是完好的**：格位/所属山/角度由代码算，实测 `fenjin_at(0°)` → 格位 2、`子山 3/5 格` 正确；
+只有 `ganzhi`/`usable` 为 `None`（RULE-001/008 要求**缺表不猜**）。**别把它当 bug 去"修"。**
+
+🔴 **补这张表不是「扔个 json 进 data/」** —— 两条后果都已实测：
+**① 恰好 4 个测试会红**（不多不少，精确命中）：
+`test_compass.py::test_ganzhi_absent_without_rule_table`｜`test_compass.py::test_facts_layer_shape`｜
+`test_context.py::test_school_metadata`｜`test_ai_report.py::test_unknown_domain_values_never_fabricated`。
+前两个**压根不测这件事**（主题分别是 facts 层结构 / school 元数据）→ 属"锁现状"，删掉那行断言即可；
+后两个主题正确但**构造方式脆**（靠"仓库里恰好没这文件"制造缺表场景），且 `build_context` 只接受
+**流派名**不接受路径（`table_available(profile.fenjin_table)`）→ 得用 `monkeypatch` 注入。
+
+**② 表写错 → 罗盘主链路 500**（不是降级）：`table_available()` 里 `load_fenjin_table()` 的启动期校验
+会抛 `KeyError`（山名错）/`ValueError`（格数≠5、干支非法、顶层非 dict），而
+`compass.py:122`、`context.py:238`、`meta.py:115` 全是**裸调用** → 异常直接冒到接口。
+实测：某山写成 4 格 → `calculate_orientation()` 抛 `ValueError: [default] 子山 应有 5 格，实为 4`。
+**只有 `admin.py:87` 包了 try/except**（作者显然知道会抛）。**补表前应先加校验脚本**（参照 `verify_zeri_table.py`）。
+
+🔴 **表内容无法从项目内推导** —— 6 张 `samples/compass/*.jpg` 是**灰度合成几何图（无任何文字）**，
+读不出分金刻度；docs 里只有格式示例不是真实数据。它属**流派规则（RULE-006）**，
+必须由阿勇提供依据（罗盘书 / 实物罗盘照片 / 直接给数据），**不得凭理论推算**。
+表结构：`{"<流派>": {"<山名>": [5 个干支或 null]}}`，每山**恰好 5 格**，`null` = 该流派下空亡/不用；
+`schools.py` 有 default / sanhe / sanyuan 三个 key。
+
+🔵 **这一节的元教训**：断言写成 `x is False` 而非「**在某条件下**为 False」时，守卫就从"测行为"
+退化成"锁现状"——**它会把任何修复都判成回归**。对照 `tests/api/test_api.py:103`
+的 `isinstance(..., bool)`（只锁类型不锁值）才是对写法。**看到 `is False` 就该问一句：这是在测行为，还是在描述今天的巧合？**
+
