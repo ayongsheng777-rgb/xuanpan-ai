@@ -24,7 +24,7 @@ import copy
 import hashlib
 import json
 from dataclasses import dataclass
-from typing import Any, Iterable, Literal, Sequence
+from typing import Any, Iterable, Literal, Mapping, Sequence
 
 from .errors import AllProvidersFailedError, ProviderCallError, ProviderUnavailableError
 from .models import Attempt, LLMRequest, LLMResponse, Turn
@@ -77,10 +77,14 @@ class AIRouter:
         self,
         providers: Sequence[Any] | None = None,
         config: RouterConfig | None = None,
+        llm: Mapping[str, str] | None = None,
     ) -> None:
         self.config = config or RouterConfig()
-        # 未显式传入时：本地模板兜底 + 从环境变量构造的云端 provider（若已配置）
-        self._providers: list[Any] = list(providers) if providers is not None else _default_chain()
+        # 未显式传入时：本地模板兜底 + 从配置构造的云端 provider（若已配置）。
+        # `llm` 是**已解析**的云端配置；不传则回落到读环境变量（见 _default_chain）。
+        self._providers: list[Any] = (
+            list(providers) if providers is not None else _default_chain(llm)
+        )
 
     # ------------------------------------------------------------------
 
@@ -209,20 +213,36 @@ def _safe_available(provider: Any) -> bool:
         return False
 
 
-def _default_chain() -> list[Any]:
-    """默认候选链：环境变量里配了云端就用云端，模板永远兜底。
+def _default_chain(llm: Mapping[str, str] | None = None) -> list[Any]:
+    """默认候选链：配置了云端就用云端，模板永远兜底。
 
     环境变量（与设计规范 §十 的配置项对应）：
         XUANPAN_LLM_BASE_URL / XUANPAN_LLM_API_KEY / XUANPAN_LLM_MODEL
+        XUANPAN_LLM_CAPABILITY（reasoning / fast / local）
+
+    Args:
+        llm: **已解析**的云端配置，键名与环境变量同名。为 None 时读 `os.environ`
+            —— 保留原行为，让不需要配置层的调用方（内核测试）不必先造一份配置。
+
+    为什么 `llm` 非 None 时**不再回落** `os.environ`：解析层已经把「环境变量 +
+    管理台覆盖」合并好了。这里再回落一次等于引入第二个真源，会出现最难查的
+    一类问题 —— 界面上显示用的是 A 模型、实际调的是 B，而且两边各自看都对。
     """
     import os
 
+    if llm is None:
+        def read(name: str) -> str:
+            return os.environ.get(name, "").strip()
+    else:
+        def read(name: str) -> str:
+            return str(llm.get(name) or "").strip()
+
     chain: list[Any] = []
-    base_url = os.environ.get("XUANPAN_LLM_BASE_URL", "").strip()
-    api_key = os.environ.get("XUANPAN_LLM_API_KEY", "").strip()
-    model = os.environ.get("XUANPAN_LLM_MODEL", "").strip()
+    base_url = read("XUANPAN_LLM_BASE_URL")
+    api_key = read("XUANPAN_LLM_API_KEY")
+    model = read("XUANPAN_LLM_MODEL")
     if base_url and api_key and model:
-        capability = os.environ.get("XUANPAN_LLM_CAPABILITY", "reasoning").strip() or "reasoning"
+        capability = read("XUANPAN_LLM_CAPABILITY") or "reasoning"
         chain.append(
             get_provider(
                 "openai_compat", api_key=api_key, base_url=base_url,
