@@ -43,7 +43,12 @@ _NON_ROUTE_STEMS = {"_layout"}
 
 #: `router.push('/x')` / `router.replace('/x')` / `<Link href="/x">` 里的字面量
 _PUSH_RE = re.compile(r"""\b(?:push|replace|navigate)\s*\(\s*(['"`])(/[^'"`]*)\1""")
+#: JSX 属性写法 `<Link href="/x">`
 _HREF_RE = re.compile(r"""\bhref\s*=\s*(['"`])(/[^'"`]*)\1""")
+#: 对象属性写法 `{ href: '/x' }` —— 用的是冒号而不是等号。
+#: 漏掉这一种会让"数据表里声明的跳转"整批逃过校验（本文件就是这么漏掉了
+#: 测盘页五张来源卡的 href）。
+_HREF_PROP_RE = re.compile(r"""\bhref\s*:\s*(['"`])(/[^'"`]*)\1""")
 
 #: `topic="x"` 与 `helpHeaderRight('x')`
 _TOPIC_PROP_RE = re.compile(r"""\btopic\s*=\s*(['"`])([A-Za-z0-9_-]+)\1""")
@@ -98,7 +103,7 @@ def _string_literal_targets() -> list[tuple[Path, int, str]]:
     for f in sorted([*_APP.rglob("*.tsx"), *_SRC.rglob("*.tsx"), *_SRC.rglob("*.ts")]):
         text = f.read_text(encoding="utf-8")
         for lineno, line in enumerate(text.splitlines(), start=1):
-            for rx in (_PUSH_RE, _HREF_RE):
+            for rx in (_PUSH_RE, _HREF_RE, _HREF_PROP_RE):
                 for m in rx.finditer(line):
                     raw = m.group(2)
                     # 模板串（含 ${}）无法静态校验，跳过 —— 它们的取值由运行期决定
@@ -303,6 +308,15 @@ def test_pushed_query_params_are_read_by_target_page() -> None:
     """
     pushed = _pushed_params()
     assert pushed, "没有扫到任何带参数的跳转（扫描正则可能失效了）"
+
+    # 已知的关键参数必须在扫描结果里 —— 否则某天正则失效，本测试就变成空跑。
+    # 这三条都是真实存在的接线，是"扫描器还活着"的锚点。
+    keys = {(path, key) for _, _, path, key in pushed}
+    for expect in (("/adjust", "template"), ("/calibrate", "photo"), ("/scan", "entry")):
+        assert expect in keys, (
+            f"扫描结果缺少 {expect} —— 参数扫描器可能已失效，本测试会沦为假绿。"
+            f"当前扫到：{sorted(keys)}"
+        )
 
     bad: list[str] = []
     for f, lineno, path, key in pushed:

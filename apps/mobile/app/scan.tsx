@@ -43,6 +43,13 @@ export default function ScanScreen(): React.JSX.Element {
 
   const [steps, setSteps] = useState<Step[] | null>(null);
   const [result, setResult] = useState<ScanResult | null>(null);
+  /**
+   * 本次识别用的**本地**照片 URI。
+   *
+   * 只有本地 URI 能用来打底渲染 —— 服务端不提供原图回传接口（上传件按
+   * `keep_photos` 策略处理，默认不保留），而照片本来就在这台设备上。
+   */
+  const [localPhoto, setLocalPhoto] = useState<string | null>(null);
   // ApiClient 的公开方法是箭头函数属性，天生绑定 this，可直接传引用
   const scan = useSubmit(getApiClient().scan);
 
@@ -50,6 +57,7 @@ export default function ScanScreen(): React.JSX.Element {
   const runScan = useCallback(
     async (uri: string, filename: string) => {
       setResult(null);
+      setLocalPhoto(uri);
       // 进行中：全部标为 pending，第一格 active —— 不假装已经完成了哪一步
       setSteps(stepsUpTo(0));
 
@@ -137,7 +145,25 @@ export default function ScanScreen(): React.JSX.Element {
 
       {result ? (
         result.compass_detected ? (
-          <DetectedCard result={result} onConfirm={() => router.push(`/confirm/${result.session_id}`)} />
+          <DetectedCard
+            result={result}
+            onConfirm={() => router.push(`/confirm/${result.session_id}`)}
+            onCalibrate={
+              localPhoto
+                ? () =>
+                    router.push({
+                      pathname: '/calibrate',
+                      params: {
+                        session: result.session_id,
+                        photo: localPhoto,
+                        degree: String(
+                          result.direction_candidates[0]?.angle ?? result.mountain_candidates[0]?.angle ?? '',
+                        ),
+                      },
+                    })
+                : undefined
+            }
+          />
         ) : (
           <NotDetectedCard
             result={result}
@@ -301,9 +327,12 @@ function LibraryEntry({ onPick, picking }: { onPick: () => void; picking: boolea
 function DetectedCard({
   result,
   onConfirm,
+  onCalibrate,
 }: {
   result: ScanResult;
   onConfirm: () => void;
+  /** 没有本地照片时不显示该入口（不做"点了没反应"的按钮） */
+  onCalibrate?: () => void;
 }): React.JSX.Element {
   const names = result.mountain_candidates.map((c) => c.name);
   return (
@@ -321,6 +350,20 @@ function DetectedCard({
         onPress={onConfirm}
         style={styles.confirmBtn}
       />
+      {onCalibrate ? (
+        <>
+          <Button
+            label="先校准与还原（对着照片对位）"
+            variant="secondary"
+            style={styles.calibrateBtn}
+            onPress={onCalibrate}
+          />
+          <AppText size="xs" color="muted" style={styles.calibrateHint}>
+            斜拍会让测出的角度整体偏掉几度。这一步让你把照片里的实物罗盘
+            在界面上摆正，再取读数 —— 照片只作参照，不参与计算。
+          </AppText>
+        </>
+      ) : null}
     </Card>
   );
 }
@@ -445,6 +488,8 @@ const styles = StyleSheet.create({
   permBtn: { marginTop: space[3] },
   detectedNote: { marginTop: space[2], lineHeight: 18 },
   confirmBtn: { marginTop: space[3] },
+  calibrateBtn: { marginTop: space[2] },
+  calibrateHint: { marginTop: space[2], lineHeight: 17 },
   reason: { marginBottom: space[1] },
   warnBlock: { marginTop: space[2], gap: 2 },
   warn: { lineHeight: 18 },

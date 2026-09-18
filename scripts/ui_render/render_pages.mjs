@@ -56,6 +56,8 @@ const PAGES = [
   ['12-test', '/test', 390, 844, 'viewport'],
   ['13-analysis', '/analysis', 390, 844, 'viewport'],
   ['14-templates', '/templates', 390, 844, 'viewport'],
+  // 校准页：不带参数也能渲染（走"没有照片 / 无法进入确认"两条如实分支）
+  ['15-calibrate', '/calibrate', 390, 844, 'viewport'],
   // 后台管理台：不在 expo web 产物里，由后端服务提供，故用绝对 URL、桌面视口。
   // 带令牌直入，否则只能截到令牌门那一屏（看不到真实面板）。
   [

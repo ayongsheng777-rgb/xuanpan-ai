@@ -33,13 +33,17 @@ import { Button, Card, EmptyState } from '@/components/Card';
 import { CompassAdjuster } from '@/components/CompassAdjuster';
 import { FactList } from '@/components/FactList';
 import { Screen } from '@/components/Screen';
-import { indexOfName, nameOfIndex, oppositeIndex } from '@/lib/ring24';
+import { degreeToIndex, indexOfName, nameOfIndex, oppositeIndex } from '@/lib/ring24';
 import { useAsync, useSubmit } from '@/lib/useAsync';
 import { colors, font, radius, space } from '@/theme/tokens';
 
 export default function ConfirmOrientationScreen(): React.JSX.Element {
   const router = useRouter();
-  const { sessionId } = useLocalSearchParams<{ sessionId?: string }>();
+  const { sessionId, degree: degreeParam } = useLocalSearchParams<{
+    sessionId?: string;
+    /** 由「罗盘校准与还原」页带过来的读数 */
+    degree?: string;
+  }>();
   const id = sessionId ?? '';
 
   const api = useMemo(() => getApiClient(), []);
@@ -104,12 +108,54 @@ export default function ConfirmOrientationScreen(): React.JSX.Element {
   /** 最终采用的实测角：用户手工校准优先于识别值 */
   const measuredDegree = degreeOverride ?? selectedCandidate?.angle ?? null;
 
+  /**
+   * 从「校准与还原」页带来的读数 —— 只作为**初始值**灌进 degreeOverride。
+   *
+   * 为什么是灌进 override 而不是另立一个状态：override 的语义就是
+   * "用户对实测角的手工修正"，而对齐照片后得到的读数正是这样一个修正值。
+   * 另立状态会让"改选坐山要不要作废"这条规则出现两个版本。
+   *
+   * 只灌一次（`degreeSeeded`）：灌完就归 override 管，避免重新渲染把用户
+   * 在本页的手工微调覆盖掉。
+   */
+  const degreeSeeded = React.useRef(false);
+  /** 当前这个人工校准值是"从校准页带过来的"还是"在本页调出来的" —— 影响文案归属 */
+  const [degreeFromCalibrate, setDegreeFromCalibrate] = useState(false);
+  React.useEffect(() => {
+    if (degreeSeeded.current) return;
+    if (degreeParam === undefined || degreeParam === '') return;
+    const d = Number(degreeParam);
+    if (!Number.isFinite(d)) return;
+    degreeSeeded.current = true;
+    setDegreeOverride(d);
+    setDegreeFromCalibrate(true);
+  }, [degreeParam]);
+
+  /** 本页手工调过之后，这个值就不再"来自校准页"了 */
+  const onManualDegree = useCallback((d: number | null) => {
+    setDegreeOverride(d);
+    setDegreeFromCalibrate(false);
+  }, []);
+
   const facing = sitting === null ? null : oppositeIndex(sitting);
 
-  /** 换坐山 = 换了一条鱼丝线，原有的实测角与新坐山不再同源，必须作废 */
+  /**
+   * 换坐山时，只有**换了一条鱼丝线**才作废实测角。
+   *
+   * 规则原文是"换坐山 = 换了一条鱼丝线 → 实测角作废"，但坐与向是**同一条线
+   * 的两端**：把"坐午"改成"向午"仍然指着同一条线，实测方向同源，不该丢掉。
+   *
+   * 🔴 原实现对此不作区分，一律清空 —— 于是从「校准与还原」页带过来的读数
+   *    会在用户点对宫那一格时被静默丢掉（那恰恰是 RULE-004 要求他做的那一步）。
+   */
   const handleSelectSitting = useCallback((next: number | null) => {
     setSitting(next);
-    setDegreeOverride(null);
+    setDegreeOverride((prev) => {
+      if (prev === null) return null; // 本来就没有人工校准值
+      if (next === null) return prev; // 取消选择：实测角还在，只是暂无坐山
+      const measured = degreeToIndex(prev);
+      return next === measured || next === oppositeIndex(measured) ? prev : null;
+    });
   }, []);
 
   const submit = useSubmit(
@@ -205,7 +251,7 @@ export default function ConfirmOrientationScreen(): React.JSX.Element {
           measuredDegree={measuredDegree}
           onChangeSitting={handleSelectSitting}
           onChangeRotation={setRotation}
-          onChangeMeasuredDegree={setDegreeOverride}
+          onChangeMeasuredDegree={onManualDegree}
           size={300}
         />
 
@@ -214,7 +260,9 @@ export default function ConfirmOrientationScreen(): React.JSX.Element {
             该山由照片实测支持，置信度 {(selectedCandidate.confidence * 100).toFixed(0)}%；
             {degreeOverride === null
               ? `实测角 ${selectedCandidate.angle.toFixed(2)}° 将用于分金精算`
-              : `已手工校准为 ${degreeOverride.toFixed(2)}°（识别原值 ${selectedCandidate.angle.toFixed(2)}° 仍留存）`}
+              : `${
+                  degreeFromCalibrate ? '由「校准与还原」对齐照片后带入' : '已手工校准为'
+                } ${degreeOverride.toFixed(2)}°（识别原值 ${selectedCandidate.angle.toFixed(2)}° 仍留存）`}
           </AppText>
         ) : sitting !== null ? (
           <AppText size="xs" color="muted" center style={styles.candMeta}>
