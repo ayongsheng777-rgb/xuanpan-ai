@@ -15,7 +15,7 @@
 | 技术栈 | React Native 0.76 + Expo SDK 52（expo-router，文件即路由）+ react-native-svg |
 | 规模 | 17 个内容页 / 12 个组件 / 1 个 token 真源，UI 相关约 15,000 行 |
 | 设计系统 | 五色品牌板（**由演示图逐像素实测得出**）+ 派生暖色中性阶 + **深色仪器域（6 个测量相关页）** 双轨 |
-| 本包内容 | 9 卷源码 Markdown + 19 张渲染快照 + 完整源码副本 + 3 份上游规范 |
+| 本包内容 | 9 卷源码 Markdown + 21 张渲染快照 + 完整源码副本 + 3 份上游规范 |
 | 快照怎么来的 | expo web 产物用 CDP 按手机视口渲染 —— **是 React Native Web，不是真机截图**（见 §6） |
 
 **一句话概括这套 UI 的设计语言**：
@@ -291,11 +291,18 @@ RULE-008 原本针对数据，但它在**视觉层**同样成立，而且有一�
 | 15 | 占测 | `app/divine.tsx` | `08-divine.png` | `divine` |
 | 16 | 黄历择日 | `app/almanac.tsx` | `05-almanac.png` | `almanac` |
 | 17 | 三式排盘 | `app/sanshi.tsx` | `06-sanshi.png` | `sanshi` |
-| — | 管理台总览 | `services/api/xuanpan_api/static/admin.html` | `11-admin.png` | — |
-| — | 管理台配置面板 | 同上（点击导航后） | `16-admin-config.png` | — |
+| — | 管理台 · 总览 | `services/api/xuanpan_api/static/admin.html` | `11-admin.png` | — |
+| — | 管理台 · 会话记录 | 同上（点击导航后） | `16-admin-sessions.png` | — |
+| — | 管理台 · 配置面板 | 同上（点击导航后） | `16-admin-config.png` | — |
+| — | 管理台 · 能力调试台 | 同上（点击导航后） | `16-admin-lab.png` | — |
 
 > 管理台是后端单文件页面（零依赖零构建原生 JS），不在 `apps/mobile` 里，
-> 故它的源码不在这套导出包中，只提供快照。
+> 故它的源码不在这套导出包中，只提供快照。**四个视图（总览/会话/配置/调试台）已齐。**
+>
+> ⚠️ **这四张快照拍的是容器镜像里的那份页面**（管理台由 8360 的容器提供）。
+> 改完 `admin.html` 若没 `docker compose up -d --build`，拍到的仍是旧界面，
+> 而渲染诊断会全绿（`ok:true` / `errors:[]`）—— 判据是 `curl :8360/admin`
+> 与磁盘文件比 sha256。`[已确认]`
 
 ### 3.3 主链路（罗盘域）
 
@@ -389,7 +396,7 @@ RULE-008 原本针对数据，但它在**视觉层**同样成立，而且有一�
 
 ### 6.1 快照不是真机截图
 
-19 张快照由 `expo export --platform web` 的产物在 Chrome 里按手机视口（390×844 @2x）渲染，
+21 张快照由 `expo export --platform web` 的产物在 Chrome 里按手机视口（390×844 @2x）渲染，
 **是 React Native Web**。它验证的是**同一套 React 组件树**（不是手绘示意图），
 所以布局、折行、配色、空态这些结论是可靠的；
 
@@ -440,7 +447,7 @@ README.md                  本导读
 07-ui-logic.md             UI 侧几何 / 样式 / 状态逻辑（12 个模块）
 08-api-contract.md         后端字段契约（界面数据的来源）
 MANIFEST.md                文件清单 + 行数 + SHA256 指纹（可用来核对版本）
-snapshots/                 19 张渲染快照（PNG）
+snapshots/                 21 张渲染快照（PNG）
 source/                    UI 源码副本（保留原目录结构，含校验探针脚本）
 references/                上游设计规范 3 份
 ```
