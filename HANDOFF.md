@@ -254,7 +254,7 @@ HTTP 层无路由、App 里 0 处引用。本轮把三条链路打通：
 
 #### APK
 
-`dist/玄盘AI-v0.1.0-v2-ui.apk`（95,616,561 B，sha256 `0e40ce99b4598d65…`）
+`dist/玄盘AI-v0.1.0-v2-ui.apk`（98,616,561 B，sha256 `0e40ce99b4598d65…`）
 含 V2 罗盘域改版 + 本轮界面工艺修复。构建命令见 `apps/mobile/scripts/build-apk.sh`。
 
 - 🔴 脚本只在「地址变化」时重打包 JS，增量构建会显示 `605 up-to-date` —— **别据此认为 JS 是新的**。
