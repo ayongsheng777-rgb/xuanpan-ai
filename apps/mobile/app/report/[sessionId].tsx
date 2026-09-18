@@ -36,6 +36,21 @@ import { alpha, colors, font, radius, space } from '@/theme/tokens';
 type ReportTab = 'facts' | 'tradition' | 'ai';
 type Mode = 'auto' | 'cost' | 'quality';
 
+/**
+ * AI 解读内的**文体**切换。
+ *
+ * 与上面的 `ReportTab` 是两回事，别看混：`ReportTab` 分的是**层**
+ * （盘面事实 / 传统分析 / AI 解读），`RegisterTab` 分的是 AI 解读层内部的**深浅**
+ * —— 同一批数据的两种讲法。两者的控件样式也不同（下划线 vs 填充块），
+ * 就是为了让人一眼看出"这是两个层级的切换"。
+ */
+type RegisterTab = 'expert' | 'plain';
+
+const REGISTER_LABEL: Record<RegisterTab, string> = {
+  expert: '专业分析',
+  plain: '白话讲解',
+};
+
 /** facts / tradition 的顶层键 → 展示名。未收录的键走兜底，不会被隐藏。 */
 const MODULE_TITLES: Record<string, string> = {
   compass: '罗盘坐向',
@@ -62,6 +77,13 @@ export default function ReportScreen(): React.JSX.Element {
   const disclaimerMeta = useAsync(useCallback(() => api.disclaimer(), [api]), []);
 
   const [tab, setTab] = useState<ReportTab>('ai');
+  /**
+   * AI 解读的文体。
+   *
+   * 默认「专业分析」：这一页的主用户是带着问题来对盘的人，先给准确术语；
+   * 看不懂的人切一下就有白话版。反过来默认白话版，懂行的人每次都要多切一次。
+   */
+  const [register, setRegister] = useState<RegisterTab>('expert');
   const [mode, setMode] = useState<Mode>('auto');
   const [offline, setOffline] = useState(false);
 
@@ -316,8 +338,38 @@ export default function ReportScreen(): React.JSX.Element {
                 </Banner>
               ) : null}
 
-              {report.interpretation.sections.map((s) => (
-                <Card key={s.title} title={s.title}>
+              {/* ---------- 文体切换 ----------
+                  只在**真的有白话版**时才显示切换：
+                  没有白话版却显示一个切过去是空的按钮，比不显示更糟。 */}
+              {report.interpretation.has_plain ? (
+                <View style={styles.registerRow}>
+                  <SegmentedTabs<RegisterTab>
+                    value={register}
+                    onChange={setRegister}
+                    items={[
+                      { key: 'expert', label: REGISTER_LABEL.expert },
+                      { key: 'plain', label: REGISTER_LABEL.plain },
+                    ]}
+                  />
+                  <AppText size="xs" color="muted" style={styles.registerNote}>
+                    {register === 'expert'
+                      ? '直接用术语，便于对照盘面与古籍。看不懂可切到「白话讲解」。'
+                      : '同一批事实，改用日常语言重讲一遍；术语都做了说明。'}
+                  </AppText>
+                </View>
+              ) : (
+                <Banner tone="info" title="本篇只有专业分析">
+                  生成时没有产出白话版（通常是模型没按格式输出）。
+                  这里如实告诉你，而不是拿专业版冒充白话版 ——
+                  若需要白话版，可重新生成一次。
+                </Banner>
+              )}
+
+              {(register === 'plain'
+                ? report.interpretation.plain_sections
+                : report.interpretation.sections
+              ).map((s) => (
+                <Card key={`${register}-${s.title}`} title={s.title}>
                   <AppText size="md" lineHeightRatio={1.2}>
                     {s.body}
                   </AppText>
@@ -566,6 +618,8 @@ const styles = StyleSheet.create({
   genBtn: { marginTop: space[4] },
 
   tabsWrap: { marginBottom: space[3] },
+  registerRow: { marginBottom: space[3] },
+  registerNote: { marginTop: space[2], lineHeight: 17 },
   footnote: { lineHeight: 16, marginBottom: space[3] },
   provenance: { marginBottom: space[3] },
   askErr: { marginTop: space[2] },
