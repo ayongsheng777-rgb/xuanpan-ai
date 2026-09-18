@@ -87,11 +87,15 @@ export default function CompassHomeScreen(): React.JSX.Element {
         <View style={styles.northArrow} />
       </View>
 
-      {/* ---------- 深色大罗盘（仿真：可拖动） ---------- */}
+      {/* ---------- 深色大罗盘（仿真：可拖动） ----------
+          盘式取「三元三合综合盘」：实物综合盘就是这个层数密度。
+          层数越多越接近用户手里的盘面，而"一眼看出排位是否一致"
+          正是这个组件存在的理由（见 CompassDial 文件头注释）。 */}
       <View style={styles.dialWrap}>
         <CompassDial
-          size={300}
+          size={320}
           palette={DIAL_DARK}
+          style="zonghe"
           rotation={rotation}
           interactive
           onRotate={setRotation}

@@ -92,8 +92,9 @@ export default function AdjustCompassScreen(): React.JSX.Element {
         </View>
         <View style={styles.dialWrap}>
           <CompassDial
-            size={300}
+            size={320}
             palette={DIAL_DARK}
+            style="zonghe"
             rotation={rotation}
             interactive={!locked}
             onRotate={(r) => setManual(-r)}

@@ -102,7 +102,12 @@ export default function SensorsScreen(): React.JSX.Element {
         <View style={styles.dialWrap}>
           {hasAzimuth ? (
             // rotation = -方位角：让当前朝向的刻度转到屏幕正上方（磁针不随盘转）
-            <CompassDial size={280} palette={DIAL_DARK} rotation={-(azimuth ?? 0)} />
+            <CompassDial
+              size={280}
+              palette={DIAL_DARK}
+              style="zonghe"
+              rotation={-(azimuth ?? 0)}
+            />
           ) : (
             <View style={styles.dialPlaceholder}>
               <Ionicons name="compass-outline" size={40} color={instrument.muted} />
