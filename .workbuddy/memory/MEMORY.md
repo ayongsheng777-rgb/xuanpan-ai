@@ -39,7 +39,7 @@
 🔴 **`.hbc` 里的中文串是 UTF-16LE** —— 想证明「页面真进了包」时；用 utf-8 grep 得 **0 命中（假阴性）**。用 `bytes.count(s.encode('utf-16-le'))`，并**带一个旧页面的串做对照组**自证探测方法有效。
 🔴 **`Path.write_text()` 在 Windows 把 LF 转 CRLF** —— 做「读-改-写」还原文件时；用 `read_bytes`/`write_bytes` 才字节级还原。
 🔴 **md5 比对可能什么都证明不了** —— 做「改坏→还原→md5」时；两边求值对象可能**都是已改坏的**（实测 DuanCard 第 66 行仍留坏代码、md5 却报一致）。**必须用 grep 关键片段做内容断言**。
-🔴 **pytest 的 `--basetemp` 必须落在系统 Temp 下** —— 跑全量/大批量用例时；因为 WorkBuddy safe-delete 只豁免 `tempfile.gettempdir()` 之下（及 pip 临时目录）的路径（shim `_should_bypass_safe_delete`），其余路径每删一个文件/目录都先问批量守卫，**同一次工具调用内累计删除 > 50** 即 `raise SystemExit(1)`（JSON 里 `scope:"turn"`）→ 落在 fixture teardown 就是**大批 ERROR**。同一份代码三种跑法实测：`--basetemp=D:/tmp/...` → 970 passed 后首个 fixture ERROR 即停（全量口径 **1469 passed + 87 errors**、exit=1）｜`--basetemp="$T/xxx"`（`$T` = `tempfile.gettempdir()`）→ **1560 passed, 2 skipped, exit=0**｜不带 basetemp → 用例全过（100%、无 `F`/`E`）但收尾删 `pytest-of-*/garbage-*` 被拦（`count:175`）→ **汇总行丢失、exit=1**。⚠️ **旧规则「用 D:/tmp 绕开 safe-delete」方向是反的**（把"丢一行"升级成"87 个 ERROR"）。判据仍是**有没有 `F`/`E` + 那行 JSON**；也别重复传 `-q`（addopts 已含，再传吞掉汇总行）
+🔴 **pytest 的 `--basetemp` 必须落在系统 Temp 下** —— 跑全量/大批量用例时；因为 WorkBuddy safe-delete 只豁免 `tempfile.gettempdir()` 之下（及 pip 临时目录）的路径（shim `_should_bypass_safe_delete`），其余路径每删一个文件/目录都先问批量守卫，**同一次工具调用内累计删除 > 50** 即 `raise SystemExit(1)`（JSON 里 `scope:"turn"`）→ 落在 fixture teardown 就是**大批 ERROR**。同一份代码三种跑法实测：`--basetemp=D:/tmp/...` → 970 passed 后首个 fixture ERROR 即停（全量口径 **1469 passed + 87 errors**、exit=1）｜`--basetemp="$T/xxx"`（`$T` = `tempfile.gettempdir()`）→ **1560 passed, exit=0**（汇总行完整，250~254s）｜不带 basetemp → 用例全过（100%、无 `F`/`E`）但收尾删 `pytest-of-*/garbage-*` 被拦（`count:175`）→ **汇总行丢失、exit=1**。⚠️ **旧规则「用 D:/tmp 绕开 safe-delete」方向是反的**（把"丢一行"升级成"87 个 ERROR"）。判据仍是**有没有 `F`/`E` + 那行 JSON**；也别重复传 `-q`（addopts 已含，再传吞掉汇总行）
 🔴 **非沙箱工具调用里批量守卫不计数** —— 想用微探针直接验证 safe-delete 判据时；实测在非沙箱调用中删 120 个**非 Temp** 文件也不被拦（阳性对照失效），会误导出"豁免范围很大"的错误结论。探针必须先自检 shim 真被 patch（`os.unlink.__module__ == "sitecustomize"`、`os.unlink.__name__ == "_safe_remove"`），且**整段对照实验都要在沙箱内**跑；否则只能拿"真实全量跑"的结果当证据
 🔴 **刷新 UI 快照要三件套，顺序不能变** —— 改过前端页面后核对视觉时；`cd apps/mobile && npx expo export --platform web --output-dir "$T/xp-web"`（**不加 `--clear`**，会被 safe-delete 拦；产物放系统 Temp）→ 起 `scripts/ui_render/preview_server.py <dist> <port>` → 跑 `render_pages.mjs <chrome> docs/ui-render http://127.0.0.1:<port>`（不传第 4 个参数才是全量 16 页）。`16-admin-config` 靠页面清单第 6 个元素「点击选择器」进懒渲染的配置视图，日志里 `clicked=clicked` 才是「面板真被点开」的证据——没有它，拍到的是没点成功的初始页
 🔴 **全量 >190s 超 Bash 默认 120s 前台超时** —— 会被截断且**无任何输出**（易误判成崩溃）。用 `run_in_background` 或分模块跑。
@@ -65,7 +65,7 @@
   - AI 解读拆成**双文体**（专业分析 / 白话讲解），报告页可切换
   - **运行时可调配置**（后端 `runtime_config.py` + SQLite `app_settings` 表）
   - **管理台新增「配置」面板**（含 AI 模型选择与模型列表探针）
-  - 全量测试 **1560 passed, 2 skipped**（单进程全量；`--basetemp` 放系统 Temp 才拿得到汇总行，见上方 safe-delete 条）
+  - 全量测试 **1560 passed, 3 skipped, EXIT=0**（单进程全量 250.73s；`--basetemp` 放系统 Temp 才拿得到汇总行，见上方 safe-delete 条）
   - UI 快照补齐到 **16 页**：底栏改版新增的 4 页（测盘/分析/牌库/校准）**此前从未渲染过**，本轮首次核对 —— 全部 `overflowX=0`、`errors=[]`；管理台配置面板一并纳入
 - 术数：六爻装卦、八字大运/流年/神煞/长生十二宫、黄历/择日、断卦层、**择日决策**、**三式全部**（全链路贯通）
 - MCP 12 工具；HTTP `/api/v1/{almanac,zeri,duan,qimen,liuren,taiyi}`；管理台 **4 个导航页**（概览/会话/配置/调试台）

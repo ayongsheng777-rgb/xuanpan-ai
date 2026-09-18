@@ -329,7 +329,7 @@ apps/mobile/
 
 ```bash
 # $PY = C:/Users/anyong/.workbuddy/binaries/python/envs/default/Scripts/python.exe（managed venv）
-# 全量测试 = 1560 passed, 2 skipped（2026-09-18 实测，单进程全量 + 汇总行完整）
+# 全量测试 = 1560 passed, 3 skipped（2026-09-18 实测，单进程全量 + 汇总行完整，EXIT=0）
 # 🔴 跑全量必须把 basetemp 放到**系统 Temp 下**，否则会撞 safe-delete 批量守卫（见下方说明）
 "$PY" -m pytest --basetemp="$("$PY" -c 'import tempfile;print(tempfile.gettempdir())')/xp-full"
 
@@ -354,7 +354,7 @@ apps/mobile/
 > | basetemp | 实测结果 | 危害 |
 > |---|---|---|
 > | `--basetemp=D:/tmp/pytest-clean1`（**非 Temp 目录**） | 970 passed 后首个 fixture ERROR 即停（`-x`）；全量口径 **1469 passed + 87 errors**，exit=1 | 🔴 最重：**大批用例集体 ERROR**，看着像代码坏了 |
-> | `--basetemp="$T/xp-full1"`（`$T` = 系统 Temp） | **1560 passed, 2 skipped, exit=0**，汇总行完整（254s） | ✅ **推荐** |
+> | `--basetemp="$T/xp-full1"`（`$T` = 系统 Temp） | **1560 passed, exit=0**，汇总行完整（254s；同口径 250.73s 复测一致） | ✅ **推荐** |
 > | 不带 `--basetemp`（默认） | 用例**全部通过**（进度 100%、一个 `F`/`E` 都没有），收尾删 `pytest-of-anyong/garbage-*` 时被拦（实测 `count:175`）→ **汇总行丢失、exit=1** | ⚠️ 假失败，但至少没 ERROR |
 >
 > **结论（照这个来）**：
