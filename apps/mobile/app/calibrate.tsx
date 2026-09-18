@@ -29,7 +29,7 @@ import { Button, Card, KeyValueRow } from '@/components/Card';
 import { CompassDial, DIAL_DARK, type CompassPhoto } from '@/components/CompassDial';
 import { HelpButton } from '@/components/HelpButton';
 import { Screen } from '@/components/Screen';
-import { azimuthAtTop } from '@/lib/compassDial';
+import { azimuthAtTop, initialRotationFor } from '@/lib/compassDial';
 import { coerceDialStyle } from '@/lib/dialStyle';
 import { degreeToIndex, nameOfIndex } from '@/lib/ring24';
 import { instrument, radius, space } from '@/theme/tokens';
@@ -61,11 +61,17 @@ export default function CalibrateScreen(): React.JSX.Element {
   const photoUri = params.photo ?? '';
   const dialStyle = useMemo(() => coerceDialStyle(params.style), [params.style]);
 
-  /** 初始方位：有 degree 就按它把盘转到该读数朝上，否则从 0 开始 */
+  /**
+   * 初始旋转：有 `degree` 就把它转到盘面正上方，否则从 0° 起步。
+   *
+   * 走 `initialRotationFor`（唯一实现）而不是自己写 `-d`：这个换算少一个
+   * 负号时界面完全正常，只是把方位转反（见 `lib/compassDial.azimuthAtTop` 注释）。
+   * 口径是**坐山角** —— `degree` 来自 scan 页的坐山候选（见该页的传参注释）。
+   */
   const initialRotation = useMemo(() => {
     if (params.degree === undefined || params.degree === '') return 0;
     const d = Number(params.degree);
-    return Number.isFinite(d) ? -d : 0;
+    return Number.isFinite(d) ? initialRotationFor({ degree: d }) : 0;
   }, [params.degree]);
 
   const [rotation, setRotation] = useState(initialRotation);

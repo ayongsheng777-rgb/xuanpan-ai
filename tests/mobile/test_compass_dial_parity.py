@@ -99,6 +99,9 @@ def test_probe_self_checks_all_pass(probe: dict) -> None:
         f"旋转后选山漂移（视角改变不应改事实）：{c['rotation_select_errors']}"
     )
     assert c["azimuth_at_top_errors"] == [], f"顶部读数错误：{c['azimuth_at_top_errors'][:10]}"
+    assert c["initial_rotation_errors"] == [], (
+        f"初始对准口径错误（顶部应为**坐山**方向）：{c['initial_rotation_errors']}"
+    )
     assert c["snap_errors"] == [], f"吸附失败：{c['snap_errors'][:10]}"
     assert c["pointer_errors"] == [], f"指针角失败：{c['pointer_errors'][:10]}"
     assert c["signed_errors"] == [], f"归一化越界：{c['signed_errors'][:10]}"
@@ -313,3 +316,65 @@ def test_degree_to_mountain_matches_backend(probe: dict) -> None:
 
 def test_mountain_count(probe: dict) -> None:
     assert probe["mountain_count"] == len(MOUNTAINS) == 24
+
+
+# ==========================================================================
+# 五、初始对准口径（档存 / 模板 → 盘面旋转）
+# ==========================================================================
+
+
+def test_initial_rotation_aligns_the_mountain_backend_would_record(probe: dict) -> None:
+    """盘面顶部指着的那座山，必须正是内核会记进 `sitting` 的那座山。
+
+    这条守的是一句**跨语言的话**，而不是某个前端公式。口径只在内核里定：
+
+        calculate_orientation(degree=180.24) → sitting='午', facing='子'
+
+    即 `degree` 落在**坐山**那一格上（模板测试的 `(sitting='午', facing='子',
+    degree=180.24)` 是同一关系的另一处证据）。所以盘面顶部必须指向坐山。
+
+    🔴 曾经按「取向山山心角」实现过第三档退路，后果是**同一条记录在
+       "有实测角"与"没实测角"两种情况下盘面相差 180°** —— 盘面画得完全正常，
+       只有把它与记录里的「坐 X 向 Y」对读才会发现读数指向了向而不是坐。
+       底部那条反面对照就是为了证明本测试真的能区分这两种口径。
+    """
+    from fortune_core.compass import calculate_orientation
+    from fortune_core.mountain24 import opposite
+
+    # ① 只有坐山（无实测角）→ 顶部就是那座山本身
+    bad_sitting = [
+        f"{r['sitting_name']}（index {r['sitting_index']}）→ 顶部 {r['top_mountain']}"
+        for r in probe["initial_rotation_sweep"]["by_sitting"]
+        if r["top_mountain"] != r["sitting_name"]
+    ]
+    assert not bad_sitting, (
+        "只有坐山时，盘面顶部没有对准坐山：\n" + "\n".join(bad_sitting)
+    )
+
+    # ② 只有实测角 → 顶部那座山 == 内核由该角度定出的坐山
+    bad_degree: list[str] = []
+    for row in probe["initial_rotation_sweep"]["by_degree"]:
+        sitting = calculate_orientation(degree=float(row["degree"])).sitting.name
+        if row["top_mountain"] != sitting:
+            bad_degree.append(
+                f"{row['degree']}°：TS 顶部={row['top_mountain']} 内核坐山={sitting}"
+            )
+    assert not bad_degree, (
+        f"{len(bad_degree)} 个角度上盘面顶部与内核坐山不符（前 10 条）：\n"
+        + "\n".join(bad_degree[:10])
+    )
+
+    # ③ 反面对照：证明"按向对齐"的旧写法确实会被上面抓到。
+    #    degree=0 时内核给 sitting=子、facing=午，两者不同 —— 若前端按向对齐，
+    #    ① 与 ② 都会看到「午」而不是「子」。
+    d0 = float(probe["initial_rotation_sweep"]["by_degree"][0]["degree"])
+    o = calculate_orientation(degree=d0)
+    assert opposite(o.sitting.name) == o.facing.name
+    assert o.facing.name != o.sitting.name, (
+        f"degree={d0} 时坐山与向山竟然同名，本测试无法区分两种口径"
+    )
+    ts_top = probe["initial_rotation_sweep"]["by_degree"][0]["top_mountain"]
+    assert ts_top == o.sitting.name
+    assert ts_top != o.facing.name, (
+        f"degree={d0} 时 TS 顶部是 {ts_top}，等于向山 —— 口径反了"
+    )

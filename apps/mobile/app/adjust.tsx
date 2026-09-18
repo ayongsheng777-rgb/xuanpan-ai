@@ -31,9 +31,9 @@ import { AppText } from '@/components/AppText';
 import { CompassDial, DIAL_DARK } from '@/components/CompassDial';
 import { HelpButton } from '@/components/HelpButton';
 import { Screen } from '@/components/Screen';
-import { normalizeSigned } from '@/lib/compassDial';
+import { azimuthAtTop, initialRotationFor, normalizeSigned } from '@/lib/compassDial';
 import { DIAL_STYLES, coerceDialStyle } from '@/lib/dialStyle';
-import { indexOfName, indexToDegree, oppositeIndex } from '@/lib/ring24';
+import { indexOfName } from '@/lib/ring24';
 import { useSensorSnapshot } from '@/services/useSensors';
 import { instrument, radius, space } from '@/theme/tokens';
 
@@ -63,21 +63,26 @@ export default function AdjustCompassScreen(): React.JSX.Element {
   const [dialStyle, setDialStyle] = useState(() => coerceDialStyle(params.style));
 
   /**
-   * 模板的初始角度。口径按**优先级**取，不做加权或折中：
-   *   1. `degree` —— 显式的实测朝向角，直接就是「当前方位」
-   *   2. `sitting` —— 只有坐山时取**对宫**：坐午则向子，界面读数应为向
-   *   3. 都没有 → 0（不假装有个默认坐向）
+   * 模板的初始方位角。口径**统一走 `initialRotationFor`**，本页不自己拼：
+   *
+   *   - 有 `degree` → 直接用它（分金级精度）
+   *   - 只有 `sitting` → 用**坐山山心角**
+   *   - 都没有 → null（不假装有个默认坐向）
+   *
+   * 🔴 原实现第二步取的是「坐山的**对宫**」，即向山山心角 —— 比正确值差 180°。
+   *    之所以能一直没被发现：模板只给坐山（不给角度）时才走到那一步，
+   *    而这时盘面上并没有"该指向哪"的参照物，看起来就是个正常盘面。
+   *    口径依据见 `lib/compassDial.initialRotationFor` 的注释（`degree` 落在坐山那格）。
    */
   const templateManual = useMemo(() => {
-    if (params.degree !== undefined && params.degree !== '') {
-      const d = Number(params.degree);
-      if (Number.isFinite(d)) return d;
-    }
-    if (params.sitting) {
-      const i = indexOfName(params.sitting);
-      if (i >= 0) return indexToDegree(oppositeIndex(i));
-    }
-    return null;
+    const degree =
+      params.degree !== undefined && params.degree !== '' && Number.isFinite(Number(params.degree))
+        ? Number(params.degree)
+        : null;
+    const sittingIndex = params.sitting ? indexOfName(params.sitting) : -1;
+    if (degree === null && sittingIndex < 0) return null;
+    // 本页状态存的是**方位角**（= −rotation，见下方 manualAzimuth 注释）
+    return azimuthAtTop(initialRotationFor({ sittingIndex, degree }));
   }, [params.degree, params.sitting]);
 
   const [mode, setMode] = useState<Mode>('simulation');

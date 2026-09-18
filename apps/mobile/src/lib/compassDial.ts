@@ -22,6 +22,7 @@ import {
   MOUNTAIN_COUNT,
   MOUNTAIN_NAMES,
   SPAN_DEGREE,
+  indexToDegree,
   normalizeDeg,
   type Point,
 } from './ring24.ts';
@@ -261,4 +262,37 @@ export function dialDegreeAt(screenDegree: number, rotation: number): number {
  */
 export function azimuthAtTop(rotation: number): number {
   return dialDegreeAt(0, rotation);
+}
+
+/**
+ * 档存 / 模板的「坐向 + 实测角」→ 盘面的初始对准旋转量。
+ *
+ * 🔴 **统一口径：顶部读数是坐山方向，不是向山。**
+ *
+ * 依据在内核（RULE-001：以计算层为准，不看界面怎么写）：
+ *   - `calculate_orientation(degree=182.0)` → `sitting='午'`
+ *     （`packages/fortune-core/tests/test_compass.py::test_from_degree`）
+ *   - 模板测试给出的三元组是 `(sitting='午', facing='子', degree=180.24)`
+ *     —— 180.24° 落在午（172.5°~187.5°），正好是**坐山**那一格
+ * 两处独立证据同向：`degree` 落在**坐山**上，向山只是取它的对宫。
+ *
+ * ⚠️ 这里曾经按「没有实测角时取向山山心角」写过一版，后果是：
+ *   同一条记录，**有实测角**和**没有实测角**两种情况下盘面相差 180°。
+ *   盘面本身画得完全正常（山格、八卦、磁针都对），只有把它与记录里的
+ *   「坐 X 向 Y」对读才会发现读数指向了向而不是坐。
+ *
+ * 返回 0 = 没有坐向信息时不假装有个默认方向。
+ */
+export function initialRotationFor(opts: {
+  /** 坐山索引（盘面角）；-1 / null 表示未知 */
+  sittingIndex?: number | null;
+  /** 实测角（**坐山方向**，分金级精度）；优先于坐山山心角 */
+  degree?: number | null;
+}): number {
+  const { sittingIndex = null, degree = null } = opts;
+  if (degree !== null && Number.isFinite(degree)) return rotationToAlign(degree);
+  if (sittingIndex !== null && sittingIndex >= 0) {
+    return rotationToAlign(indexToDegree(sittingIndex));
+  }
+  return 0;
 }

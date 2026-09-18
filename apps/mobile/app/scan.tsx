@@ -145,6 +145,23 @@ export default function ScanScreen(): React.JSX.Element {
 
       {result ? (
         result.compass_detected ? (
+          /**
+           * 🔴 「校准与还原」入口传的读数必须是**坐山**候选角，不能是向山。
+           *
+           * 全链路的 `degree` 都以坐山为准（内核：
+           * `calculate_orientation(degree=180.24)` → `sitting=午`）。校准页把它
+           * 转到盘面正上方，再「交棒」给确认页灌进 `degreeOverride`，最终**原样
+           * 提交**给后端。
+           *
+           * 原先这里优先取向山候选（`direction_candidates[0]`），后果是灌进去的
+           * 实测角比坐山差 180°：用户按提示确认坐山后提交，后端会以
+           * `mountain_at(degree) != sitting` 报冲突（可见报错）；若他改成选向山，
+           * 则会**静默存下一条坐向翻转的记录**。
+           *
+           * `mountain_candidates` 由识别管线按 `(-confidence, name)` 排好序，故
+           * `[0]` 就是首选坐山；没有坐山候选时传空串，让校准页从 0° 起步（由人
+           * 自己对齐），不拿向山角顶上。
+           */
           <DetectedCard
             result={result}
             onConfirm={() => router.push(`/confirm/${result.session_id}`)}
@@ -156,9 +173,7 @@ export default function ScanScreen(): React.JSX.Element {
                       params: {
                         session: result.session_id,
                         photo: localPhoto,
-                        degree: String(
-                          result.direction_candidates[0]?.angle ?? result.mountain_candidates[0]?.angle ?? '',
-                        ),
+                        degree: String(result.mountain_candidates[0]?.angle ?? ''),
                       },
                     })
                 : undefined
