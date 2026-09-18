@@ -86,9 +86,17 @@ def _rule_tables() -> dict[str, Any]:
     out: dict[str, Any] = {}
 
     try:
-        from fortune_core.fenjin120 import table_available
+        from fortune_core.fenjin120 import table_available, table_load_error
 
-        out["fenjin120"] = {"available": table_available()}
+        item: dict[str, Any] = {"available": table_available()}
+        # 🔴 错误详情必须单独取：`table_available()` 现在对**写坏的表**也返回 False
+        # （不让一张坏表把罗盘主链路打成 500），于是这条信息不再会随异常冒出来。
+        # 少了这一句，「表写坏了」在管理台上会长得和「这张表还没做」一模一样 ——
+        # 而两者的处置完全不同。见本模块 docstring 与 fenjin120._load_or_error。
+        error = table_load_error()
+        if error:
+            item["error"] = error
+        out["fenjin120"] = item
     except Exception as exc:  # noqa: BLE001 - 管理界面要报告"为什么没有"，不能让异常逃逸
         out["fenjin120"] = {"available": False, "error": f"{type(exc).__name__}: {exc}"}
 

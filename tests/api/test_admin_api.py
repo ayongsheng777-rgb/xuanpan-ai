@@ -165,6 +165,31 @@ class TestOverview:
             if item.get("error"):
                 assert item["available"] is False, f"{name} 有 error 却声称可用"
 
+    def test_broken_fenjin_table_is_distinguishable_from_missing(
+        self, unlocked: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """「表写坏了」与「表没提供」在管理台上必须能分开。
+
+        两者处置完全不同：一个是运维事故（要修文件），一个是功能还没做。
+        而 `table_available()` 现在对**两种**都返回 False（坏表不再把罗盘主链路
+        打成 500）—— 这个代价换来的新责任是：错误详情只能由 `table_load_error()`
+        单独提供。少了这一句，运维会去找一张根本不缺的表。
+        """
+        from fortune_core import fenjin120
+
+        broken = tmp_path / "broken-fenjin120.json"
+        broken.write_text('{"default": {"子": ["甲子", "丙子"]}}', encoding="utf-8")
+        monkeypatch.setattr(fenjin120, "DEFAULT_TABLE_PATH", broken, raising=False)
+        fenjin120.clear_fenjin_cache()
+
+        item = unlocked.get(
+            "/api/v1/admin/overview", headers={"X-Xuanpan-Admin-Token": TOKEN}
+        ).json()["rule_tables"]["fenjin120"]
+
+        assert item["available"] is False
+        assert "error" in item, "坏表必须给出原因，否则与「表没提供」无法区分"
+        assert "子山" in item["error"], f"原因要能定位到具体位置：{item['error']}"
+
     def test_counts_reflect_real_sessions(self, unlocked: TestClient) -> None:
         """写一条会话后，统计必须跟着变 —— 防止把统计写成常量。"""
         created = unlocked.post("/api/v1/sessions", json={"title": "管理台测试"})
