@@ -195,7 +195,7 @@ SPECS: tuple[SettingSpec, ...] = (
         default="",
         editable=False,
         description=(
-            "管理台令牌。刻意**不允许从界面修改**：它一旦被改错，"
+            "管理台令牌。刻意「不允许从界面修改」：它一旦被改错，"
             "改它的那个界面立刻就用不了了。启用/更换请改 .env 后重启"
         ),
         read=lambda s: s.admin_token,

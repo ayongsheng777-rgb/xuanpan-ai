@@ -608,3 +608,45 @@ class TestOverviewConsistency:
         body = client.get("/healthz").json()
         assert body["cloud_ai_ready"] is True
         assert SECRET_VALUE not in str(body)
+
+
+# ==========================================================================
+# 六、文案必须是纯文本：界面按 textContent 渲染，Markdown 标记会原样显示
+# ==========================================================================
+
+
+class TestCopyIsPlainText:
+    """配置文案里不能出现 Markdown 标记。
+
+    ## 为什么单列一类
+    实测（2026-09-18，用 CDP 真渲染管理台「配置」视图）：写进 `description`
+    的强调标记会**原样显示成星号** —— 面板是把说明当纯文本塞进 DOM 的，
+    不做 Markdown 解析。这类缺陷在 tsc / 单元测试 / 静态检查里全都看不见，
+    只有真渲染页面、或下面这两条断言能拦住。
+
+    ## 为什么查"整段响应体"而不只查 description
+    文案还可能来自路由层的 `note` 等字段（`/ai/status` 就有一条），
+    只盯 `SPECS` 会漏掉它们。
+    """
+
+    def test_setting_copy_has_no_markdown_markup(self) -> None:
+        offenders = []
+        for spec in SPECS:
+            entries = [("description", spec.description)]
+            entries += [
+                (f"choices[{i}]", str(c)) for i, c in enumerate(spec.choices or ())
+            ]
+            for label, text in entries:
+                if "**" in text or "`" in text:
+                    offenders.append(f"{spec.key}.{label}: {text!r}")
+        assert not offenders, "下列文案含 Markdown 标记，会原样显示成符号：\n" + "\n".join(
+            offenders
+        )
+
+    @pytest.mark.parametrize(
+        "path",
+        ["/api/v1/admin/config", "/api/v1/admin/ai/status", "/api/v1/admin/overview"],
+    )
+    def test_response_copy_has_no_markdown_markup(self, client: TestClient, path: str) -> None:
+        body = client.get(path).text
+        assert "**" not in body, f"{path} 的响应含 Markdown 强调标记，会原样渲染成星号"

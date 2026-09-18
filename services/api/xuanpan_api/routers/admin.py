@@ -427,7 +427,7 @@ def admin_ai_status(
         "providers": router_obj.available_providers(),
         "note": (
             "template 是零成本兜底，永远排在最后。云端三项（base_url/api_key/model）"
-            "缺任一即不参与选路 —— 这时报告会走本地模板，属于**设计内行为**，不是故障。"
+            "缺任一即不参与选路 —— 这时报告会走本地模板，属于设计内行为，不是故障。"
         ),
     }
 
