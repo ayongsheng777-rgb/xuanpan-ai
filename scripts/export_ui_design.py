@@ -104,6 +104,7 @@ VOLUMES: tuple[Volume, ...] = (
             "src/components/Banner.tsx",
             "src/components/SegmentedTabs.tsx",
             "src/components/HelpButton.tsx",
+            "src/components/usePressScale.ts",
         ),
     ),
     Volume(
