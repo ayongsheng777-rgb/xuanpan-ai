@@ -342,6 +342,114 @@ def test_pushed_query_params_are_read_by_target_page() -> None:
 
 
 # ==========================================================================
+# 断言 5：`degree` 参数一律以「坐山角」为准，不得来自向山候选
+# ==========================================================================
+
+_DEGREE_KEY_RE = re.compile(r"""\bdegree\s*:\s*""")
+
+
+def _degree_expressions_in(src: str) -> list[tuple[int, str]]:
+    """从一段源码里抽出所有 `degree: <表达式>` —— 返回 (行号, 表达式)。
+
+    为什么不能按行取：本项目这一处本来就是多行嵌套调用
+    （`String(result.mountain_candidates[0]?.angle ?? '')`），
+    按行取只会拿到半截 —— 于是"表达式里没有 direction_candidates"
+    会**必然成立**，断言沦为假绿。故这里按括号配平取到表达式结尾。
+
+    做成**纯函数**（而不是直接遍历目录）是为了让自检拿一段字符串来验证，
+    不必往 `apps/mobile/app/` 里写临时文件 —— 往被测目录里写文件会让
+    自检与执行顺序、残留文件耦合，属于"测试自己制造假故障"。
+    """
+    out: list[tuple[int, str]] = []
+    for m in _DEGREE_KEY_RE.finditer(src):
+        i = m.end()
+        depth = 0
+        j = i
+        while j < len(src):
+            ch = src[j]
+            if ch in "([{":
+                depth += 1
+            elif ch in ")]}":
+                if depth == 0:
+                    break
+                depth -= 1
+            elif depth == 0 and ch in ",\n":
+                break
+            j += 1
+        expr = src[i:j].strip()
+        if expr:
+            out.append((src.count("\n", 0, i) + 1, expr))
+    return out
+
+
+def _degree_param_expressions() -> list[tuple[Path, int, str]]:
+    """扫全部页面，把 `degree:` 表达式连同所在文件取出来。"""
+    out: list[tuple[Path, int, str]] = []
+    for f in sorted(_APP.rglob("*.tsx")):
+        for lineno, expr in _degree_expressions_in(f.read_text(encoding="utf-8")):
+            out.append((f, lineno, expr))
+    return out
+
+
+def test_degree_param_never_comes_from_the_facing_candidate() -> None:
+    """全链路的 `degree` 是**坐山角**，任何一个 `degree:` 都不得引用向山候选。
+
+    口径由一个地方定，且在内核里（RULE-001）：
+
+        calculate_orientation(degree=180.24) → sitting='午', facing='子'
+
+    识别层也把两个列表分得很清楚：`mountain_candidates` = 坐山候选、
+    `direction_candidates` = 向山候选（见 `services/vision/.../models.py`）。
+
+    挡住的错（本项目刚发生过）：`scan.tsx` 把 `direction_candidates[0].angle`
+    作为 `degree` 推给校准页 —— 一路带到确认页、再原样提交给后端。
+    灌进去的实测角比坐山差 180°，于是：
+      · 用户按提示确认坐山 → 后端以 `mountain_at(degree) != sitting` 报冲突（可见）；
+      · 用户改成选向山   → **静默存下一条坐向翻转的记录**（不可见，最坏的那种）。
+    """
+    exprs = _degree_param_expressions()
+    assert exprs, "没有扫到任何 `degree:` 表达式（抽取器可能已失效）"
+
+    # 锚点：抽取器必须真的看得见那一处多行嵌套调用，否则"没扫到"就变成假绿
+    scan_exprs = [e for f, _, e in exprs if f.name == "scan.tsx"]
+    assert scan_exprs, "抽取器没有扫到 scan.tsx 里的 degree 表达式"
+    assert any("mountain_candidates" in e for e in scan_exprs), (
+        f"抽取到的 scan.tsx 表达式不完整（可能是按行截断了）：{scan_exprs}"
+    )
+
+    bad = [
+        f"{f.relative_to(_REPO_ROOT)}:{lineno} → {expr}"
+        for f, lineno, expr in exprs
+        if "direction_candidates" in expr
+    ]
+    assert not bad, (
+        "以下 `degree` 取自**向山**候选 —— 与内核口径（degree 落在坐山）相差 180°：\n  "
+        + "\n  ".join(bad)
+    )
+
+
+def test_selfcheck_degree_extractor_would_flag_a_facing_source() -> None:
+    """用一个必然该判不合格的片段，证明上面的抽取器 + 判据真的会拒绝。"""
+    snippet = """
+      params: {
+        session: x,
+        degree: String(
+          result.direction_candidates[0]?.angle ?? '',
+        ),
+      },
+    """
+    exprs = _degree_expressions_in(snippet)
+    assert len(exprs) == 1, f"自检失败：抽取器取到 {len(exprs)} 个表达式，应为 1：{exprs}"
+    assert "direction_candidates" in exprs[0][1], (
+        f"自检失败：抽取器没能取出跨行表达式（取到 {exprs[0][1]!r}）—— 断言 5 因此是假绿"
+    )
+
+    # 再证一次"判据真的会把它标红"，而不是只靠人眼看抽取结果
+    flagged = [e for _, e in exprs if "direction_candidates" in e]
+    assert flagged, "自检失败：含 direction_candidates 的表达式没有被判据捕获"
+
+
+# ==========================================================================
 # 假绿自检：证明上面两套匹配器真的会拒绝
 # ==========================================================================
 
