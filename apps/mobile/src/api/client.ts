@@ -49,6 +49,7 @@ import type {
   CapabilitiesResponse,
   CompassConfirmRequest,
   CompassInput,
+  CompassTemplate,
   DeletedResponse,
   DuanLiuyaoRequest,
   DuanResponse,
@@ -60,6 +61,9 @@ import type {
   TaiyiCastRequest,
   TaiyiChart,
   TaiyiMetaResponse,
+  TemplateCreateRequest,
+  TemplateListResponse,
+  TemplateUpdateRequest,
   LiuyaoInput,
   MountainsResponse,
   NamingInput,
@@ -413,6 +417,34 @@ export class ApiClient {
    */
   taiyiCast = (input: TaiyiCastRequest): Promise<TaiyiChart> =>
     this.json('/api/v1/taiyi/cast', 'POST', input);
+
+  // ------------------------------------------------------------ 罗盘模板库
+
+  /** 模板列表。排序（常用 → 最近使用 → 新建）由服务端定，客户端不重排 */
+  templates = (): Promise<TemplateListResponse> => this.request('/api/v1/templates');
+
+  template = (templateId: string): Promise<CompassTemplate> =>
+    this.request(`/api/v1/templates/${encodeURIComponent(templateId)}`);
+
+  createTemplate = (payload: TemplateCreateRequest): Promise<CompassTemplate> =>
+    this.json('/api/v1/templates', 'POST', payload);
+
+  /**
+   * 局部更新：**只传要改的字段**。
+   *
+   * 服务端用 `exclude_unset` 判定"用户显式给了哪些键"，所以省略的字段
+   * 保持原值；要清空某字段则显式传 `null`（而不是省略）。
+   * 这两条相反语义的守卫在 tests/api/test_templates_routes.py。
+   */
+  updateTemplate = (templateId: string, payload: TemplateUpdateRequest): Promise<CompassTemplate> =>
+    this.json(`/api/v1/templates/${encodeURIComponent(templateId)}`, 'PATCH', payload);
+
+  deleteTemplate = (templateId: string): Promise<DeletedResponse> =>
+    this.json(`/api/v1/templates/${encodeURIComponent(templateId)}`, 'DELETE');
+
+  /** 记录一次使用（use_count +1、last_used_at 置现在）。**读列表不会调它** */
+  useTemplate = (templateId: string): Promise<CompassTemplate> =>
+    this.json(`/api/v1/templates/${encodeURIComponent(templateId)}/use`, 'POST');
 
   // ------------------------------------------------------------------ 报告
 

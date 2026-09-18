@@ -12,7 +12,7 @@
  */
 
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { Stack, useRouter } from 'expo-router';
 import React, { useCallback, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, TextInput, View } from 'react-native';
 
@@ -24,6 +24,7 @@ import { Button, Card, Divider, KeyValueRow } from '@/components/Card';
 import { Tag } from '@/components/Chip';
 import { DuanCard, verdictTone } from '@/components/DuanCard';
 import { FactList } from '@/components/FactList';
+import { helpHeaderRight } from '@/components/HelpButton';
 import { Screen } from '@/components/Screen';
 import { SegmentedTabs } from '@/components/SegmentedTabs';
 import { useSubmit } from '@/lib/useAsync';
@@ -122,6 +123,10 @@ export default function ChartScreen(): React.JSX.Element {
 
   return (
     <Screen scroll onRefresh={onCalc} refreshing={calc.loading}>
+      {/* 本页已从底栏「命盘」tab 收进「分析」内页，标题在此声明 */}
+      <Stack.Screen
+        options={{ title: '八字命盘', headerRight: helpHeaderRight('chart') }}
+      />
       <SegmentedTabs
         items={[
           { key: 'solar', label: '公历' },

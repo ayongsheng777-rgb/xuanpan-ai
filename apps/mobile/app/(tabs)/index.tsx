@@ -1,15 +1,20 @@
 /**
- * 罗盘（首页）—— V2 演示图第 1 屏「数字罗盘 · 仿真模式」。
+ * 罗盘（首页）—— 参考图第 1 屏「数字罗盘 · 仿真模式」。
  *
  * 布局（核心数据优先，V2 §31）：
  *   标题栏 → 真北指示 → 深色大罗盘（可拖动）→
- *   当前方位（大字）+ 磁场强度卡 → 三快捷入口 → 今日状态
+ *   当前方位（大字）+ 磁场强度卡 → 去测盘 → 已存盘面
  *
  * 语义约定：
  *   - 本页罗盘是**仿真模式**：用户拖出的方向就是「当前方位」，
  *     不读取传感器（传感器测量在 /sensors 页，职责分离，V2 §30「一页一事」）。
  *   - 磁场卡的数据来自传感器；设备无磁力计/数据未到时显示「—」占位，
  *     **不编造数值**（RULE-008 同精神：没有就是没有）。
+ *
+ * 🔴 本页**不再放「扫描/传感器/手动」三个入口**，改为一个「去测盘」。
+ *    理由：底栏新增了「测盘」tab，那三条来源属于测盘流程；两处都放，
+ *    用户会以为它们是两套不同的功能，而其中一套（首页那三个）没有
+ *    模板库与档案详情。入口只留一处，职责边界才清楚。
  *
  * 深色仪器风（instrument 色域）仅用于罗盘域 —— 见《V2 评估与实施路线》冲突 2 裁决。
  */
@@ -60,7 +65,7 @@ export default function CompassHomeScreen(): React.JSX.Element {
           玄盘 AI
         </AppText>
         <View style={styles.headerActions}>
-          <HelpButton topic="compass-home" />
+          <HelpButton topic="compass-home" color={instrument.textSecondary} />
           <Pressable
             onPress={() => router.push('/mine')}
             accessibilityLabel="设置"
@@ -145,24 +150,28 @@ export default function CompassHomeScreen(): React.JSX.Element {
         </View>
       </View>
 
-      {/* ---------- 三快捷入口 ---------- */}
-      <View style={styles.quickRow}>
-        <QuickEntry
-          label="扫描真实罗盘"
-          icon="camera-outline"
-          onPress={() => router.push('/scan')}
-        />
-        <QuickEntry
-          label="传感器测量"
-          icon="radio-outline"
-          onPress={() => router.push('/sensors')}
-        />
-        <QuickEntry
-          label="手动调节"
-          icon="options-outline"
-          onPress={() => router.push('/adjust')}
-        />
-      </View>
+      {/* ---------- 去测盘（本页唯一的采集入口） ----------
+          五条数据来源统一收在「测盘」tab，此处只跳转、不重复列出。
+          故意**不在这里显示任何读数**：那属于测盘流程（一页一事）。 */}
+      <Pressable
+        onPress={() => router.push('/test')}
+        accessibilityRole="button"
+        accessibilityLabel="去测盘，选择数据来源"
+        style={({ pressed }) => [styles.cta, pressed && styles.ctaPressed]}
+      >
+        <View style={styles.ctaIcon}>
+          <Ionicons name="locate" size={22} color={instrument.accent} />
+        </View>
+        <View style={styles.ctaBody}>
+          <AppText size="md" weight="medium" color={instrument.text}>
+            去测盘
+          </AppText>
+          <AppText size="xs" color={instrument.textSecondary} style={styles.ctaDesc}>
+            拍摄真实罗盘 / 导入照片 / 手机传感器 / 手动输入 / 我的罗盘
+          </AppText>
+        </View>
+        <Ionicons name="chevron-forward" size={18} color={instrument.muted} />
+      </Pressable>
 
       {/* ---------- 今日状态 ---------- */}
       {data && data.total > 0 ? (
@@ -179,33 +188,9 @@ export default function CompassHomeScreen(): React.JSX.Element {
       ) : null}
 
       <AppText size="xs" color={instrument.muted} center style={styles.disclaimer}>
-        仿真模式仅用于熟悉盘面；实测请用传感器测量或扫描真实罗盘
+        仿真模式仅用于熟悉盘面；实测请到「测盘」选择数据来源
       </AppText>
     </Screen>
-  );
-}
-
-function QuickEntry({
-  label,
-  icon,
-  onPress,
-}: {
-  label: string;
-  icon: keyof typeof Ionicons.glyphMap;
-  onPress: () => void;
-}): React.JSX.Element {
-  return (
-    <Pressable
-      onPress={onPress}
-      accessibilityRole="button"
-      accessibilityLabel={label}
-      style={({ pressed }) => [styles.quick, pressed && styles.quickPressed]}
-    >
-      <Ionicons name={icon} size={22} color={instrument.accent} />
-      <AppText size="xs" weight="medium" color={instrument.text} center style={styles.quickLabel}>
-        {label}
-      </AppText>
-    </Pressable>
   );
 }
 
@@ -245,18 +230,28 @@ const styles = StyleSheet.create({
   magValue: { marginTop: space[2], fontVariant: ['tabular-nums'] },
   magStatus: { flexDirection: 'row', alignItems: 'center', gap: space[1], marginTop: space[1] },
   dot: { width: 6, height: 6, borderRadius: 3 },
-  quickRow: { flexDirection: 'row', gap: space[3], marginTop: space[4] },
-  quick: {
-    flex: 1,
+  cta: {
+    flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: space[3],
+    gap: space[3],
+    marginTop: space[4],
+    padding: space[3],
     borderRadius: radius.lg,
     backgroundColor: instrument.surface,
     borderWidth: 1,
     borderColor: instrument.border,
   },
-  quickPressed: { backgroundColor: instrument.surfaceAlt },
-  quickLabel: { marginTop: space[2] },
+  ctaPressed: { backgroundColor: instrument.surfaceAlt },
+  ctaIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: radius.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: instrument.surfaceAlt,
+  },
+  ctaBody: { flex: 1 },
+  ctaDesc: { marginTop: 2, lineHeight: 17 },
   statsCard: {
     marginTop: space[4],
     backgroundColor: instrument.surface,

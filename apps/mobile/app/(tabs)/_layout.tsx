@@ -1,7 +1,12 @@
 /**
- * 底部导航 —— 固定 5 栏，顺序不可调换（基线规范 §1，裁定 1「方案 A」）。
+ * 底部导航 —— 固定 5 栏，顺序不可调换。
  *
- *   罗盘 ｜ 命盘 ｜ 占测 ｜ 历史 ｜ 我的
+ *   罗盘 ｜ 测盘 ｜ 分析 ｜ 历史 ｜ 我的
+ *
+ * 与初版（罗盘 / 命盘 / 占测 / 历史 / 我的）相比，把「命盘」「占测」并入了「分析」：
+ * 底栏是给**高频动作**留的位置。测盘（拍盘 / 对盘 / 存盘）天天要做，
+ * 而排盘是"想起来才做一次"的。四个低频谱术式摊在底栏，会把高频的测盘挤掉。
+ * 术式入口一个都没少，只是搬进 `analysis.tsx` 这一层内页（见该文件注释）。
  *
  * 图标用 `@expo/vector-icons` 的 Ionicons（随 Expo 内置，无需额外字体文件）。
  * 激活色用主色（深蓝），未激活用 muted —— 不用朱红：朱红在本产品里
@@ -64,21 +69,22 @@ export default function TabsLayout(): React.JSX.Element {
           tabBarIcon: tabIcon('compass', 'compass-outline'),
         }}
       />
+      {/* 测盘：深色域页面，标题栏由页面自己画（与 index 一致）。
+          用 tab 的浅色标题栏压在一个深色页面上，会出现"浅色顶 + 深色身"的割裂。 */}
       <Tabs.Screen
-        name="chart"
+        name="test"
         options={{
-          title: '命盘',
-          headerTitle: '命盘',
-          headerRight: helpHeaderRight('chart'),
-          tabBarIcon: tabIcon('planet', 'planet-outline'),
+          title: '测盘',
+          headerShown: false,
+          tabBarIcon: tabIcon('locate', 'locate-outline'),
         }}
       />
       <Tabs.Screen
-        name="divine"
+        name="analysis"
         options={{
-          title: '占测',
-          headerTitle: '占测',
-          headerRight: helpHeaderRight('divine'),
+          title: '分析',
+          headerTitle: '分析',
+          headerRight: helpHeaderRight('analysis'),
           tabBarIcon: tabIcon('sparkles', 'sparkles-outline'),
         }}
       />

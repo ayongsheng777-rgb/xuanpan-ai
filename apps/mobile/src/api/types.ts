@@ -106,6 +106,73 @@ export interface SessionCreated {
   title: string;
 }
 
+// ==========================================================================
+// 罗盘模板库
+// ==========================================================================
+
+/**
+ * 罗盘模板 —— 一套「盘式 + 默认坐向」的命名预设。
+ *
+ * 🔴 **接口里没有 `layers` 字段，这是有意的。**
+ * 「盘式 → 层数」的表在 `lib/dialStyle.ts`，后端刻意不存副本 ——
+ * 两边各存一份必然漂移，而漂移的表现是「列表写 18 层、打开画出 6 层」，
+ * 数字对不上却不报任何错。层数一律由前端 `DIAL_STYLES[style].statedLayers` 查得。
+ *
+ * 同理 `style` 声明成 `string` 而不是联合类型：后端不校验枚举
+ * （删掉某个盘式后旧模板仍要能读出来），故这里拿到的可能是未知值，
+ * 使用前必须过 `coerceDialStyle`。
+ */
+export interface CompassTemplate {
+  template_id: string;
+  created_at: string;
+  updated_at: string;
+  name: string;
+  /** 盘式 id。**可能是未知值**（旧存档），用前过 `coerceDialStyle` */
+  style: string;
+  sitting: string | null;
+  facing: string | null;
+  degree: number | null;
+  school: string;
+  note: string | null;
+  is_favorite: boolean;
+  use_count: number;
+  last_used_at: string | null;
+}
+
+export interface TemplateListResponse {
+  items: CompassTemplate[];
+  total: number;
+}
+
+export interface TemplateCreateRequest {
+  name: string;
+  style?: string;
+  sitting?: string | null;
+  facing?: string | null;
+  degree?: number | null;
+  school?: string;
+  note?: string | null;
+  is_favorite?: boolean;
+}
+
+/**
+ * 局部更新请求 —— 只给要改的字段。
+ *
+ * 刻意不写成 `Partial<CompassTemplate>`：那样会允许传 `template_id` /
+ * `created_at` 等不可变字段，而服务端会 422（`extra="forbid"`），
+ * 变成一个到运行时才发现的错误。
+ */
+export interface TemplateUpdateRequest {
+  name?: string;
+  style?: string;
+  sitting?: string | null;
+  facing?: string | null;
+  degree?: number | null;
+  school?: string;
+  note?: string | null;
+  is_favorite?: boolean;
+}
+
 export interface DeletedResponse {
   deleted: boolean;
   session_id: string;

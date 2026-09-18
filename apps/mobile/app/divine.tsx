@@ -11,7 +11,7 @@
  */
 
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { Stack, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
 import { Pressable, StyleSheet, TextInput, View } from 'react-native';
 
@@ -23,6 +23,7 @@ import { Button, Card, Divider, EmptyState, KeyValueRow } from '@/components/Car
 import { Chip } from '@/components/Chip';
 import { DuanCard } from '@/components/DuanCard';
 import { FactList } from '@/components/FactList';
+import { helpHeaderRight } from '@/components/HelpButton';
 import { Screen } from '@/components/Screen';
 import { SegmentedTabs } from '@/components/SegmentedTabs';
 import { isToday, shiftDays, todayISODate, weekdayLabel } from '@/lib/date';
@@ -45,6 +46,10 @@ export default function DivineScreen(): React.JSX.Element {
 
   return (
     <Screen scroll>
+      {/* 本页已从底栏「占测」tab 收进「分析」内页，标题在此声明 */}
+      <Stack.Screen
+        options={{ title: '六爻 · 灵签', headerRight: helpHeaderRight('divine') }}
+      />
       <SegmentedTabs
         items={[
           { key: 'liuyao', label: '六爻' },
