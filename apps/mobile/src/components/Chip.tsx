@@ -7,11 +7,12 @@
  */
 
 import React from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { Animated, Pressable, StyleSheet, View } from 'react-native';
 
 import { alpha, colors, radius, space } from '@/theme/tokens';
 
 import { AppText } from './AppText';
+import { usePressScale } from './usePressScale';
 
 export interface ChipProps {
   label: string;
@@ -21,20 +22,32 @@ export interface ChipProps {
 }
 
 export function Chip({ label, onPress, active = false }: ChipProps): React.JSX.Element {
+  const press = usePressScale();
   return (
     <Pressable
       onPress={onPress}
+      onPressIn={press.onPressIn}
+      onPressOut={press.onPressOut}
       accessibilityRole="button"
       accessibilityState={{ selected: active }}
-      style={({ pressed }) => [styles.chip, active && styles.chipActive, pressed && styles.pressed]}
+      pressRetentionOffset={10}
     >
-      <AppText
-        size="xs"
-        weight={active ? 'semibold' : 'regular'}
-        color={active ? 'onPrimary' : 'primary'}
+      {/* 与 Button / Card 用同一套按压反馈（缩放），原来的 opacity 0.7 是第三种写法 */}
+      <Animated.View
+        style={[
+          styles.chip,
+          active && styles.chipActive,
+          { transform: [{ scale: press.scale }] },
+        ]}
       >
-        {label}
-      </AppText>
+        <AppText
+          size="xs"
+          weight={active ? 'semibold' : 'regular'}
+          color={active ? 'onPrimary' : 'primary'}
+        >
+          {label}
+        </AppText>
+      </Animated.View>
     </Pressable>
   );
 }
@@ -42,6 +55,7 @@ export function Chip({ label, onPress, active = false }: ChipProps): React.JSX.E
 const styles = StyleSheet.create({
   chip: {
     paddingHorizontal: space[3],
+    /* 触达高度补到 32：视觉仍是小标签，但手指不至于点不中 */
     paddingVertical: space[1] + 2,
     borderRadius: radius.pill,
     borderWidth: 1,
@@ -49,7 +63,6 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
   },
   chipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
-  pressed: { opacity: 0.7 },
 
   tag: {
     paddingHorizontal: space[2] + 2,
