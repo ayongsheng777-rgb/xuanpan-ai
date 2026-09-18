@@ -18,152 +18,438 @@
   · 从 URL 读取后立刻 replaceState 清掉，避免残留在浏览器历史与 Referer 里。
 -->
 <style>
+  /* ==========================================================================
+     设计 token —— 为什么值得单列一层
+     ==========================================================================
+     本页**刻意不属于 APP 的设计系统**（见文件头：单文件、零依赖、零构建；
+     使用者是坐在电脑前的运维，不是手持手机的用户）。所以这里保留"工程控制台"
+     的冷与密，**不去靠拢 APP 的暖色金调** —— 两套体系并存是有意为之。
+
+     但它同样不该有"没被决定过"的值。下面每条都是被决定过的，并附理由：
+
+     间距 —— 4pt 栅格。此前实际用到 1/2/5/6/7/10/11/14 共 8 种非 4 倍数，
+             那不是"精细"，是没有栅格：同类元素在不同卡片里差 1~2px，
+             用户说不出哪里不对，只觉得"不够整"。
+     文字 —— 四级。**每级都实测过对比度**（脚本算，不靠眼睛）。
+             🔴 刻意**不做第四级"更淡的字色"**：#8A929C 在白底只有 3.15:1、
+             #9AA3AE 只有 2.55:1，都过不了 4.5:1。需要"更弱"时**降字号或降字重**，
+             不要靠继续调淡 —— 那是拿可读性换层次。
+     深度 —— **只选一种：描边**。全页不引入投影。
+             混用两种深度策略是界面显得业余最快的路径；而"技术型、密、工具"
+             这一类本来就应该用描边（浅底投影在密集列表里只会让边缘发脏）。
+     对比基线 —— 正文/小字 ≥4.5:1，大字与图形边界 ≥3:1。
+             禁用态不适用（WCAG 1.4.3 对 inactive 组件免除对比要求）。
+     ========================================================================== */
   :root {
+    /* 品牌五色 —— 与 APP 同一套（SSOT 已裁定），不可擅改 */
     --brand-primary: #013A6C;
     --brand-gold:    #DAB37D;
     --brand-sand:    #E5D7C7;
     --brand-jade:    #3C7066;
     --brand-cinnabar:#B93E35;
 
-    --bg:      #F7F5F2;
-    --surface: #FFFFFF;
-    --border:  #E3DED6;
-    --text:    #1F2937;
-    --muted:   #6B7280;
-    --radius:  10px;
+    --bg:            #F7F5F2;
+    --surface:       #FFFFFF;
+    /* 输入框底**比周围略深**：控件是"凹陷、要往里写字"的容器。
+       做成比周围更亮，读起来会像"浮起来的按钮"。 */
+    --surface-sunken:#F3F0EB;
+    --surface-hover: #FAF8F5;
+    --border:        #E3DED6;
+    /* 第二档描边：给"必须看得见边界"的地方（输入框、粘底工具条）。
+       一档描边走到底会让控件边界在浅底上糊掉。 */
+    --border-strong: #CDC5B8;
+
+    /* 文字三级，全部实测达标（括号内为白底对比度） */
+    --text:   #1F2937;   /* 一级 14.68:1 —— 标题与值 */
+    --text-2: #4B5563;   /* 二级  7.56:1 —— 说明、表单标签 */
+    --muted:  #6B7280;   /* 三级  4.83:1 —— **这是最淡的一个文字色**，见上方说明 */
+
+    /* 语义三件套：前景 / 底 / 描边。
+       同一语义的三个色值放在一起，改的时候不会只改一半 ——
+       此前 banner 的底色手写在 CSS、前景色却在别处，
+       "描边变了、字色没变"这种半改状态迟早会出现。 */
+    --ok-fg:#2F5A52;   --ok-bg:#EDF3F1;   --ok-bd:#C6DCD5;
+    --warn-fg:#6F5219; --warn-bg:#FBF3E3; --warn-bd:#E8D5AC;
+    --bad-fg:#8F2F28;  --bad-bg:#FBF0EE;  --bad-bd:#EFC9C5;
+    --info-fg:#013A6C; --info-bg:#EEF3F8; --info-bd:#C9D8E6;
+
+    /* 间距 4pt 栅格 */
+    --s1:4px; --s2:8px; --s3:12px; --s4:16px; --s5:20px; --s6:24px; --s7:32px;
+
+    /* 圆角阶梯：控件小、卡片大。嵌套元素同半径是"说不上哪里不对"的常见来源 */
+    --r-xs:4px; --r-ctl:6px; --r-card:10px; --r-pill:999px;
+
+    /* 文字阶梯（≈1.2 比率，密/静的档）。
+       title 必须 ≥ body 且不比 body 淡 —— 见下方 .card h2 的说明。 */
+    --t-caption:11px; --t-meta:12px; --t-body:14px; --t-title:15px;
+    --t-h1:17px; --t-display:28px;
+
+    --w-reg:400; --w-med:500; --w-semi:600; --w-bold:700;
+
+    /* 动效常量：悬停/按压是**最高频**的交互，只允许 150ms 以内。
+       上限放在变量里，避免各处各写一个 duration。 */
+    --dur:120ms;
+    --ease:cubic-bezier(.23, 1, .32, 1);
+
+    /* 交互态色：按钮的 hover/active 需要**比主色浅一点**（悬停）与
+       **比主色深一点**（按下）两个明确档位。写死在各自的规则里时，
+       想统一调一次手感就要满文件找 —— 而"找漏一处"表现为某个按钮手感不一样。 */
+    --primary-hover:  #0B4E82;
+    --primary-active: #012B50;
+    --danger-hover:   #A5342C;
+    --danger-active:  #8F2C25;
+
+    /* 主色底之上的前景色族（顶部深色栏）。半透明白只能叠在**已知的深色底**上，
+       所以这五个必须和 --brand-primary 成组使用，不能拿去配浅底。 */
+    --on-brand:             #FFFFFF;
+    --on-brand-line:        rgba(255,255,255,.35);
+    --on-brand-line-hover:  rgba(255,255,255,.55);
+    --on-brand-fill:        rgba(255,255,255,.10);
+    --on-brand-fill-hover:  rgba(255,255,255,.14);
+
+    /* 金色系底纹。gold 是品牌色，不能整体调淡，只能以**底纹**形式参与层次 ——
+       所以这几个透明度是成套的，改要一起改。 */
+    --tint-gold:        rgba(218,179,125,.10);  /* 未保存的配置项底纹 */
+    --tint-gold-select: rgba(218,179,125,.16);  /* 表格选中行底纹 */
+    --tint-gold-strong: rgba(218,179,125,.28);  /* 「新增」标签底 / 徽章描边 */
+    /* 内联 code 的底：让变量名、路径从周围正文里浮出来 */
+    --tint-code: rgba(1,58,108,.07);
   }
   * { box-sizing: border-box; }
   body {
     margin: 0; background: var(--bg); color: var(--text);
-    font: 14px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif;
+    font: var(--t-body)/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  /* 凡数值会**原地变化**、或需要按位对齐的地方，一律等宽数字。
+     比例数字下 "1" 比 "8" 窄，读数一跳整行长度就跳 —— 看起来像界面在闪。
+     此前全文件 tabular-nums 出现 0 次（这不是审美问题，是读数会不会抖）。 */
+  .stat .n, .kv .v, td, .envnote, pre, .mono, .badge {
+    font-variant-numeric: tabular-nums;
   }
   code, pre, .mono { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; }
 
-  header {
-    background: var(--brand-primary); color: #fff;
-    padding: 14px 20px; display: flex; align-items: center; gap: 14px;
+  /* ---- 焦点可见性（无障碍硬要求，不是审美）--------------------------------
+     此前只有 input/select 有焦点样式，而且用的是品牌金 --brand-gold：
+     实测金 on 白 = **1.96:1**，几乎看不见（非文本对比要求 ≥3:1）；
+     按钮则**完全没有**焦点样式 —— 键盘用户根本不知道焦点在哪。
+     现在统一到主色：主色 on 白 = 11.52:1。 */
+  :where(a, button, input, select, textarea, [tabindex]):focus-visible {
+    outline: 2px solid var(--brand-primary);
+    outline-offset: 2px;
   }
-  header h1 { font-size: 16px; margin: 0; font-weight: 600; letter-spacing: .5px; }
+  /* 文本类控件用 :focus 而非仅 :focus-visible：
+     鼠标点进输入框同样需要"我现在在这里"的信号（键盘语义对它不适用）。 */
+  input:focus, select:focus {
+    outline: 2px solid var(--brand-primary);
+    outline-offset: 0;
+    border-color: var(--brand-primary);
+    background: var(--surface);
+  }
+
+  /* ---- 动效退化 --------------------------------------------------------- */
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      transition-duration: .01ms !important;
+      animation-duration: .01ms !important;
+    }
+    button.btn:active, header button.link:active { transform: none; }
+  }
+
+  header {
+    background: var(--brand-primary); color: var(--on-brand);
+    padding: var(--s3) var(--s5); display: flex; align-items: center; gap: var(--s3);
+  }
+  header h1 {
+    font-size: var(--t-h1); margin: 0; font-weight: var(--w-semi);
+    letter-spacing: .2px; text-wrap: balance;
+  }
   header .badge {
-    font-size: 12px; padding: 2px 8px; border-radius: 999px;
-    background: rgba(255,255,255,.15); color: var(--brand-gold);
+    font-size: var(--t-meta); padding: 2px var(--s2); border-radius: var(--r-pill);
+    /* 底色从 15% 白降到 10% 白：原先那层白把金字的对比度压到 3.82:1（低于 4.5）。
+       同时给描边，让徽章在深底上有明确的边界而不是靠发光感。
+       2px 的纵向内距是**光学**值不是栅格值：12px 的字配 4px 就会变成胖胶囊，
+       与它"标注"的身份不符。 */
+    background: var(--on-brand-fill); color: var(--brand-gold);
+    border: 1px solid var(--tint-gold-strong);
   }
   header .spacer { flex: 1; }
   header button.link {
-    background: none; border: 1px solid rgba(255,255,255,.35); color: #fff;
-    padding: 4px 12px; border-radius: 999px; cursor: pointer; font-size: 12px;
+    background: none; border: 1px solid var(--on-brand-line); color: var(--on-brand);
+    padding: var(--s1) var(--s3); border-radius: var(--r-pill); cursor: pointer;
+    font-size: var(--t-meta); font-family: inherit; min-height: 28px;
+    transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease),
+                transform var(--dur) var(--ease);
   }
-  header button.link:hover { background: rgba(255,255,255,.12); }
+  header button.link:hover { background: var(--on-brand-fill-hover); border-color: var(--on-brand-line-hover); }
+  header button.link:active { transform: translateY(1px); }
 
   nav {
     background: var(--surface); border-bottom: 1px solid var(--border);
-    padding: 0 20px; display: flex; gap: 4px; position: sticky; top: 0; z-index: 10;
+    padding: 0 var(--s5); display: flex; gap: var(--s1);
+    position: sticky; top: 0; z-index: 10;
   }
   nav button {
     background: none; border: none; border-bottom: 2px solid transparent;
-    padding: 12px 16px; cursor: pointer; color: var(--muted);
-    font-size: 14px; font-weight: 500;
+    padding: var(--s3) var(--s4); cursor: pointer; color: var(--muted);
+    font-size: var(--t-body); font-weight: var(--w-med); font-family: inherit;
+    transition: color var(--dur) var(--ease), border-color var(--dur) var(--ease);
   }
   nav button:hover { color: var(--brand-primary); }
-  nav button.active { color: var(--brand-primary); border-bottom-color: var(--brand-gold); }
+  /* 选中态同时给**颜色 + 字重 + 下划线**三重信号：
+     只靠颜色的话，弱视用户与灰度屏上这四个 tab 完全分不出当前在哪。 */
+  nav button.active {
+    color: var(--brand-primary); font-weight: var(--w-semi);
+    border-bottom-color: var(--brand-gold);
+  }
 
-  main { padding: 20px; max-width: 1180px; margin: 0 auto; }
-  .grid { display: grid; gap: 14px; }
-  .grid.cols-2 { grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
-  .grid.cols-4 { grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
+  main { padding: var(--s5); max-width: 1180px; margin: 0 auto; }
+  .grid { display: grid; gap: var(--s4); }
+  .grid.cols-2 { grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
+  .grid.cols-4 { grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); }
 
   .card {
     background: var(--surface); border: 1px solid var(--border);
-    border-radius: var(--radius); padding: 16px;
+    border-radius: var(--r-card); padding: var(--s4);
   }
+  /* 🔴 卡片标题**不得比它管的正文更小、更淡**。
+     此前是 13px + --muted，而 body 是 14px + --text —— 标题比自己管的正文
+     更小更淡，读起来像"这行是个标签"而不是"这是一块的标题"。
+     这类层级倒挂**不会让任何测试失败**，只能靠规则守（APP 侧同一处已修）。
+     另外：**text-transform: uppercase 对中文完全无效**（中文没有大小写），
+     原来那条是照英文后台模板抄来的，实际只剩 letter-spacing 在撑，已删。
+     中文的层级只能靠「字号 × 字重 × 颜色」三件套。 */
   .card h2 {
-    font-size: 13px; margin: 0 0 12px; color: var(--muted);
-    text-transform: uppercase; letter-spacing: .8px; font-weight: 600;
+    font-size: var(--t-title); margin: 0 0 var(--s3);
+    color: var(--text); font-weight: var(--w-semi);
+    letter-spacing: .1px; text-wrap: balance;
   }
-  .card h3 { font-size: 14px; margin: 16px 0 8px; color: var(--brand-primary); }
+  /* 卡内小节：与正文**同号**，靠字重与颜色区分。
+     字号不动是刻意的 —— 再往上加一档，中文在 15px 附近就开始出现
+     13/14/15 那种"看着都一样"的糊档。字重比字号更能拉开层级。 */
+  .card h3 {
+    font-size: var(--t-body); margin: var(--s4) 0 var(--s2);
+    color: var(--text-2); font-weight: var(--w-semi);
+  }
   .card h3:first-child { margin-top: 0; }
 
+  /* 读数：概览页的**焦点**。它赢得最大字号 + 最高对比 + 等宽对齐；
+     标签被刻意降级到 meta + muted。层级来自"一大一小"的落差，不靠装饰。 */
   .stat { text-align: center; }
-  .stat .n { font-size: 26px; font-weight: 700; color: var(--brand-primary); line-height: 1.2; }
-  .stat .k { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .stat .n {
+    font-size: var(--t-display); font-weight: var(--w-bold);
+    color: var(--brand-primary); line-height: 1.15;
+    letter-spacing: -.5px;   /* 大字号收紧字距，否则读起来像正文放大 */
+  }
+  /* 字符串型读数（如 260.0 KB）走这一档。
+     🔴 原先是在 JS 里内联了一个 font-size 覆盖 —— 同一个元素两个字号，
+     由"这个值恰好是字节串"决定，属于绕过样式表的一次性补丁。
+     现在改成语义修饰类，理由变得可读：**位数多的读数需要就位**。 */
+  .stat .n.is-text { font-size: var(--t-h2); letter-spacing: -.2px; }
+  .stat .k { font-size: var(--t-meta); color: var(--muted); margin-top: var(--s1); }
 
-  .kv { display: flex; justify-content: space-between; gap: 12px; padding: 5px 0; font-size: 13px; border-bottom: 1px dashed var(--border); }
+  .kv {
+    display: flex; justify-content: space-between; gap: var(--s3);
+    padding: var(--s2) 0; font-size: var(--t-body);
+    border-bottom: 1px dashed var(--border);
+  }
   .kv:last-child { border-bottom: none; }
-  .kv .k { color: var(--muted); flex-shrink: 0; }
-  .kv .v { text-align: right; word-break: break-all; }
+  /* 键比值小一档是对的：这是「标签—值」对，不是标题与正文。
+     标签本就是配角，压小反而让值更突出。 */
+  .kv .k { color: var(--muted); font-size: var(--t-meta); flex-shrink: 0; }
+  .kv .v { text-align: right; font-weight: var(--w-med); overflow-wrap: anywhere; }
+  /* 值为整段文本（如多轮对话的一问一答）时不右对齐 ——
+     右对齐只适合短值，长文本右对齐会让每行起点参差不齐、无法扫读。
+     原先靠内联 style 覆盖，现改为具名类。 */
+  .kv .v.is-text { text-align: left; font-weight: var(--w-reg); line-height: 1.7; }
 
-  .pill { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px; font-weight: 500; }
-  .pill.ok   { background: rgba(60,112,102,.12); color: var(--brand-jade); }
-  .pill.bad  { background: rgba(185,62,53,.10); color: var(--brand-cinnabar); }
-  .pill.warn { background: rgba(218,179,125,.24); color: #8a6a33; }
-  .pill.mute { background: #EFEBE6; color: var(--muted); }
+  /* 状态标签：三件套（底/字/描边）成套引用，不再手写 rgba。
+     此前 warn 的前景色 #8a6a33 实测只有 4.32:1、mute 用 --muted 只有 4.07:1，
+     都低于 4.5 —— 已换成达标色值（见 :root 注释）。 */
+  .pill {
+    display: inline-block; padding: 1px var(--s2); border-radius: var(--r-pill);
+    font-size: var(--t-meta); font-weight: var(--w-med);
+    border: 1px solid transparent; white-space: nowrap;
+  }
+  .pill.ok   { background: var(--ok-bg);   color: var(--ok-fg);   border-color: var(--ok-bd); }
+  .pill.bad  { background: var(--bad-bg);  color: var(--bad-fg);  border-color: var(--bad-bd); }
+  .pill.warn { background: var(--warn-bg); color: var(--warn-fg); border-color: var(--warn-bd); }
+  .pill.mute { background: var(--surface-sunken); color: var(--text-2); border-color: var(--border); }
 
-  table { width: 100%; border-collapse: collapse; font-size: 13px; }
-  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); }
-  th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .5px; }
-  tbody tr:hover { background: #FAF8F6; }
-  tbody tr.selected { background: rgba(218,179,125,.16); }
-  td.mono { font-size: 12px; color: var(--muted); }
+  table { width: 100%; border-collapse: collapse; font-size: var(--t-body); }
+  th, td { text-align: left; padding: var(--s2) var(--s3); border-bottom: 1px solid var(--border); }
+  th {
+    color: var(--muted); font-weight: var(--w-semi); font-size: var(--t-meta);
+    /* 同样去掉 uppercase（对中文无效），用字距把表头与单元格数据拉开 */
+    letter-spacing: .4px; white-space: nowrap;
+  }
+  tbody tr { transition: background var(--dur) var(--ease); }
+  tbody tr:hover { background: var(--surface-hover); }
+  /* 选中行：底纹 + 左侧 3px 实心条。
+     只用底纹时，在灰色调屏幕/低亮度下几乎看不出选中的是哪一行；
+     左侧实心条是**不依赖色相**的第二重信号。
+     用 inset 描边而不是 border-left，避免选中时行内容整体右移 3px。 */
+  tbody tr.selected {
+    background: var(--tint-gold-select);
+    box-shadow: inset 3px 0 0 0 var(--brand-gold);
+  }
+  td.mono { font-size: var(--t-meta); color: var(--muted); }
 
   button.btn {
-    background: var(--brand-primary); color: #fff; border: none;
-    padding: 7px 14px; border-radius: 6px; cursor: pointer; font-size: 13px;
+    background: var(--brand-primary); color: var(--on-brand);
+    border: 1px solid var(--brand-primary);   /* 与 .ghost 同框模型，切换变体时不会跳尺寸 */
+    padding: var(--s2) var(--s3); border-radius: var(--r-ctl); cursor: pointer;
+    font-size: var(--t-body); font-weight: var(--w-med); font-family: inherit;
+    min-height: 34px;
+    transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease),
+                transform var(--dur) var(--ease);
   }
-  button.btn:hover { filter: brightness(1.12); }
-  button.btn:disabled { opacity: .5; cursor: not-allowed; }
-  button.btn.ghost { background: transparent; color: var(--brand-primary); border: 1px solid var(--border); }
-  button.btn.danger { background: var(--brand-cinnabar); }
-  button.btn.sm { padding: 4px 10px; font-size: 12px; }
+  /* 悬停/按压都写实数色值（走 token），不用 filter: brightness()：
+     filter 会把文字一起提亮，且在各浏览器上的结果不一致。 */
+  button.btn:hover { background: var(--primary-hover); border-color: var(--primary-hover); }
+  /* 按压反馈：位移 1px + 背景变深。
+     全站**唯一一种**按下反馈 —— 此前只有 :hover，没有任何按下态，
+     点下去毫无"被听到"的回应（APP 侧同类问题已统一，这里对齐同一原则）。 */
+  button.btn:active { background: var(--primary-active); border-color: var(--primary-active); transform: translateY(1px); }
+  /* 禁用态：不用 opacity —— 半透明的主色按钮在浅底上仍像个"能点的蓝按钮"，
+     用户会反复点。改成中性的灰底 + 灰字，语义一眼可辨（颜色对比不受
+     WCAG 约束，inactive 组件被豁免）。 */
+  button.btn:disabled {
+    background: var(--surface-sunken); color: var(--muted);
+    border-color: var(--border); cursor: not-allowed; transform: none;
+  }
+  button.btn.ghost { background: transparent; color: var(--brand-primary); border-color: var(--border-strong); }
+  button.btn.ghost:hover { background: var(--surface-hover); border-color: var(--brand-primary); }
+  button.btn.ghost:active { background: var(--surface-sunken); }
+  button.btn.ghost:disabled { background: transparent; color: var(--muted); border-color: var(--border); }
+  button.btn.danger { background: var(--brand-cinnabar); border-color: var(--brand-cinnabar); }
+  button.btn.danger:hover { background: var(--danger-hover); border-color: var(--danger-hover); }
+  button.btn.danger:active { background: var(--danger-active); border-color: var(--danger-active); }
+  button.btn.sm { padding: var(--s1) var(--s2); font-size: var(--t-meta); min-height: 28px; }
 
   input, select {
-    border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px;
-    font-size: 13px; background: #fff; color: var(--text); font-family: inherit;
+    border: 1px solid var(--border-strong); border-radius: var(--r-ctl);
+    padding: var(--s2) var(--s3); font-size: var(--t-body);
+    background: var(--surface-sunken); color: var(--text); font-family: inherit;
+    min-height: 34px;
+    transition: border-color var(--dur) var(--ease), background var(--dur) var(--ease);
   }
-  input:focus, select:focus { outline: 2px solid var(--brand-gold); outline-offset: -1px; }
-  label { font-size: 12px; color: var(--muted); display: block; margin-bottom: 4px; }
-  .field { margin-bottom: 10px; }
-  .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; }
-  .row > * { flex: 1 1 150px; }
+  input:hover, select:hover { border-color: var(--muted); }
+  label {
+    font-size: var(--t-meta); color: var(--text-2); display: block;
+    margin-bottom: var(--s1); font-weight: var(--w-med);
+  }
+  .field { margin-bottom: var(--s3); }
+  .row { display: flex; gap: var(--s3); flex-wrap: wrap; align-items: flex-end; }
+  .row > * { flex: 1 1 160px; }
   .row > .shrink { flex: 0 0 auto; }
+  .w-full { width: 100%; }
+
+  /* 触屏设备才补命中区。44px 是**触摸**标准，不是桌面标准 ——
+     给指针设备套 44px 会把工具栏的密度整个吃掉，反而更难用。
+     管理台偶尔会在手机上打开（局域网随手看一下），所以两条都要有。 */
+  @media (pointer: coarse) {
+    button.btn { min-height: 44px; }
+    button.btn.sm { min-height: 40px; }
+    input, select { min-height: 44px; }
+    nav button { padding: var(--s4) var(--s4); }
+  }
 
   pre.out {
-    background: #FBF9F7; border: 1px solid var(--border); border-radius: 8px;
-    padding: 12px; font-size: 12px; line-height: 1.55; overflow: auto;
-    max-height: 460px; margin: 12px 0 0; white-space: pre-wrap; word-break: break-all;
+    background: var(--surface-sunken); border: 1px solid var(--border);
+    border-radius: var(--r-ctl); padding: var(--s3);
+    font-size: var(--t-meta); line-height: 1.6; overflow: auto;
+    max-height: 460px; margin: var(--s3) 0 0;
+    /* break-all 保留：接口返回的 JSON 长串里没有空格可断，
+       换成 break-word 会让它撑出横向滚动条。 */
+    white-space: pre-wrap; word-break: break-all;
   }
-  .hint { color: var(--muted); font-size: 12px; }
+  .hint { color: var(--muted); font-size: var(--t-meta); line-height: 1.6; }
   .banner {
-    border-radius: var(--radius); padding: 12px 14px; margin-bottom: 14px; font-size: 13px;
+    border-radius: var(--r-card); padding: var(--s3) var(--s4);
+    margin-bottom: var(--s4); font-size: var(--t-body); line-height: 1.65;
     border: 1px solid;
   }
-  .banner.error { background: rgba(185,62,53,.06); border-color: rgba(185,62,53,.3); color: #7a2b26; }
-  .banner.info  { background: rgba(1,58,108,.05);  border-color: rgba(1,58,108,.2);  color: var(--brand-primary); }
-  .banner pre { margin: 8px 0 0; white-space: pre-wrap; font-size: 12px; }
+  .banner.error { background: var(--bad-bg);  border-color: var(--bad-bd);  color: var(--bad-fg); }
+  .banner.info  { background: var(--info-bg); border-color: var(--info-bd); color: var(--info-fg); }
+  /* 文案里大量出现配置项名与环境变量名，给内联 code 一点底色，
+     否则 <code> 与周围正文在视觉上完全等价，读者会漏掉"这是个变量名"。 */
+  .banner code, .hint code {
+    background: var(--tint-code); padding: 1px var(--s1);
+    border-radius: var(--r-xs); font-size: .92em;
+  }
+  .banner b, .banner strong { font-weight: var(--w-semi); }
+  .banner pre { margin: var(--s2) 0 0; white-space: pre-wrap; font-size: var(--t-meta); }
 
-  .gates { min-height: 60vh; display: flex; align-items: center; justify-content: center; padding: 20px; }
+  .gates { min-height: 60vh; display: flex; align-items: center; justify-content: center; padding: var(--s5); }
   .gates .card { max-width: 620px; width: 100%; }
   .hidden { display: none !important; }
   .right { text-align: right; }
-  .mt { margin-top: 12px; }
-  .empty { padding: 28px; text-align: center; color: var(--muted); font-size: 13px; }
+  .mt { margin-top: var(--s3); }
+  .mb { margin-bottom: var(--s3); }
+  /* 空态：不写"暂无数据"就完事 —— 要给出"下一步做什么"。
+     这在 APP 侧是一条硬约束（空态组件必须给可操作提示），这里沿用同一原则。 */
+  .empty {
+    padding: var(--s6); text-align: center; color: var(--muted);
+    font-size: var(--t-body); line-height: 1.8;
+  }
 
   /* ── 配置面板 ────────────────────────────────────────────── */
-  .cfgItem { padding: 11px 0; border-bottom: 1px dashed var(--border); }
+  /* 每项统一留出 12px 左内距当"标记槽"。
+     这样下面的 .dirty 标记条有地方落，而且**切换 dirty 时内容不会位移** ——
+     原先是 `padding-left:9px; margin-left:-12px` 的负边距写法，
+     编辑任意一项都会让整行文字横向跳 12px，是那种"说不出哪里怪"的抖动来源。 */
+  .cfgItem {
+    padding: var(--s3) 0 var(--s3) var(--s3);
+    border-bottom: 1px dashed var(--border);
+  }
   .cfgItem:last-child { border-bottom: none; }
-  .cfgHead { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 6px; }
-  .cfgKey { font-size: 13px; font-weight: 600; color: var(--text); }
-  .cfgItem .desc { font-size: 12px; color: var(--muted); margin-bottom: 6px; line-height: 1.5; }
-  .cfgItem .ctrl { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-  .cfgItem .ctrl > input, .cfgItem .ctrl > select { flex: 1 1 200px; min-width: 0; }
-  .cfgItem .ctrl > .fixed { flex: 1 1 200px; }
-  .cfgItem.dirty { background: rgba(218,179,125,.10); border-left: 3px solid var(--brand-gold); padding-left: 9px; margin-left: -12px; }
-  .envnote { font-size: 11px; color: var(--muted); font-family: "SFMono-Regular", Consolas, monospace; }
-  .tag-new { background: rgba(218,179,125,.28); color: #7a5a25; }
-  .ro { background: #F5F3F0; color: var(--muted); }
+  /* 未保存的改动：底纹 + 左侧实心条。
+     用 inset 描边而非 border-left —— inset 不占布局，是上面"不位移"的另一半原因。 */
+  .cfgItem.dirty {
+    background: var(--tint-gold);
+    border-radius: 0 var(--r-ctl) var(--r-ctl) 0;
+    box-shadow: inset 3px 0 0 0 var(--brand-gold);
+  }
+  .cfgHead { display: flex; align-items: center; gap: var(--s2); flex-wrap: wrap; margin-bottom: var(--s1); }
+  .cfgKey { font-size: var(--t-body); font-weight: var(--w-semi); color: var(--text); }
+  .cfgItem .desc { font-size: var(--t-meta); color: var(--text-2); margin-bottom: var(--s2); line-height: 1.65; }
+  .cfgItem .ctrl { display: flex; gap: var(--s2); align-items: center; flex-wrap: wrap; }
+  .cfgItem .ctrl > input, .cfgItem .ctrl > select { flex: 1 1 220px; min-width: 0; }
+  .cfgItem .ctrl > .fixed { flex: 1 1 220px; }
+  /* 「当前生效值 · 环境变量名」这一行是排查"我改了 .env 为什么没生效"的**唯一线索**，
+     原先 11px 太小、扫读时会被跳过。提到 12px 并不是为了好看，是为了它会被看到。 */
+  .envnote {
+    font-size: var(--t-meta); color: var(--muted);
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+    overflow-wrap: anywhere;
+  }
+  /* 只读值框：外形与 input 对齐（同高、同圆角、同内距），
+     但用**虚线描边**区分"这里不能输入"。此前这组度量是内联写死的。 */
+  .ro-box {
+    display: flex; align-items: center;
+    padding: var(--s2) var(--s3); min-height: 34px;
+    border: 1px dashed var(--border-strong); border-radius: var(--r-ctl);
+    background: var(--surface-sunken); color: var(--muted); font-size: var(--t-body);
+  }
+  .tag-new { background: var(--tint-gold-strong); color: var(--warn-fg); }
+  .ro { background: var(--surface-sunken); color: var(--muted); }
+  /* 粘底操作条。
+     🔴 它是一条**覆盖层**，会盖住下方内容 —— 所以必须一眼读得出"浮在内容之上"，
+     否则被切开的文字看起来像渲染坏了。做法：独立圆角卡片外形 + 更强的一档描边
+     （比列表分隔线明显）+ 离视口底留 12px 缝。
+     刻意**不加投影**：本页全局深度策略是"只用描边"，
+     为一条工具栏破例会立刻让整套规则失去约束力（详见文件头 token 说明）。
+     结构上它在 DOM 里是 #view-config 的最后一个子元素，因此滚到底部时
+     它回到自然位置，不会有任何内容被永久遮挡。 */
   #cfgBar {
-    position: sticky; bottom: 0; background: var(--surface);
-    border-top: 1px solid var(--border); padding: 12px 20px;
-    display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+    position: sticky; bottom: var(--s3); z-index: 5;
+    background: var(--surface);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--r-card);
+    margin: var(--s4) 0 0;
+    padding: var(--s3) var(--s4);
+    display: flex; gap: var(--s3); align-items: center; flex-wrap: wrap;
   }
   #cfgBar .spacer { flex: 1; }
 </style>
@@ -179,7 +465,7 @@
     </div>
     <div class="field">
       <label for="tokenInput">管理令牌</label>
-      <input id="tokenInput" type="password" placeholder="粘贴 XUANPAN_ADMIN_TOKEN 的值" style="width:100%">
+      <input id="tokenInput" type="password" class="w-full" placeholder="粘贴 XUANPAN_ADMIN_TOKEN 的值">
     </div>
     <button class="btn" id="loginBtn">进入</button>
     <p class="hint mt">
@@ -199,23 +485,35 @@
     <button class="link" id="logoutBtn">退出</button>
   </header>
 
-  <nav>
-    <button data-view="overview" class="active">概览</button>
-    <button data-view="sessions">会话记录</button>
-    <button data-view="config">配置</button>
-    <button data-view="lab">能力调试台</button>
+  <!-- 这四个按钮是**一组标签页**（四个平级视图，彼此无层级）。
+       把语义写出来（tablist / tab / aria-selected / aria-controls），而不是只靠
+       .active 类：屏幕阅读器原本只会念出「概览 按钮 会话记录 按钮 …」，
+       读不出"当前在哪一页"—— 而这个管理台的全部导航就靠这四个按钮。
+       aria-selected 由 switchView() 同步维护；二者不同步比干脆没有更糟。 -->
+  <nav role="tablist" aria-label="管理台视图">
+    <!-- tabindex：整组只有一个可 Tab 停靠点（=当前选中项），组内用左右方向键切换。
+         初始值写在 HTML 里而不是靠 JS 补 —— 静态标注就该如实描述初始状态，
+         否则脚本一旦没跑起来（或跑失败），键盘可达性会静默退化。 -->
+    <button id="tab-overview" role="tab" aria-controls="view-overview" aria-selected="true"
+            tabindex="0" data-view="overview" class="active">概览</button>
+    <button id="tab-sessions" role="tab" aria-controls="view-sessions" aria-selected="false"
+            tabindex="-1" data-view="sessions">会话记录</button>
+    <button id="tab-config" role="tab" aria-controls="view-config" aria-selected="false"
+            tabindex="-1" data-view="config">配置</button>
+    <button id="tab-lab" role="tab" aria-controls="view-lab" aria-selected="false"
+            tabindex="-1" data-view="lab">能力调试台</button>
   </nav>
 
   <main>
     <!-- 概览 -->
-    <section id="view-overview">
-      <div id="overviewError"></div>
+    <section id="view-overview" role="tabpanel" aria-labelledby="tab-overview">
+      <div id="overviewError" role="status"></div>
       <div class="grid cols-4" id="statCards"></div>
       <div class="grid cols-2 mt" id="overviewCards"></div>
     </section>
 
     <!-- 会话 -->
-    <section id="view-sessions" class="hidden">
+    <section id="view-sessions" class="hidden" role="tabpanel" aria-labelledby="tab-sessions">
       <div class="card">
         <h2>会话记录</h2>
         <div class="row">
@@ -228,8 +526,11 @@
     </section>
 
     <!-- 配置 -->
-    <section id="view-config" class="hidden">
-      <div id="cfgMsg"></div>
+    <section id="view-config" class="hidden" role="tabpanel" aria-labelledby="tab-config">
+      <!-- 保存/清除的结果要能**被读出来**，不能只是屏幕上闪一行字：
+           这两类操作的结果（成功、失败、需要先撤销）对使用屏幕阅读器的人
+           完全不可感知。aria-live="polite" 让它在不打断当前朗读的前提下播报。 -->
+      <div id="cfgMsg" role="status" aria-live="polite"></div>
 
       <div class="banner info">
         改完<b>即时生效</b>，不需要重启（标「需重启服务」的项除外）。每项都标了当前值的来源：
@@ -257,7 +558,7 @@
 
       <div class="card mt">
         <h2>候选链与可用性</h2>
-        <div class="hint" style="margin-bottom:10px">
+        <div class="hint mb">
           解释「这次报告为什么走了本地模板」—— template 是零成本兜底，永远排在最后。
         </div>
         <div id="cfgAiStatus"></div>
@@ -274,9 +575,19 @@
     </section>
 
     <!-- 调试台 -->
-    <section id="view-lab" class="hidden">
+    <section id="view-lab" class="hidden" role="tabpanel" aria-labelledby="tab-lab">
+      <!-- 🔴 原文是 `这里是**只读试算台**：` —— 星号是 Markdown 的加粗语法，
+           而 HTML 不解析 Markdown，用户看到的就是字面上的两个星号。
+           这个缺陷由 CDP 真渲染快照的 text 字段当场坐实（不是推测）：
+           innerText 里逐字包含「这里是**只读试算台**：」。
+
+           为什么这里用 <strong> 而不是像 APP 那样把标记删掉：
+           两处的**载体不同**。APP 侧是 RN 的 <Text>，children 一律按纯文本渲染，
+           没有 Markdown 也没有 HTML，所以只能删；本页是静态 HTML，
+           <strong> 是原生语义、零成本，既消掉星号又保住了强调 ——
+           而这句强调的正是"不做任何写操作"这个安全边界，值得留着。 -->
       <div class="banner info">
-        这里是**只读试算台**：直接调用公开的 <code>/api/v1/almanac</code>、<code>/zeri</code>、<code>/duan</code>、
+        这里是<strong>只读试算台</strong>：直接调用公开的 <code>/api/v1/almanac</code>、<code>/zeri</code>、<code>/duan</code>、
         <code>/calc</code>、<code>/qimen</code>、<code>/liuren</code>、<code>/taiyi</code>
         接口，用来看清服务端实际算出了什么。不做任何写操作。
       </div>
@@ -605,7 +916,12 @@ async function loadOverview() {
     ['会话', c.sessions], ['报告', c.reports], ['对话轮次', c.turns],
   ].map(function (x) {
     return '<div class="card stat"><div class="n">' + x[1] + '</div><div class="k">' + x[0] + '</div></div>';
-  }).join('') + '<div class="card stat"><div class="n" style="font-size:18px">' + fmtBytes(data.storage.size_bytes) + '</div><div class="k">数据库体积</div></div>';
+  // 第四张卡与前三个**值类型不同**：前三者是"个数"（短数字），
+  // 这一张是字节串（"260.0 KB"，位数多）。
+  // 所以它走 .is-text 修饰类让自己的字号降一档 —— 而不是像原来那样在 JS 里
+  // 内联一个 font-size 覆盖。差别不只是写法：内联覆盖让"为什么这张卡的字号
+  // 不一样"这个问题无法从样式表里得到解释，只能翻到这一行代码才看得到。
+  }).join('') + '<div class="card stat"><div class="n is-text">' + fmtBytes(data.storage.size_bytes) + '</div><div class="k">数据库体积</div></div>';
 
   const rt = data.rule_tables;
   let rtHtml = '';
@@ -719,7 +1035,7 @@ async function openSession(id) {
   const turnHtml = data.turns.length
     ? data.turns.map(function (t) {
         return '<div class="kv"><span class="k">' + esc(t.role === 'user' ? '问' : '答') + '</span>' +
-               '<span class="v" style="text-align:left">' + esc((t.content || '').slice(0, 160)) + '</span></div>';
+               '<span class="v is-text">' + esc((t.content || '').slice(0, 160)) + '</span></div>';
       }).join('')
     : '<div class="hint">没有多轮对话。</div>';
 
@@ -1139,7 +1455,7 @@ function cfgCtrl(item) {
   // 密钥：**不设 value**。留空即不改动。
   if (item.secret) {
     if (!item.editable) {
-      return '<span class="fixed ro" style="padding:6px 10px;border-radius:6px">' +
+      return '<span class="fixed ro-box">' +
         (item.configured ? '已配置 ' + esc(item.masked) : '未配置') + '</span>';
     }
     return '<input type="password" autocomplete="new-password"' + attrs + ' placeholder="' +
@@ -1412,7 +1728,14 @@ function discardCfgEdits() {
 // ==========================================================================
 function switchView(name) {
   document.querySelectorAll('nav button').forEach(function (b) {
-    b.classList.toggle('active', b.dataset.view === name);
+    const on = b.dataset.view === name;
+    b.classList.toggle('active', on);
+    // 语义必须与视觉**同步**更新。只改 .active 的话，读屏软件报出的"当前选中项"
+    // 会一直停在「概览」—— 二者不同步比干脆没有 ARIA 更糟，因为它给出的是**错**信息。
+    b.setAttribute('aria-selected', on ? 'true' : 'false');
+    // roving tabindex：标签页的标准键盘模型里整组只保留一个 Tab 停靠点，
+    // 组内切换交给左右方向键。否则键盘用户要连按 4 次 Tab 才能越过这四个按钮。
+    b.tabIndex = on ? 0 : -1;
   });
   ['overview', 'sessions', 'config', 'lab'].forEach(function (v) {
     $('view-' + v).classList.toggle('hidden', v !== name);
@@ -1430,6 +1753,22 @@ async function loadAll() {
 
 document.querySelectorAll('nav button').forEach(function (b) {
   b.addEventListener('click', function () { switchView(b.dataset.view); });
+});
+
+// 标签页的键盘约定：← → 在组内移动并切换，Home / End 跳到首尾。
+// 🔴 只补 aria-selected 而不补这一条，等于对外声明"这是标准标签页"却做不到 ——
+// 用户按方向键没反应，会判断成页面坏了。ARIA 一旦用了，配套的键盘行为就是它的契约。
+document.querySelectorAll('nav [role="tab"]').forEach(function (b, i, all) {
+  b.addEventListener('keydown', function (e) {
+    const step = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : 0;
+    if (!step && e.key !== 'Home' && e.key !== 'End') return;
+    e.preventDefault();
+    const next = e.key === 'Home' ? 0
+               : e.key === 'End' ? all.length - 1
+               : (i + step + all.length) % all.length;
+    all[next].focus();
+    switchView(all[next].dataset.view);
+  });
 });
 
 $('loginBtn').addEventListener('click', function () { tryLogin($('tokenInput').value.trim()); });
