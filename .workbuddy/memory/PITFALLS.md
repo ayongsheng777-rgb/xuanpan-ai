@@ -29,6 +29,21 @@
 
 🔴 **`.workbuddy/` 是项目数据，非缓存，不得删除。**
 
+
+🔴 **`finally` 里的清理可能被 safe-delete 拦下 → 实验残留会留在仓库里** —— 做「临时放一个文件、跑完自动删掉」的实验时；
+safe-delete 是**按同一个 turn 内累计删除数**判的（>50 即拦），而 pytest 自己就在删一堆临时文件，
+于是收尾那个 `unlink` 会被 `SAFE_DELETE_BULK_CONFIRM_REQUIRED` 挡掉 —— 而**实验脚本的主流程仍然报成功**
+（本次是打印了「✓ 零失败」、退出码 0，只有 stderr 里一行 JSON 提示）。
+🔴 **判据：实验做完必须单独 `ls` 目标目录 + 核 `git status`**，不能相信脚本自己说的"已恢复"。
+本次残留的是 `packages/fortune-core/data/fenjin120.json`（一张实验填充表），
+若没发现就会跟着 commit 进仓库 —— 而它长得完全像领域数据。
+（清理自建残留文件用单条 `rm -f <精确路径>`，别用通配符。）
+
+🔴 **同一文件严禁在一条消息里并行发多个 Edit** —— 改一个文件的多个位置时；
+编辑是「读-改-写」，并行下发会基于同一份旧快照互相覆盖，**先完成的那次写入被静默丢弃（工具仍回 success）**。
+本次实测：想给 `scripts/verify_fenjin_table.py` 同时改 import 行和函数体，结果 **import 行没落地**，
+测试报 `NameError: name 'DEFAULT_SCHOOL' is not defined` 才发现。
+**改完立刻 grep 复核，不要只信 success 回执。**（跨文件并行是安全的；同一文件串行。）
 ---
 
 ## 2. 变异 / 还原 / 校验（"假绿"类）
@@ -39,6 +54,11 @@
 
 🔴 **`Path.write_text()` 在 Windows 把 LF 转 CRLF** —— 做「读-改-写」还原文件时；用 `read_bytes`/`write_bytes` 才字节级还原。
 **而且 `git diff` 看不见它**：`.gitattributes` 声明 `*.ts/tsx text eol=lf`，git 比对前会先规范化，于是整文件行尾被换掉也不显示任何差异，只在输出里留一句 `CRLF will be replaced by LF` 的告警（很容易当成噪音略过）。本次 5 个文件 582/386/291/665/1009 处行尾被换。**判据：改完立刻数 `read_bytes().count(b'\r\n')`，不要只看 diff。** 修法：`write_text(..., newline='\n')`，或改完二进制回写。
+
+🔴 **本坑 2026-09-19 又踩了一次 —— 但边界现在清楚了**：那次是 4 个 `.md` 被批量刷成 CRLF（327/103/137/582 处），**全部来自 heredoc 里自己写的 `pathlib.Path.write_text()`**。
+**WorkBuddy 的 `Write` / `Edit` 工具不会引入 CRLF**（同一个 turn 里用它们改的 11 个 `.py` 全是 0 处 CRLF）。
+→ **改文本优先用 `Edit`；必须用 Python 批量写时，一律 `write_bytes(text.replace(b'\r\n', b'\n'))`。**
+**判据不变：改完对 `git status` 里每个文件数 `read_bytes().count(b'\r\n')`，`>0` 就归一化再提交。**
 
 🔴 **静态扫描类守卫自己要能被验证，否则它会「永远通过」** —— 写"扫源码找某特征"的测试时；第一版幂运算符判据用了 `[\w\)\]]\s*\*\*\s*[\w\(\[]`，而 **Python 的 `\w` 含 CJK**，于是中文句子中间的 `**标记**` 被判成 `2 ** 3` 整段跳过 —— 中文正是本项目正文语种，等于守卫关掉一大半（症状：只有行首的标记报得出来，句中的静默漏掉，最坏情况全绿而缺陷全在）。
 两道修法都要做：① 显式写 ASCII 字符类 `[A-Za-z0-9_]`；② **给守卫本身写"守卫的守卫"断言**（该报的报 / 不该报的不报 / 剥注释不剥过头，见 `tests/mobile/test_ui_copy_plain_text.py`）—— 本轮正是这两条断言当场抓到了它自己。
@@ -254,19 +274,51 @@
 **几何层是完好的**：格位/所属山/角度由代码算，实测 `fenjin_at(0°)` → 格位 2、`子山 3/5 格` 正确；
 只有 `ganzhi`/`usable` 为 `None`（RULE-001/008 要求**缺表不猜**）。**别把它当 bug 去"修"。**
 
-🔴 **补这张表不是「扔个 json 进 data/」** —— 两条后果都已实测：
-**① 恰好 4 个测试会红**（不多不少，精确命中）：
-`test_compass.py::test_ganzhi_absent_without_rule_table`｜`test_compass.py::test_facts_layer_shape`｜
-`test_context.py::test_school_metadata`｜`test_ai_report.py::test_unknown_domain_values_never_fabricated`。
-前两个**压根不测这件事**（主题分别是 facts 层结构 / school 元数据）→ 属"锁现状"，删掉那行断言即可；
-后两个主题正确但**构造方式脆**（靠"仓库里恰好没这文件"制造缺表场景），且 `build_context` 只接受
-**流派名**不接受路径（`table_available(profile.fenjin_table)`）→ 得用 `monkeypatch` 注入。
+🔴 **补表不是「扔个 json 进 data/」就完事** —— 但**连坐问题已在 2026-09-19 解除**：
 
-**② 表写错 → 罗盘主链路 500**（不是降级）：`table_available()` 里 `load_fenjin_table()` 的启动期校验
-会抛 `KeyError`（山名错）/`ValueError`（格数≠5、干支非法、顶层非 dict），而
-`compass.py:122`、`context.py:238`、`meta.py:115` 全是**裸调用** → 异常直接冒到接口。
-实测：某山写成 4 格 → `calculate_orientation()` 抛 `ValueError: [default] 子山 应有 5 格，实为 4`。
-**只有 `admin.py:87` 包了 try/except**（作者显然知道会抛）。**补表前应先加校验脚本**（参照 `verify_zeri_table.py`）。
+**① 那 4 处「锁现状」断言已改成测行为。** 改前实测「放入一张合法表 → 恰好 4 个 FAILED」；
+改后同一实验 → **全量 1617 passed, 0 failed**。两类改法：
+- 主题根本不对的（`test_compass.py::test_facts_layer_shape`、`test_context.py::test_school_metadata`）
+  → 只锁类型：`isinstance(..., bool)`
+- 主题对但构造脆的 → **显式构造输入**：`test_compass.py::test_ganzhi_absent_without_rule_table`
+  传不存在的 `table_path=`；`test_ai_report.py::test_unknown_domain_values_never_fabricated`
+  把 `DEFAULT_TABLE_PATH` 指向 `tmp_path`（用唯一路径 → 缓存键天然隔离，不漏给别的用例）
+
+⚠️ **`build_context` 只接受流派名、没有路径注入点**（内部 `table_available(profile.fenjin_table)`）
+—— 所以那两处只能改模块常量 / `monkeypatch`。**别去找不存在的 `fenjin_table=` 参数**（上一轮找过，白费一轮）。
+
+🔴 **三层职责已拆开，别再合回去** —— 改 `fenjin120.py` 时：
+
+| 函数 | 定位 | 坏表时 |
+|---|---|---|
+| `load_fenjin_table` | **严格**：补表环节的裁判 | **抛异常** |
+| `table_available` / `fenjin_at` | **运行期**：罗盘主链路 | **降级**（`False` / 只给几何格位）|
+| `table_load_error` | 诊断：管理台区分「没提供」与「写坏了」| 返回具体原因 |
+
+🔴 **别把 `load_fenjin_table` 也改成 fail-soft** —— 那样"写错的表"会被当成"没有表"，
+校验脚本与测试同时失去裁判。改动前实测：某山写成 4 格 → `calculate_orientation()` 抛
+`ValueError`（**罗盘主链路 500**），因为 `compass.py:122`、`context.py:238`、`meta.py:115`
+全是**裸调用**（只有 `admin.py` 包了 try/except，作者显然知道会抛）。
+
+🔴 **降级 ≠ 静默，但也不能刷屏** —— `_load_or_error` 借 `lru_cache` 让告警**只打一次**；
+坏表若每个请求都打日志，日志最终会被关掉 = 彻底静默。
+
+🔴 **降级后 `admin.py` 的错误详情必须单独取 `table_load_error()`** —— 因为
+`table_available()` 不再抛，原来的 `except` 分支**永远不会走到**；不改这一句，
+「表写坏了」在管理台上会长得和「这张表还没做」**一模一样**（`admin.py::_rule_tables`）。
+▶ 这条是**改 fail-soft 时最容易漏掉的一步**：把异常吞掉的地方，都要检查"原来靠异常传出去的信息"改从哪里来。
+
+🔵 **`scripts/verify_fenjin_table.py` 管的是加载器管不到的** —— 补表时先跑它。
+加载器只查**结构合法性**；这个脚本查**完整性**：二十四山覆盖度（只写 3 个山 → 105 格静默无干支）、
+`schools.py` 声明但缺失的**在用流派** key、山内干支重复、整山全 `null`。
+🔴 **它不判断排法对错** —— 那是流派规则（RULE-006），须人给依据；脚本自己也会打印这句边界。
+退出码 `0` 通过（含 WARN）/ `1` 有问题；`--strict` 让 WARN 也算失败，`--require` 用于交付检查。
+守卫 `tests/test_verify_fenjin_table.py`（19 条），**含"不该报的不报"**（完整表必须零问题）——
+误报会训练人忽略脚本，那是比没有脚本更糟的结局。
+
+🔵 **补表流程（照做）**：填表 → `"$PY" scripts/verify_fenjin_table.py` → `pytest` 全量 → 重建镜像
+（表在 `packages/fortune-core/data/`，由 Dockerfile `COPY packages/` 进镜像）。
+🔴 **表有缓存**，改完必须重启服务（容器：`docker compose up -d --build`），否则"改了没生效"。
 
 🔴 **表内容无法从项目内推导** —— 6 张 `samples/compass/*.jpg` 是**灰度合成几何图（无任何文字）**，
 读不出分金刻度；docs 里只有格式示例不是真实数据。它属**流派规则（RULE-006）**，

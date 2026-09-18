@@ -145,25 +145,30 @@ HTTP 层无路由、App 里 0 处引用。本轮把三条链路打通：
 - `fenjin120` 规则表缺失（管理台 `available=False`）—— 已知数据缺口，
   当前退化为「只输出几何格位 + 警告」。**根因已查明（2026-09-18 夜）**：
   `packages/fortune-core/data/fenjin120.json` **从未被创建**（全仓无此文件）。
-  🔴 **补表不是"扔个 json 进去"就完事 —— 以下两条已实测（2026-09-19 凌晨），非推测**：
-  **① 恰 4 个测试会红**（临时放入格式合法的表 → 精确报 4 个 FAILED，不多不少）。
-  其中 2 处**根本不是测这件事**（`test_compass.py::test_facts_layer_shape`、
-  `test_context.py::test_school_metadata`；主题分别是 facts 层结构 / school 元数据）→ 锁现状，删断言即可；
-  另 2 处（`test_compass.py::test_ganzhi_absent_without_rule_table`、
-  `test_ai_report.py::test_unknown_domain_values_never_fabricated`）主题正确但**构造方式脆**
-  —— 靠"仓库里恰好没这文件"制造缺表场景。
-  ⚠️ **修正上轮的一处错误结论**：上轮写"可改为显式传不存在的 path"，**这是错的** ——
-  `build_context` 只接受**流派名**（内部 `table_available(profile.fenjin_table)`），
-  **没有路径注入点** → 这两处只能用 `monkeypatch`。仅 `fenjin120.fenjin_at(..., table_path=)` 支持路径。
-  **② 表写错 → 罗盘主链路 500**（不是降级）：`load_fenjin_table()` 的启动期校验抛
-  `KeyError`（山名错）/`ValueError`（格数≠5、干支非法、顶层非 dict），而
-  `compass.py:122`、`context.py:238`、`meta.py:115` 全是**裸调用** → 异常直接冒到接口；
-  实测某山写成 4 格 → `calculate_orientation()` 抛 `ValueError: [default] 子山 应有 5 格，实为 4`。
-  只有 `admin.py:87` 包了 try/except。→ **补表前先加校验脚本**（参照 `scripts/verify_zeri_table.py`）。
-  🔴 **表内容无法从项目内推导**：6 张 `samples/compass/*.jpg` 是**灰度合成几何图、无任何文字**
+  ✅ **补表的前置加固已完成（2026-09-19 凌晨）—— 补表不再有连坐，也不会打崩罗盘**：
+  - **①「4 个测试会红」已解除**。改前实测「放入合法表 → 恰好 4 个 FAILED」；同一实验改后
+    → **全量 1617 passed, 0 failed**。四处改法：主题根本不对的两处
+    （`test_compass.py::test_facts_layer_shape`、`test_context.py::test_school_metadata`）
+    只锁类型 `isinstance(..., bool)`；另两处改为**显式构造输入**
+    （`test_ganzhi_absent_without_rule_table` 传不存在的 `table_path=`；
+    `test_ai_report.py::test_unknown_domain_values_never_fabricated` 把 `DEFAULT_TABLE_PATH`
+    指向 `tmp_path`）。
+  - **②「表写错 → 罗盘 500」已修**。`fenjin120` 现在分三层：
+    `load_fenjin_table`（**严格**，抛异常）/ `table_available`·`fenjin_at`（**运行期**，降级）
+    / `table_load_error`（诊断）。坏表 → 罗盘降级为几何格位 + 一条告警日志（借 `lru_cache` **只打一次**）；
+    管理台用 `table_load_error()` 显示具体原因。`compass.py` 的警告也据此区分
+    「未提供」与「加载失败」。
+  - **③ 新增校验脚本** `scripts/verify_fenjin_table.py`（补表时先跑）：查二十四山覆盖度、
+    在用流派 key、山内干支重复、整山全 `null`。**不判断排法对错**（那是流派规则）。
+    守卫 `tests/test_verify_fenjin_table.py`（19 条，含"不该报的不报"）。
+  ⚠️ **修正上轮的一处错误结论**：`build_context` 只接受**流派名**
+  （内部 `table_available(profile.fenjin_table)`），**没有路径注入点** —— 那两处只能用
+  模块常量 / `monkeypatch`。仅 `fenjin120.fenjin_at(..., table_path=)` 支持路径。
+  🔴 **表内容仍无法从项目内推导**：6 张 `samples/compass/*.jpg` 是**灰度合成几何图、无任何文字**
   （已读图确认），读不出排法 → 须阿勇给依据（罗盘书 / 实物照片 / 直接给数据）。
-  🔴 补表后必须 `docker compose up -d --build` —— 表在 `packages/fortune-core/data/`，
-  由 Dockerfile `COPY packages/` 进镜像（领域数据，不是运行时产物）。
+  🔵 **补表流程（照做）**：填表 → `"$PY" scripts/verify_fenjin_table.py` → `pytest` 全量 →
+  `docker compose up -d --build`（表在 `packages/fortune-core/data/`，由 Dockerfile `COPY packages/`
+  进镜像，是领域数据不是运行时产物）。🔴 **表有缓存，不重启服务不生效。**
   表格式见 `fenjin120.py` 模块 docstring：`{"default": {"子": ["甲子","丙子",null,"庚子",null], ...}}`，
   每山恰好 5 格，`null` = 该流派下空亡/不用。**属流派规则（RULE-006），不能由代码推算。**
 
@@ -489,7 +494,7 @@ PYTHONPATH=packages/fortune-core "$PY" services/mcp/server.py   # stdio 模式�
 
 ### 7.0 🔴 待阿勇拍板的四项 —— **别自行择一**
 
-这四项都是「两条路都说得通、且 SSOT 未覆盖」。按 AGENTS.md §1.1「该文件未覆盖的冲突，先回报确认，不得自行择一执行」，
+下表各项都是「两条路都说得通、且 SSOT 未覆盖」（⑥ 除外，它卡在**缺依据**）。按 AGENTS.md §1.1「该文件未覆盖的冲突，先回报确认，不得自行择一执行」，
 **当前一律保持原样**，等阿勇给方向：
 
 | # | 事项 | 两条路 | 现状 |
@@ -502,6 +507,8 @@ PYTHONPATH=packages/fortune-core "$PY" services/mcp/server.py   # stdio 模式�
 
 > ④ 的背景：`src/content/help.ts` 的 53 对标记是有意加在**最容易被搞错的句子**上的，
 > 删掉后这些句子读起来更平。要恢复强调就得引入粗体渲染，属新能力，故留给阿勇定。
+
+| ⑥ | **`fenjin120` 规则表的内容依据** —— 表里每格配哪个干支、哪格旺相哪格孤虚，属流派规则，代码不得推算 | (a) 阿勇给依据（罗盘书该层照片 / 实物罗盘清晰照 / 直接给数据），照此为 24 山 × 5 格填空并选定流派 key (b) 暂不补，保持「只输出几何格位」的诚实降级 | **不等依扫除外的活已做完**：连坐测试已修（补表零回归）、坏表降级已加（不再打崩罗盘）、校验脚本 `scripts/verify_fenjin_table.py` 已就位。**只差内容本身。** |
 
 按性价比（详见 MEMORY.md「待办」与路线图 §4）：
 

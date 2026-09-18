@@ -100,4 +100,4 @@
 ## 数据缺口
 
 - ✅ `data/kangxi_strokes.json` 已 20794 字 `verified:true`；缺字抛 `DomainDataMissingError`（**不静默取错值**）
-- `fenjin120` 规则表缺失（管理台 `available=false`）—— 退化为「只输出几何格位 + 警告」
+- `fenjin120` 规则表缺失（管理台 `available=false`）—— 退化为「只输出几何格位 + 警告」。**加固已完成**（三层职责：严格加载 / 运行期降级 / `table_load_error` 诊断；补表零回归；校验脚本 `scripts/verify_fenjin_table.py`），**只差内容依据（须阿勇给）**｜详版 PITFALLS §11「一百二十分金专项」
