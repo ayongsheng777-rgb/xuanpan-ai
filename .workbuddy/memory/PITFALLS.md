@@ -39,8 +39,11 @@
 `git rev-parse` 报 `warning: ignoring broken ref ...` + `fatal: ambiguous argument`，**同时把 ref 名回显到 stdout**
 （这一行极易被误读成"解析成功"）；`git update-ref` 则直接 `cannot lock ref ... reference broken`（exit=128），
 **连正确值都写不进去**，必须先 `rm -f` 掉坏文件。
-🔴 **`fetch` 成功 ≠ 追踪引用存在**（已复现两次）—— `git fetch origin` 会打印 `* [new branch] main -> origin/main`，
-紧接着 `ls .git/refs/remotes/origin/` 却是空的。所以收尾核对一律回到 `git ls-remote origin refs/heads/main` 比 sha。
+🔴 **`fetch` / `push` 成功 ≠ 追踪引用存在**（已复现三次）—— `git fetch origin` 会打印 `* [new branch] main -> origin/main`、
+`git push` 会打印 `6026f99..331328d  main -> main`，但紧接着 `ls .git/refs/remotes/origin/` 仍然是空的，
+`git status -sb` 立刻变回 `## main...origin/main [gone]`。
+**「推完 `status` 说 gone」是本环境的正常长相，不是失败信号**，别据此重推或回滚。
+收尾核对一律回到 `git ls-remote origin refs/heads/main` 与 `git rev-parse HEAD` 比 sha。
 
 🔴 **`.workbuddy/` 是项目数据，非缓存，不得删除。**
 
