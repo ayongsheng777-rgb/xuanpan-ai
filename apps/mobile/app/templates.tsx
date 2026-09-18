@@ -86,15 +86,27 @@ export default function TemplatesScreen(): React.JSX.Element {
     async (tpl: CompassTemplate) => {
       const res = await applyTemplate.run(tpl);
       if (!res) return;
-      // 手工拼接而非 URLSearchParams：后者在 RN/Hermes 上的实现不完整，
-      // 属于"tsc 全绿、一打包才知道"的那类依赖（本项目已踩过一次）。
-      const parts = [
-        `template=${encodeURIComponent(res.template_id)}`,
-        `style=${encodeURIComponent(res.style)}`,
-      ];
-      if (res.sitting) parts.push(`sitting=${encodeURIComponent(res.sitting)}`);
-      if (res.degree !== null) parts.push(`degree=${res.degree}`);
-      router.push(`/adjust?${parts.join('&')}`);
+      /**
+       * 用**对象形式**而不是手拼查询串，两个理由：
+       *   1. 编码交给路由层 —— 不会再漏一个 `encodeURIComponent`；
+       *   2. 参数名是字面量，于是能被 `tests/mobile/test_app_wiring.py`
+       *      静态校验"目标页到底读没读这个参数"。
+       *      手拼的模板串它看不见 —— 而"推了参数但目标页不读"
+       *      正是本功能刚踩过的坑（模板点了没反应）。
+       *
+       * 四个键**全部给值**（缺省给空串）也是为了让静态校验看得见全部参数名；
+       * 目标页对空串按"未提供"处理。
+       */
+      router.push({
+        pathname: '/adjust',
+        params: {
+          template: res.template_id,
+          name: tpl.name,
+          style: res.style,
+          sitting: res.sitting ?? '',
+          degree: res.degree === null ? '' : String(res.degree),
+        },
+      });
     },
     [router, applyTemplate],
   );

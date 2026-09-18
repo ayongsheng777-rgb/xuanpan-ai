@@ -220,6 +220,114 @@ def test_every_tab_screen_has_a_route_file() -> None:
 
 
 # ==========================================================================
+# 断言 4：推过去的查询参数，目标页必须真的读
+# ==========================================================================
+
+#: 对象形式：`router.push({ pathname: '/x', params: { a: ..., b: ... } })`
+_OBJ_PUSH_RE = re.compile(
+    r"""pathname\s*:\s*(['"])(/[^'"]*)\1[\s\S]{0,400}?params\s*:\s*\{([\s\S]{0,400}?)\}""",
+    re.S,
+)
+_PARAM_KEY_RE = re.compile(r"""(?:^|[,{\s])([A-Za-z_][A-Za-z0-9_]*)\s*:""")
+
+
+def _pushed_params() -> list[tuple[Path, int, str, str]]:
+    """扫出（文件, 行号, 目标路径, 参数名）。
+
+    只认**字面量**：对象形式的 `pathname` + `params` 键，以及字符串形式里的
+    字面量查询串。手拼的模板串（`'/x?' + parts.join('&')`）静态看不见 ——
+    所以 templates.tsx 特意改成了对象形式（见该文件注释）。
+    """
+    out: list[tuple[Path, int, str, str]] = []
+    for f in sorted([*_APP.rglob("*.tsx"), *_SRC.rglob("*.tsx"), *_SRC.rglob("*.ts")]):
+        text = f.read_text(encoding="utf-8")
+        for m in _OBJ_PUSH_RE.finditer(text):
+            path, block = m.group(2), m.group(3)
+            lineno = text[: m.start()].count("\n") + 1
+            for key in _PARAM_KEY_RE.findall(block):
+                out.append((f, lineno, path, key))
+        # 字符串形式里带字面量查询串的
+        for _, lineno, raw in _string_literal_targets():
+            if "?" not in raw:
+                continue
+            path, _, query = raw.partition("?")
+            for pair in query.split("&"):
+                key = pair.split("=")[0].strip()
+                if key:
+                    out.append((f, lineno, path, key))
+    return out
+
+
+def _param_reading_region(src: str) -> str | None:
+    """取页面"读参数"的那段源码。
+
+    优先取 `useLocalSearchParams<{...}>()` 的泛型块；没有泛型时退化为
+    调用点后 300 字符（覆盖 `const { a, b } = useLocalSearchParams()` 写法）。
+    返回 None 表示该文件根本不读任何参数。
+
+    ⚠️ 必须跳过 **import 语句**里的那个名字 —— `import { useLocalSearchParams }`
+    是文件里第一次出现它的地方，直接取首个匹配会拿到一行 import，
+    于是所有参数都判成"没解出"（本匹配器首版就是这么错的）。
+    """
+    for m in re.finditer(r"\buse(?:Local|Global)SearchParams\b", src):
+        tail = src[m.end() :]
+        nxt = tail.lstrip()[:1]
+        if nxt not in ("<", "("):
+            continue  # import 语句 / 类型引用，不是调用点
+        generic = re.match(r"\s*<\s*([\s\S]{0,600}?)\s*>\s*\(", tail)
+        if generic:
+            return generic.group(1)
+        return tail[:300]
+    return None
+
+
+def _route_file_of(target: str) -> Path | None:
+    want = [s for s in target.strip("/").split("/") if s]
+    for p in _route_files():
+        segs = [s for s in _route_of(p).strip("/").split("/") if s]
+        if len(segs) != len(want):
+            continue
+        if all(h.startswith("[") and h.endswith("]") or h == w for h, w in zip(segs, want)):
+            return p
+    return None
+
+
+def test_pushed_query_params_are_read_by_target_page() -> None:
+    """推过去的参数，目标页必须真的读。
+
+    挡住的错（本项目刚发生过）：`templates.tsx` 推了
+    `template/style/sitting/degree`，而 `adjust.tsx` 一个字都没读 ——
+    用户点模板落到手动调节页，什么都没生效，界面看起来却完全正常。
+
+    这类错**没有任何一层会报错**：路由对、参数名也没拼错，只是没人消费。
+    """
+    pushed = _pushed_params()
+    assert pushed, "没有扫到任何带参数的跳转（扫描正则可能失效了）"
+
+    bad: list[str] = []
+    for f, lineno, path, key in pushed:
+        rf = _route_file_of(path)
+        if rf is None:
+            bad.append(f"{f.relative_to(_REPO_ROOT)}:{lineno} → {path}（路由不存在）")
+            continue
+        region = _param_reading_region(rf.read_text(encoding="utf-8"))
+        if region is None:
+            bad.append(
+                f"{f.relative_to(_REPO_ROOT)}:{lineno} 推了 '{key}' 给 {path}，"
+                f"但 {rf.relative_to(_REPO_ROOT)} 没有调用 useLocalSearchParams"
+            )
+        elif key not in region:
+            bad.append(
+                f"{f.relative_to(_REPO_ROOT)}:{lineno} 推了 '{key}' 给 {path}，"
+                f"但 {rf.relative_to(_REPO_ROOT)} 读参数时没有解出 '{key}'"
+            )
+
+    assert not bad, "以下参数在目标页没有落地（推了等于没推）：\n  " + "\n  ".join(
+        sorted(set(bad))
+    )
+
+
+# ==========================================================================
 # 假绿自检：证明上面两套匹配器真的会拒绝
 # ==========================================================================
 
