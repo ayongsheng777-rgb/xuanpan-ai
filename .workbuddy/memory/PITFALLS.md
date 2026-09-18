@@ -45,6 +45,17 @@
 **「推完 `status` 说 gone」是本环境的正常长相，不是失败信号**，别据此重推或回滚。
 收尾核对一律回到 `git ls-remote origin refs/heads/main` 与 `git rev-parse HEAD` 比 sha。
 
+🔴 **修 ref 要单独执行，别和 `fetch`/`push`/`commit` 串在同一条命令里** —— 因为 git 删 ref 后会顺手
+**清掉变空的 `.git/refs/remotes/origin/` 目录**：同一行里先跑 `push`、再 `printf > .git/refs/.../main`，
+等你写时目录已被删，报 `bash: .git/refs/remotes/origin/main: No such file or directory`，
+**这行只出现在 stderr，主流程照样打印"已同步"**，极易漏看。
+正确姿势（独立执行；`rev-parse` 是只读的，可以留在 `$()` 里）：
+
+```bash
+mkdir -p .git/refs/remotes/origin && printf '%s\n' "$(git rev-parse HEAD)" > .git/refs/remotes/origin/main
+git rev-parse refs/remotes/origin/main   # 自证：能解析出 sha 才算修好
+```
+
 🔴 **`.workbuddy/` 是项目数据，非缓存，不得删除。**
 
 
