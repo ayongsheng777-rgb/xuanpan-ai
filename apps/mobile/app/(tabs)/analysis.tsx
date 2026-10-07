@@ -37,7 +37,7 @@ interface Entry {
 }
 
 /**
- * 术式入口。顺序按「用得最多 → 最少」排（八字 > 六爻灵签 > 黄历 > 三式），
+ * 术式入口。顺序按「用得最多 → 最少」排（八字 > 六爻灵签 > 灵签机 > 黄历 > 三式），
  * 不按学科体系排 —— 这是给人点的列表，第一项应当是最常用的那个。
  */
 const ENTRIES: readonly Entry[] = [
@@ -56,6 +56,14 @@ const ENTRIES: readonly Entry[] = [
     desc: '登记实际摇出的结果，或抽取可复现的签文',
     bound: '不提供「帮我摇一卦」—— 摇卦结果必须由你实际摇出',
     href: '/divine',
+  },
+  {
+    key: 'qianji',
+    icon: 'game-controller-outline',
+    title: '灵签机',
+    desc: '街机式抽签：按住摇签筒、开奖看签文，再解签',
+    bound: '签号由种子唯一确定，动画只是表现层；签库为演示样例',
+    href: '/qianji',
   },
   {
     key: 'almanac',
