@@ -176,36 +176,51 @@ export default function AdjustCompassScreen(): React.JSX.Element {
               盘式：{DIAL_STYLES[dialStyle].name}
               {params.sitting ? `　坐${params.sitting}` : ''}
             </AppText>
-            <View style={styles.styleRow}>
-              {(['simple', 'sanhe', 'zonghe'] as const).map((sid) => {
-                const on = sid === dialStyle;
-                return (
-                  <Pressable
-                    key={sid}
-                    onPress={() => setDialStyle(sid)}
-                    accessibilityRole="button"
-                    accessibilityState={{ selected: on }}
-                    style={[styles.styleChip, on && styles.styleChipOn]}
-                  >
-                    <AppText
-                      size="xs"
-                      weight={on ? 'semibold' : 'regular'}
-                      color={on ? instrument.bg : instrument.textSecondary}
-                    >
-                      {DIAL_STYLES[sid].name}
-                    </AppText>
-                    <AppText size="xs" color={on ? instrument.bg : instrument.muted}>
-                      {DIAL_STYLES[sid].statedLayers} 层
-                    </AppText>
-                  </Pressable>
-                );
-              })}
-            </View>
             <AppText size="xs" color={instrument.muted} style={styles.templateNote}>
               模板只带出「用哪面盘、从哪个基准开始」，不代替本次实测。
             </AppText>
           </View>
         ) : null}
+
+        {/* ---------- 盘面（盘式切换） ----------
+            🔴 之前这组选择器藏在上面的"模板带出"卡片里 —— 从「测盘 → 手动输入」
+            直接进本页的用户根本看不到它，盘面想换也换不了，而界面一切正常。
+            盘式只决定画哪些层、每层多宽（见 CompassDial 约定 4），
+            切换不改变当前方位、锁定状态与模板带出的基准。 */}
+        <View style={styles.card}>
+          <AppText size="sm" weight="medium" color={instrument.text}>
+            盘面
+          </AppText>
+          <AppText size="xs" color={instrument.textSecondary} style={styles.templateNote}>
+            切换只改变显示的层数与密度，不改变当前方位与锁定状态。
+          </AppText>
+          <View style={styles.styleRow}>
+            {(['simple', 'sanhe', 'zonghe'] as const).map((sid) => {
+              const on = sid === dialStyle;
+              return (
+                <Pressable
+                  key={sid}
+                  onPress={() => setDialStyle(sid)}
+                  accessibilityRole="button"
+                  accessibilityLabel={`切换盘面为${DIAL_STYLES[sid].name}`}
+                  accessibilityState={{ selected: on }}
+                  style={[styles.styleChip, on && styles.styleChipOn]}
+                >
+                  <AppText
+                    size="xs"
+                    weight={on ? 'semibold' : 'regular'}
+                    color={on ? instrument.bg : instrument.textSecondary}
+                  >
+                    {DIAL_STYLES[sid].name}
+                  </AppText>
+                  <AppText size="xs" color={on ? instrument.bg : instrument.muted}>
+                    {DIAL_STYLES[sid].statedLayers} 层
+                  </AppText>
+                </Pressable>
+              );
+            })}
+          </View>
+        </View>
 
         {/* ---------- 角度调节 ---------- */}
         <View style={styles.card}>

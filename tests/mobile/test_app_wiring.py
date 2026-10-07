@@ -470,3 +470,94 @@ def test_selfcheck_help_scanner_rejects_unknown_topic() -> None:
     assert "no-such-topic-xyz" not in registered, (
         "自检失败：未登记的 topic 竟被认为已登记 —— 断言 2 因此是假绿"
     )
+
+
+# ==========================================================================
+# 断言 6：`/sensors` 必须有"采集"出口 —— 读数要能进确认管线
+# ==========================================================================
+
+
+def test_sensors_page_has_collection_exit_into_confirm_pipeline() -> None:
+    """传感器测量页不能是死胡同。
+
+    挡住的错：`/sensors` 能测出方位角、能看质量评分，但没有任何按钮
+    把读数送进「确认坐向 → 计算 → 测盘档案」链路（V2 §2.1 第 8 步）——
+    用户测完只能干瞪眼，"采集数据功能没接上"，而界面一切正常。
+
+    接线要求（与 scan 页识别失败走手动录入同一条管线）：
+      1. 建一个会话（确认页的入口是 `/confirm/[sessionId]`）；
+      2. 把当前方位角以 `degree` 参数带过去（确认页会灌进实测角）；
+      3. 无读数时按钮必须禁用 —— 不能把一个"—"采进去。
+    """
+    src = (_APP / "sensors.tsx").read_text(encoding="utf-8")
+
+    assert "createSession" in src, (
+        "sensors.tsx 没有建会话：采集的读数没有档案可落，链路还是断的"
+    )
+    assert "pathname: '/confirm/[sessionId]'" in src, (
+        "sensors.tsx 没有把读数推向确认坐向页：采集出口缺失"
+    )
+    assert re.search(r"\bdegree:\s*az\.toFixed\(2\)", src), (
+        "sensors.tsx 推确认页时没有带 degree 参数：确认页收不到实测角"
+    )
+    assert re.search(r"disabled=\{!hasAzimuth\}", src), (
+        "采集按钮没有在无读数时禁用：用户可能采一个空读数进去"
+    )
+
+
+# ==========================================================================
+# 断言 7：`/adjust` 的盘面（盘式）选择器必须常驻，不能只在模板进入时可见
+# ==========================================================================
+
+
+def test_adjust_style_picker_is_not_gated_by_template() -> None:
+    """盘面更换入口不能藏在"模板带出"卡片里。
+
+    挡住的错：盘式选择器写在 `{fromTemplate ? ... : null}` 分支里 ——
+    从「测盘 → 手动输入」直接进来的用户根本看不到它，盘面想换也换不了，
+    而界面一切正常（"盘面更换操作有 bug"）。
+    """
+    src = (_APP / "adjust.tsx").read_text(encoding="utf-8")
+
+    # 抠出 {fromTemplate ? ( ... ) : null} 整块：括号配平
+    start = src.find("{fromTemplate ? (")
+    assert start >= 0, "adjust.tsx 里找不到 fromTemplate 分支（测试锚点失效）"
+    i = src.find("(", start)
+    depth = 0
+    end = -1
+    for j in range(i, len(src)):
+        if src[j] == "(":
+            depth += 1
+        elif src[j] == ")":
+            depth -= 1
+            if depth == 0:
+                end = j
+                break
+    assert end > 0, "fromTemplate 分支括号配平失败（测试写法失效）"
+    region = src[start:end]
+
+    assert "setDialStyle" not in region, (
+        "盘式选择器仍在 fromTemplate 分支里：直接进入 /adjust 的用户换不了盘面"
+    )
+    # 守卫本身要是活的：选择器必须还在页面上（只是挪到了分支外面）
+    assert "setDialStyle" in src, "页面上找不到盘式选择器了（修过头了）"
+
+
+# ==========================================================================
+# 断言 8：`useSensors` 不得用定时器"踢"渲染 —— 传感器事件本身已驱动更新
+# ==========================================================================
+
+
+def test_use_sensors_has_no_render_ticker() -> None:
+    """useSensors 里不许有 setInterval 驱动的重渲染。
+
+    挡住的错：曾有一个每 200ms 的 ticker，美其名曰"驱动序列刷新"，
+    实际上它既不在 useMemo 依赖里（根本驱动不了重算），
+    又在无传感器设备上空转 5 次渲染/秒 —— 纯耗电，且注释与实现不符。
+    传感器事件本身 10Hz 触发 setState，渲染自有来源。
+    """
+    src = (_SRC / "services/useSensors.ts").read_text(encoding="utf-8")
+    assert "setInterval" not in src, (
+        "useSensors.ts 里出现了 setInterval：渲染应由传感器事件驱动，"
+        "不要加定时器空转"
+    )

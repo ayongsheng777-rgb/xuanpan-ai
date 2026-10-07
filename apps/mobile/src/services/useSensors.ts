@@ -61,7 +61,6 @@ export function useSensorSnapshot(enabled: boolean): SensorSnapshot {
   const magSeriesRef = useRef<number[]>([]);
   const azSeriesRef = useRef<number[]>([]);
   const tiltSeriesRef = useRef<{ pitch: number; roll: number }[]>([]);
-  const [, forceTick] = useState(0);
 
   useEffect(() => {
     if (!enabled) return undefined;
@@ -102,14 +101,15 @@ export function useSensorSnapshot(enabled: boolean): SensorSnapshot {
       return undefined;
     }
 
-    // 序列缓冲在 ref 里，组件不重渲染也想拿到新样本 —— 用轻量 tick 驱动
-    const ticker = setInterval(() => forceTick((n) => n + 1), SAMPLE_INTERVAL_MS * 2);
+    // 序列缓冲在 ref 里随事件原地追加；mag/acc/gyro 每次事件都 setState
+    // 触发重渲染，useMemo 本就会重算 —— 不需要额外的定时器"踢"渲染。
+    // （之前这里有个每 200ms 的 ticker：它既不在 useMemo 依赖里所以
+    //  根本驱动不了重算，又在无传感器设备上空转 5 次渲染/秒，纯耗电。）
 
     return () => {
       magSub?.remove();
       accSub?.remove();
       gyroSub?.remove();
-      clearInterval(ticker);
       magSeriesRef.current = [];
       azSeriesRef.current = [];
       tiltSeriesRef.current = [];
@@ -135,6 +135,7 @@ export function useSensorSnapshot(enabled: boolean): SensorSnapshot {
       }),
       available: mag !== null || acc !== null,
     };
-    // forceTick 驱动的重渲染会重算；mag/acc/gyro 变化本身也是依赖
+    // mag/acc/gyro 每次传感器事件都是新对象，useMemo 随之重算；
+    // 序列数组是 ref 原地追加，同一引用即最新内容。
   }, [mag, acc, gyro]);
 }

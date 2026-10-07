@@ -7,7 +7,9 @@
  * 与相邻两页的职责分工（V2 §30「一页一事」，别混起来）：
  *   - `/`（罗盘首页）：仿真模式，盘面只由手指拖动，**不读传感器**；
  *   - `/adjust`：调角度、上锁，盘面可由磁力计驱动，但不做质量判断；
- *   - `/sensors`（本页）：**只做测量与可信度判断**，不可拖、不可选山、不算术数。
+ *   - `/sensors`（本页）：**只做测量与可信度判断**，不可拖、不可选山、不算术数；
+ *     唯一的出口是「采集当前读数」—— 把方位角交给「确认坐向」页，
+ *     坐山/向山仍由用户在确认页点选（RULE-004：传感器给不出"哪一端是坐"）。
  *
  * 🔴 三条必须守住的语义（错了就会给出"看起来正常"的假结论）：
  *
@@ -22,12 +24,14 @@
  */
 
 import { Ionicons } from '@expo/vector-icons';
-import { Stack } from 'expo-router';
-import React, { useId } from 'react';
+import { Stack, useRouter } from 'expo-router';
+import React, { useCallback, useId } from 'react';
 import { StyleSheet, View } from 'react-native';
 import Svg, { Defs, LinearGradient, Line, Path, Stop } from 'react-native-svg';
 
+import { getApiClient } from '@/api/client';
 import { AppText } from '@/components/AppText';
+import { Button } from '@/components/Card';
 import { CompassDial, DIAL_DARK } from '@/components/CompassDial';
 import { HelpButton } from '@/components/HelpButton';
 import { Screen } from '@/components/Screen';
@@ -39,6 +43,7 @@ import {
   buildSparkline,
 } from '@/lib/sparkline';
 import { useSensorSnapshot } from '@/services/useSensors';
+import { useSubmit } from '@/lib/useAsync';
 import { instrument, radius, space } from '@/theme/tokens';
 
 /** 质量等级的配色 —— 这是**仪器质量**的绿/红，不是术数吉凶，两者不要互相套用 */
@@ -53,10 +58,35 @@ export default function SensorsScreen(): React.JSX.Element {
   // 进入页面即订阅、离开即退订（磁力计高频采样耗电，见 useSensors 注释）
   const sensor = useSensorSnapshot(true);
   const { quality } = sensor;
+  const router = useRouter();
+  const collect = useSubmit(getApiClient().createSession);
 
   const azimuth = sensor.azimuth;
   const magnitude = sensor.magneticMagnitude;
   const hasAzimuth = azimuth !== null;
+
+  /**
+   * 采集当前读数 —— 本页唯一的"出口"。
+   *
+   * 之前本页是个死胡同：测出方位角、看到质量评分，然后就没有然后了，
+   * 读数进不了「确认坐向 → 计算 → 测盘档案」链路（V2 §2.1 第 8 步）。
+   * 现在：建一个会话，把当前方位角以 `degree` 参数带给确认页。
+   * 确认页本来就支持"无识别手动录入"（scan 页识别失败时就是这么进的），
+   * `degree` 会灌进实测角 override，用户再点选坐山即完成 RULE-004 确认。
+   *
+   * 只传角度、不预选坐山：单一方位角无法判断"哪一端是坐"，
+   * 那是建筑朝向的语义，不在传感器数据里 —— 必须留给用户点选。
+   */
+  const onCollect = useCallback(async () => {
+    const az = sensor.azimuth;
+    if (az === null) return;
+    const res = await collect.run({ title: `传感器实测 ${az.toFixed(1)}°` });
+    if (!res) return;
+    router.push({
+      pathname: '/confirm/[sessionId]',
+      params: { sessionId: res.session_id, degree: az.toFixed(2) },
+    });
+  }, [sensor.azimuth, collect, router]);
 
   const maxTilt = sensor.tilt
     ? Math.max(Math.abs(sensor.tilt.pitch), Math.abs(sensor.tilt.roll))
@@ -136,6 +166,26 @@ export default function SensorsScreen(): React.JSX.Element {
           <AppText size="xs" color={instrument.muted} center>
             {hasAzimuth ? '未做磁偏角改正：真北与磁北约差数度，随地区而变' : '等待磁力计数据'}
           </AppText>
+        </View>
+
+        {/* ---------- 采集：把读数送进确认管线 ---------- */}
+        <View style={styles.card}>
+          <AppText size="xs" color={instrument.textSecondary} style={styles.collectNote}>
+            采集的是当前方位角（相对磁北，未做磁偏角改正）。
+            坐山 / 向山需在下一步由你点选确认 —— 传感器只给得出方向，给不出"哪一端是坐"。
+          </AppText>
+          <Button
+            label={hasAzimuth ? `采集当前读数 ${azimuth!.toFixed(1)}°` : '暂无读数可采集'}
+            disabled={!hasAzimuth}
+            loading={collect.loading}
+            onPress={() => void onCollect()}
+            style={styles.collectBtn}
+          />
+          {collect.error ? (
+            <AppText size="sm" color={instrument.warn} style={styles.collectNote}>
+              建档失败：{collect.error}
+            </AppText>
+          ) : null}
         </View>
 
         {/* ---------- 综合质量 ---------- */}
@@ -444,6 +494,8 @@ const styles = StyleSheet.create({
   },
   placeholderText: { marginTop: space[3] },
   bigNumber: { marginTop: space[1], fontVariant: ['tabular-nums'] },
+  collectNote: { lineHeight: 18, marginBottom: space[2] },
+  collectBtn: { marginTop: space[1] },
   qualityHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   weightNote: { marginTop: 2 },
   gradeRow: { flexDirection: 'row', alignItems: 'center', gap: space[2] },
