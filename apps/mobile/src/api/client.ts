@@ -48,6 +48,8 @@ import type {
   BaziInput,
   CapabilitiesResponse,
   CompassConfirmRequest,
+  DailyFortune,
+  DailyFortuneInput,
   CompassInput,
   CompassTemplate,
   DeletedResponse,
@@ -327,6 +329,15 @@ export class ApiClient {
     this.request(
       `/api/v1/almanac/range?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`,
     );
+
+  /**
+   * 每日运程（POST：请求体里装着出生日期，放 query 会进日志）。
+   *
+   * `birth_date` 只用于定日主；`birth_hour` 未知可省略；
+   * `target_date` 省略即今天，由服务端定（与 almanacDay 同一理由）。
+   */
+  dailyFortune = (input: DailyFortuneInput): Promise<DailyFortune> =>
+    this.json('/api/v1/daily/fortune', 'POST', input);
 
   zeriEvents = (): Promise<ZeriEventsResponse> => this.request('/api/v1/zeri/events');
 
