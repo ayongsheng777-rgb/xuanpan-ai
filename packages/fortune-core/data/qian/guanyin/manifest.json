@@ -1,0 +1,12 @@
+{
+  "set_id": "guanyin",
+  "name": "观音灵签 · 一百签",
+  "demo": false,
+  "note": "签文来源：https://github.com/shetengteng/tt-qimen （src/modules/lingqian/data/guanyin.json，2026-10-07 获取）。「解签」取该来源的解曰，「建议」取仙机；分项（家宅/婚姻/事业/财运/健康/出行）与典故保留在各签备查。本仓库未对传世版本做校对，文本准确性以来源为准。",
+  "levels": [
+    "上吉",
+    "中凶",
+    "中平"
+  ],
+  "total": 100
+}
