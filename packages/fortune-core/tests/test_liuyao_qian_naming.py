@@ -207,9 +207,11 @@ class TestQian:
         assert len(data["signs"]) == data["total"]
 
     def test_list_sets(self) -> None:
-        sets = list_qian_sets()
-        assert any(s["set_id"] == "demo_guanyin" for s in sets)
-        assert all(s["demo"] for s in sets)
+        sets = {s["set_id"]: s for s in list_qian_sets()}
+        assert "demo_guanyin" in sets
+        # 演示集必须明确标 demo；真实签库（demo=False）允许存在，
+        # 由各自文件的元数据声明（见 test_qian_guanyin.py）
+        assert sets["demo_guanyin"]["demo"] is True
 
     def test_draw_is_deterministic(self) -> None:
         a = draw_qian(3)
