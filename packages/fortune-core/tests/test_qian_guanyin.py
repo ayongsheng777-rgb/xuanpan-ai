@@ -22,8 +22,14 @@ SET_ID = "guanyin"
 
 
 def _raw() -> dict:
-    path = Path(DEFAULT_DATA_DIR) / f"{SET_ID}.json"
-    return json.loads(path.read_text(encoding="utf-8"))
+    """从分卷目录重组出与单文件等价的数据（manifest + part-*.json 按序合并）。"""
+    shard = Path(DEFAULT_DATA_DIR) / SET_ID
+    manifest = json.loads((shard / "manifest.json").read_text(encoding="utf-8"))
+    signs: list = []
+    for part_path in sorted(shard.glob("part-*.json")):
+        part = json.loads(part_path.read_text(encoding="utf-8"))
+        signs.extend(part["signs"])
+    return {**manifest, "signs": signs}
 
 
 class TestDatasetIntegrity:
@@ -61,6 +67,52 @@ class TestDatasetIntegrity:
         data = _raw()
         assert "shetengteng/tt-qimen" in data["note"]
         assert "未做传世版本校对" in data["note"] or "校对" in data["note"]
+
+
+class TestShardedFormat:
+    """分卷机制本身：用临时目录验证 manifest + part 合并语义。"""
+
+    def test_shard_roundtrip(self, tmp_path) -> None:
+        from fortune_core.qian import _load_sharded  # noqa: PLC2701（白盒测内部合并）
+
+        shard = tmp_path / "myset"
+        shard.mkdir()
+        (shard / "manifest.json").write_text(
+            json.dumps({"set_id": "myset", "total": 3}), encoding="utf-8"
+        )
+        (shard / "part-01.json").write_text(
+            json.dumps({"signs": [{"number": 1}, {"number": 2}]}), encoding="utf-8"
+        )
+        (shard / "part-02.json").write_text(
+            json.dumps({"signs": [{"number": 3}]}), encoding="utf-8"
+        )
+        data = _load_sharded("myset", shard)
+        assert data is not None
+        assert [s["number"] for s in data["signs"]] == [1, 2, 3]
+        assert data["total"] == 3
+
+    def test_missing_manifest_returns_none(self, tmp_path) -> None:
+        from fortune_core.qian import _load_sharded
+
+        shard = tmp_path / "empty"
+        shard.mkdir()
+        assert _load_sharded("empty", shard) is None
+
+    def test_list_includes_sharded_sets(self, tmp_path) -> None:
+        from fortune_core.qian import list_qian_sets
+
+        shard = tmp_path / "myset"
+        shard.mkdir()
+        (shard / "manifest.json").write_text(
+            json.dumps({"set_id": "myset", "name": "测试集", "demo": False}),
+            encoding="utf-8",
+        )
+        (shard / "part-01.json").write_text(
+            json.dumps({"signs": [{"number": 1}]}), encoding="utf-8"
+        )
+        sets = {s["set_id"]: s for s in list_qian_sets(str(tmp_path))}
+        assert sets["myset"]["total"] == 1
+        assert sets["myset"]["name"] == "测试集"
 
 
 class TestEngineBehavior:
