@@ -178,6 +178,50 @@ export default function CompassHomeScreen(): React.JSX.Element {
         <Ionicons name="chevron-forward" size={18} color={instrument.muted} />
       </PressablePanel>
 
+      {/* ---------- 每日早报 & 灵签机 ----------
+          高频轻量入口：早报是每天看一眼的东西，签机是游戏化的抽签。
+          与「去测盘」同一视觉语言（PressablePanel + instrument 色域）。 */}
+      <View style={styles.dailyRow}>
+        <PressablePanel
+          onPress={() => router.push('/morning')}
+          accessibilityLabel="打开每日早报"
+          style={styles.dailyCard}
+          contentStyle={styles.dailyContent}
+        >
+          <View style={styles.ctaIcon}>
+            <Ionicons name="sunny" size={22} color={instrument.accent} />
+          </View>
+          <View style={styles.ctaBody}>
+            <AppText size="md" weight="semibold" color={instrument.text}>
+              每日早报
+            </AppText>
+            <AppText size="xs" color={instrument.textSecondary} style={styles.ctaDesc}>
+              黄历宜忌 + 按你生日算的当日运程
+            </AppText>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color={instrument.muted} />
+        </PressablePanel>
+        <PressablePanel
+          onPress={() => router.push('/qianji')}
+          accessibilityLabel="打开灵签机"
+          style={styles.dailyCard}
+          contentStyle={styles.dailyContent}
+        >
+          <View style={styles.ctaIcon}>
+            <Ionicons name="game-controller" size={22} color={instrument.accent} />
+          </View>
+          <View style={styles.ctaBody}>
+            <AppText size="md" weight="semibold" color={instrument.text}>
+              灵签机
+            </AppText>
+            <AppText size="xs" color={instrument.textSecondary} style={styles.ctaDesc}>
+              摇签筒、开奖、解签，街机式抽签
+            </AppText>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color={instrument.muted} />
+        </PressablePanel>
+      </View>
+
       {/* ---------- 今日状态 ---------- */}
       {data && data.total > 0 ? (
         <PressablePanel
@@ -241,6 +285,14 @@ const styles = StyleSheet.create({
   magStatus: { flexDirection: 'row', alignItems: 'center', gap: space[1], marginTop: space[2] },
   dot: { width: 6, height: 6, borderRadius: 3 },
 
+  dailyRow: { marginTop: space[4], gap: space[3] },
+  dailyCard: { marginBottom: 0 },
+  dailyContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space[3],
+    marginBottom: 0,
+  },
   ctaWrap: { marginTop: space[4] },
   ctaContent: {
     flexDirection: 'row',
