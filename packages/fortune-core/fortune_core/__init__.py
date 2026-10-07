@@ -21,6 +21,7 @@ from .bazi import BaziChart, BirthInput, calculate_bazi
 from .almanac import AlmanacResult, calculate_almanac
 from .compass import CompassOrientation, calculate_orientation, element_relation
 from .context import FortuneContext, build_context
+from .daily import DailyFortune, DomainScore, daily_fortune
 from .duangua import BaziDuan, LiuYaoDuan, duan_bazi, duan_liuyao
 from .exceptions import (
     DomainDataMissingError,
@@ -75,6 +76,8 @@ __all__ = [
     "NameAnalysis", "analyze_name",
     # 断卦
     "LiuYaoDuan", "BaziDuan", "duan_liuyao", "duan_bazi",
+    # 每日运程
+    "DailyFortune", "DomainScore", "daily_fortune",
     # 上下文 / 流派
     "FortuneContext", "build_context",
     "DEFAULT_SCHOOL", "get_school", "list_schools",
