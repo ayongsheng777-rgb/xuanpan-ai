@@ -24,6 +24,7 @@ import { Chip } from '@/components/Chip';
 import { DuanCard } from '@/components/DuanCard';
 import { FactList } from '@/components/FactList';
 import { helpHeaderRight } from '@/components/HelpButton';
+import { QianSetPicker } from '@/components/QianSetPicker';
 import { Screen } from '@/components/Screen';
 import { SegmentedTabs } from '@/components/SegmentedTabs';
 import { isToday, shiftDays, todayISODate, weekdayLabel } from '@/lib/date';
@@ -383,7 +384,9 @@ function LiuyaoPanel({ onOpenReport }: { onOpenReport: (id: string) => void }): 
 // ==========================================================================
 
 function QianPanel({ onOpenReport }: { onOpenReport: (id: string) => void }): React.JSX.Element {
+  const router = useRouter();
   const [seedText, setSeedText] = useState('');
+  const [setId, setSetId] = useState('guanyin');
   const [preview, setPreview] = useState<LayerPreview | null>(null);
   const [savedId, setSavedId] = useState<string | null>(null);
   const [demoWarning, setDemoWarning] = useState<string | null>(null);
@@ -397,29 +400,36 @@ function QianPanel({ onOpenReport }: { onOpenReport: (id: string) => void }): Re
     const seed = seedText.trim() === '' ? Date.now() : Number(seedText);
     if (!Number.isFinite(seed)) return;
 
-    const r = await calc.run({ seed, set_id: 'demo_guanyin' });
+    const r = await calc.run({ seed, set_id: setId });
     if (!r) return;
     setSeedText(String(seed));
     setPreview(r);
     setSavedId(null);
     // 演示签库必须显著提示，不能让人误以为抽到了传世签文
     setDemoWarning(r.facts['qian']?.['is_demo_data'] === true ? '当前使用演示签库（自撰样例），非传世签文' : null);
-  }, [calc, seedText]);
+  }, [calc, seedText, setId]);
 
   const onSave = useCallback(async () => {
     const seed = Number(seedText);
     if (!Number.isFinite(seed)) return;
     const created = await create.run({ title: '灵签' });
     if (!created) return;
-    const ok = await patch.run(created.session_id, { qian: { seed, set_id: 'demo_guanyin' } });
+    const ok = await patch.run(created.session_id, { qian: { seed, set_id: setId } });
     if (ok) setSavedId(created.session_id);
-  }, [create, patch, seedText]);
+  }, [create, patch, seedText, setId]);
 
   const qianFacts = preview?.facts['qian'] ?? {};
   const err = calc.error ?? create.error ?? patch.error;
 
   return (
     <>
+      <Button
+        label="去灵签机（街机版）"
+        variant="ghost"
+        icon={<Ionicons name="game-controller-outline" size={18} color={colors.primary} />}
+        onPress={() => router.push('/qianji')}
+      />
+      <QianSetPicker value={setId} onChange={(id) => { setSetId(id); setPreview(null); setSavedId(null); }} />
       <Card title="抽签">
         <AppText size="sm" color="textSecondary" style={styles.cardIntro}>
           留空则以点击那一刻的时间为种子；也可填入你心仪的数字。
