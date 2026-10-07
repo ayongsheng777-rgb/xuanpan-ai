@@ -11,7 +11,12 @@
   `demo: false` 但**未做传世版本校对** —— 文本准确性以来源为准，
   由用户自行判断是否采用（2026-10-07 由用户指定引入）
 
-引擎本身完整可用：只要把合法签库 JSON 放进 `data/qian/`，即可直接启用。
+引擎本身完整可用：只要把合法签库放进 `data/qian/`，即可直接启用。
+签库两种形态（`load_qian_set` 自动识别）：
+- 单文件：`data/qian/<set_id>.json`（含 `signs` 数组）
+- 分卷：`data/qian/<set_id>/manifest.json`（元数据）+
+  `data/qian/<set_id>/part-*.json`（`signs` 分片，按文件名排序合并；
+  用于单文件过大的数据集，合并后与单文件语义一致）
 抽签为**确定性**函数：给定 `seed` 必得同一签（可测、可复现、可留痕）。
 """
 
@@ -73,13 +78,19 @@ class QianResult:
 
 @lru_cache(maxsize=16)
 def _load_raw(set_id: str, data_dir: str) -> dict[str, Any]:
-    path = Path(data_dir) / f"{set_id}.json"
-    if not path.exists():
-        raise DomainDataMissingError(
-            f"签库不存在：{path}。请将合法签库 JSON 放入该目录，或改用已存在的签库。"
-        )
-    with path.open("r", encoding="utf-8") as fh:
-        data = json.load(fh)
+    single = Path(data_dir) / f"{set_id}.json"
+    if single.exists():
+        with single.open("r", encoding="utf-8") as fh:
+            data = json.load(fh)
+    else:
+        # 分卷签库：大数据集拆成目录（manifest.json + part-*.json），
+        # 避免单个文件过大。合并后与单文件格式完全一致。
+        data = _load_sharded(set_id, Path(data_dir) / set_id)
+        if data is None:
+            raise DomainDataMissingError(
+                f"签库不存在：{single}（或分卷目录 {set_id}/manifest.json）。"
+                "请将合法签库放入该目录，或改用已存在的签库。"
+            )
 
     signs = data.get("signs")
     if not isinstance(signs, list) or not signs:
@@ -92,6 +103,33 @@ def _load_raw(set_id: str, data_dir: str) -> dict[str, Any]:
     numbers = [s.get("number") for s in signs]
     if len(set(numbers)) != len(numbers):
         raise DomainDataMissingError(f"签库 {set_id} 存在重复签号：{numbers}")
+    return data
+
+
+def _load_sharded(set_id: str, shard_dir: Path) -> dict[str, Any] | None:
+    """加载分卷签库；目录结构不合法时返回 None（由调用方报"签库不存在"）。
+
+    目录约定：`<set_id>/manifest.json`（元数据，不含 signs）+
+    `<set_id>/part-*.json`（每个含 `signs` 数组，按文件名排序合并）。
+    """
+    manifest_path = shard_dir / "manifest.json"
+    if not shard_dir.is_dir() or not manifest_path.exists():
+        return None
+    with manifest_path.open("r", encoding="utf-8") as fh:
+        manifest = json.load(fh)
+    parts = sorted(shard_dir.glob("part-*.json"))
+    if not parts:
+        raise DomainDataMissingError(f"分卷签库 {set_id} 没有 part-*.json：{shard_dir}")
+    signs: list[dict[str, Any]] = []
+    for part_path in parts:
+        with part_path.open("r", encoding="utf-8") as fh:
+            part = json.load(fh)
+        part_signs = part.get("signs")
+        if not isinstance(part_signs, list):
+            raise DomainDataMissingError(f"分卷 {part_path.name} 缺少 signs 数组")
+        signs.extend(part_signs)
+    data = dict(manifest)
+    data["signs"] = signs
     return data
 
 
@@ -114,6 +152,21 @@ def list_qian_sets(data_dir: str | Path | None = None) -> list[dict[str, Any]]:
         out.append({
             "set_id": f.stem,
             "name": data.get("name", f.stem),
+            "total": len(data.get("signs", [])),
+            "demo": bool(data.get("demo", False)),
+            "note": data.get("note", ""),
+        })
+    # 分卷签库：子目录（含 manifest.json）
+    for sub in sorted(p for p in d.iterdir() if p.is_dir()):
+        if not (sub / "manifest.json").exists():
+            continue
+        try:
+            data = _load_raw(sub.name, str(d))
+        except DomainDataMissingError:
+            continue
+        out.append({
+            "set_id": sub.name,
+            "name": data.get("name", sub.name),
             "total": len(data.get("signs", [])),
             "demo": bool(data.get("demo", False)),
             "note": data.get("note", ""),
