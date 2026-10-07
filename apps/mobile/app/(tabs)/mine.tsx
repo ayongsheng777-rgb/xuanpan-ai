@@ -47,6 +47,7 @@ export default function MineScreen(): React.JSX.Element {
       ) : null}
 
       <AiModelCard data={data?.providers ?? null} />
+      <ProfileCard onGoProfile={() => router.push('/profile')} />
       <NetworkCard onApplied={reload} />
       <PrivacyCard caps={data?.caps ?? null} />
       <DataCard onGoHistory={() => router.push('/history')} />
@@ -99,6 +100,21 @@ function AiModelCard({ data }: { data: AiProvidersResponse | null }): React.JSX.
           </View>
         ))
       )}
+    </Card>
+  );
+}
+
+// ==========================================================================
+// 我的信息（每日运程用，只存本地）
+// ==========================================================================
+
+function ProfileCard({ onGoProfile }: { onGoProfile: () => void }): React.JSX.Element {
+  return (
+    <Card title="我的信息">
+      <AppText size="xs" color="muted" style={styles.note}>
+        出生日期用来排出你的日主，是「每日早报」里个人运程的依据。只存手机本地，不上传。
+      </AppText>
+      <Button label="设置我的信息" variant="secondary" onPress={onGoProfile} />
     </Card>
   );
 }
@@ -163,8 +179,7 @@ function NetworkCard({ onApplied }: { onApplied: () => void }): React.JSX.Elemen
       ) : null}
 
       <AppText size="xs" color="muted" style={styles.note}>
-        注：地址目前仅在本次运行内生效。持久化需要引入本地存储依赖，
-        按 AGENTS.md §5.4 需先说明成本与替代方案后再引入，故暂未加入。
+        注：地址目前仅在本次运行内生效，暂未做持久化（本地存储依赖已引入，后续可接）。
       </AppText>
       <Button label="刷新服务端状态" variant="ghost" onPress={onApplied} style={styles.refreshBtn} />
     </Card>
