@@ -561,3 +561,28 @@ def test_use_sensors_has_no_render_ticker() -> None:
         "useSensors.ts 里出现了 setInterval：渲染应由传感器事件驱动，"
         "不要加定时器空转"
     )
+
+
+# ==========================================================================
+# 断言 9：首页罗盘必须是实时磁针，不能是纯仿真
+# ==========================================================================
+
+
+def test_home_compass_is_sensor_driven() -> None:
+    """首页罗盘必须读真传感器，不能只拿手拖角度当"当前方位"。
+
+    挡住的错：首页罗盘用 useState 存用户拖出来的角度当"当前方位"，
+    全程不读传感器 —— 阿勇 2026-10-07 明确要求"不要模拟，都要真实数据"。
+    要求：
+      1. rotation 由 sensor.azimuth 推出（有数据时）；
+      2. 磁针驱动时盘面不可手拖 —— 否则会造出"读数与手机朝向不一致"的假状态；
+      3. 读数旁不再挂"仿真"字样（无数据回退手拖时必须明示）。
+    """
+    src = (_APP / "(tabs)" / "index.tsx").read_text(encoding="utf-8")
+
+    assert "sensor.azimuth" in src, "首页 rotation 没有接传感器方位角"
+    assert re.search(r"interactive=\{!sensorDriven\}", src), (
+        "首页盘面在磁针驱动时仍可手拖：会造出读数与手机朝向不一致的假状态"
+    )
+    assert "当前方位（仿真）" not in src, '首页读数旁还挂着"仿真"字样'
+    assert "useSensorSnapshot(true)" in src, "首页没有订阅传感器"

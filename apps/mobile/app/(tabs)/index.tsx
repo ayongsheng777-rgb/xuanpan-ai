@@ -6,8 +6,8 @@
  *   当前方位（大字）+ 磁场强度卡 → 去测盘 → 已存盘面
  *
  * 语义约定：
- *   - 本页罗盘是**仿真模式**：用户拖出的方向就是「当前方位」，
- *     不读取传感器（传感器测量在 /sensors 页，职责分离，V2 §30「一页一事」）。
+ *   - 本页罗盘是**实时磁针**：有磁力计数据时盘面跟着手机转（rotation = −方位角，
+ *     与 /adjust「真实磁针」同一口径）；无数据时回退手拖并明示，不编造方位。
  *   - 磁场卡的数据来自传感器；设备无磁力计/数据未到时显示「—」占位，
  *     **不编造数值**（RULE-008 同精神：没有就是没有）。
  *
@@ -43,10 +43,18 @@ interface HomeStats {
 
 export default function CompassHomeScreen(): React.JSX.Element {
   const router = useRouter();
-  /** 仿真模式的盘面旋转量（度）。用户拖出来的「当前方位」 */
-  const [rotation, setRotation] = useState(0);
-  /** 磁场卡需要传感器 —— 首页也订阅（进入即开始，离开即停止，见 useSensors 注释） */
+  /** 无传感器时的手动盘面旋转量（度）—— 仅回退用，有磁针数据时不生效 */
+  const [manualRotation, setManualRotation] = useState(0);
+  /** 首页订阅传感器：磁场卡与实时磁针都要它（进入即开始，离开即停止，见 useSensors 注释） */
   const sensor = useSensorSnapshot(true);
+
+  /**
+   * 实时磁针：有方位角数据 → 盘面由磁针驱动（rotation = −azimuth，
+   * 顶部读数 = azimuthAtTop(rotation) = azimuth，见 lib/compassDial 注释）；
+   * 无数据 → 回退手拖，并如实标注，不编造一个"看起来在转"的方位。
+   */
+  const sensorDriven = sensor.azimuth !== null;
+  const rotation = sensorDriven ? -sensor.azimuth! : manualRotation;
 
   const load = useCallback(async (): Promise<HomeStats> => {
     const page = await getApiClient().listSessions(1, 0);
@@ -93,18 +101,20 @@ export default function CompassHomeScreen(): React.JSX.Element {
         <View style={styles.northArrow} />
       </View>
 
-      {/* ---------- 深色大罗盘（仿真：可拖动） ----------
+      {/* ---------- 深色大罗盘（实时磁针；无数据时回退手拖） ----------
           盘式取「三元三合综合盘」：实物综合盘就是这个层数密度。
           层数越多越接近用户手里的盘面，而"一眼看出排位是否一致"
-          正是这个组件存在的理由（见 CompassDial 文件头注释）。 */}
+          正是这个组件存在的理由（见 CompassDial 文件头注释）。
+          磁针驱动时禁止手拖：转的是手机，不是盘面 —— 拖盘面会制造
+          "读数与手机朝向不一致"的假状态。 */}
       <View style={styles.dialWrap}>
         <CompassDial
           size={320}
           palette={DIAL_DARK}
           style="zonghe"
           rotation={rotation}
-          interactive
-          onRotate={setRotation}
+          interactive={!sensorDriven}
+          onRotate={setManualRotation}
         />
       </View>
 
@@ -115,11 +125,13 @@ export default function CompassHomeScreen(): React.JSX.Element {
           折了行就不是"仪表"了。 */}
       <View style={styles.readoutRow}>
         <Panel style={[styles.readoutCard, styles.readoutMain]}>
-          <Label color={instrument.textSecondary}>当前方位（仿真）</Label>
+          <Label color={instrument.textSecondary}>当前方位</Label>
           <Metric color={instrument.accent} numberOfLines={1} style={styles.azimuth}>
             {azimuth.toFixed(2)}°
           </Metric>
-          <Label color={instrument.muted}>拖动罗盘改变方向</Label>
+          <Label color={instrument.muted}>
+            {sensorDriven ? '实时磁针 · 转动手机' : '无传感器数据 · 可拖动罗盘'}
+          </Label>
         </Panel>
         <Panel style={styles.readoutCard}>
           <Label color={instrument.textSecondary}>磁场强度</Label>
@@ -247,7 +259,9 @@ export default function CompassHomeScreen(): React.JSX.Element {
       ) : null}
 
       <AppText size="xs" color={instrument.muted} center style={styles.disclaimer}>
-        仿真模式仅用于熟悉盘面；实测请到「测盘」选择数据来源
+        {sensorDriven
+          ? '实时磁针：读数为磁北，未做磁偏角改正；要存档请到「测盘」采集'
+          : '无传感器数据时可拖动罗盘熟悉盘面；实测请到「测盘」选择数据来源'}
       </AppText>
     </Screen>
   );

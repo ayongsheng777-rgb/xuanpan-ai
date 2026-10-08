@@ -1,0 +1,26 @@
+{
+  "build": {
+    "preview": {
+      "android": {
+        "buildType": "apk"
+      },
+      "distribution": "internal",
+      "env": {
+        "XUANPAN_API_BASE_URL": "http://oect.yongshengcloud.asia:2557",
+        "XUANPAN_API_BASE_URLS": "http://oect.yongshengcloud.asia:2557,http://oect.ayong.qzz.io:2557,http://127.0.0.1:8360"
+      }
+    },
+    "production": {
+      "android": {
+        "buildType": "apk"
+      }
+    }
+  },
+  "cli": {
+    "appVersionSource": "remote",
+    "version": ">= 16.0.0"
+  },
+  "submit": {
+    "production": {}
+  }
+}
