@@ -71,7 +71,10 @@
       "typedRoutes": false
     },
     "extra": {
-      "apiBaseUrl": "http://127.0.0.1:8360"
+      "apiBaseUrl": "http://127.0.0.1:8360",
+      "eas": {
+        "projectId": "12fb128e-02e4-47fe-83ef-c796b7973e82"
+      }
     }
   }
 }
