@@ -93,7 +93,8 @@ VOLUMES: tuple[Volume, ...] = (
         slug="01-components-base",
         title="基础组件",
         blurb=(
-            "与术数领域无关的通用 UI 原件：排版、容器、按钮、标签、横幅、分段切换、讲解入口。"
+            "与术数领域无关的通用 UI 原件：排版、容器、按钮、标签、横幅、分段切换、讲解入口，"
+            "以及「点一下弹白话」的两件套（`Term` 行内术语 + `InfoPopup` 底部半屏卡片）。"
             "这些组件决定了全 App 的视觉基调，也是判断「设计系统是否被真正执行」的第一手材料。"
         ),
         files=(
@@ -104,6 +105,8 @@ VOLUMES: tuple[Volume, ...] = (
             "src/components/Banner.tsx",
             "src/components/SegmentedTabs.tsx",
             "src/components/HelpButton.tsx",
+            "src/components/InfoPopup.tsx",
+            "src/components/Term.tsx",
             "src/components/usePressScale.ts",
         ),
     ),
@@ -186,11 +189,15 @@ VOLUMES: tuple[Volume, ...] = (
         slug="06-content-copy",
         title="界面讲解文案",
         blurb=(
-            "各页「帮助」入口展开的操作说明与运作原理讲解。"
+            "各页「帮助」入口展开的操作说明与运作原理讲解，外加术语白话词典"
+            "（`plainTerms.ts`：每个专业术语一句话大白话，供 `Term` 组件点击弹出）。"
             "它是产品「把黑箱讲清楚」这一主张的落地物，"
             "也是判断文案与界面是否一致（有没有把已删除的按钮写进说明）的唯一依据。"
         ),
-        files=("src/content/help.ts",),
+        files=(
+            "src/content/help.ts",
+            "src/content/plainTerms.ts",
+        ),
     ),
     Volume(
         slug="07-ui-logic",
@@ -225,10 +232,12 @@ VOLUMES: tuple[Volume, ...] = (
             "界面上的每个数字都来自后端，`types.ts` 与后端 schema 一一对应。"
             "看这一卷能回答「这个格子里的值是谁算的、字段名叫什么、缺数据时是什么形态」——"
             "也是判断前端有没有自己算术数的依据（结论：没有，唯一例外是二十四山的顺序与山心角）。"
+            "另含 `baseUrlStore.ts`：后端地址的人工覆盖值（存手机本地，优先于启动自动探活）。"
         ),
         files=(
             "src/api/types.ts",
             "src/api/client.ts",
+            "src/api/baseUrlStore.ts",
             "src/types/env.d.ts",
         ),
     ),
