@@ -28,7 +28,7 @@ import React, { useCallback, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Switch, View } from 'react-native';
 
 import { AppText } from '@/components/AppText';
-import { CompassDial, DIAL_DARK } from '@/components/CompassDial';
+import { CompassDial, DIAL_LIGHT } from '@/components/CompassDial';
 import { HelpButton } from '@/components/HelpButton';
 import { Screen } from '@/components/Screen';
 import { azimuthAtTop, initialRotationFor, normalizeSigned } from '@/lib/compassDial';
@@ -155,7 +155,7 @@ export default function AdjustCompassScreen(): React.JSX.Element {
         <View style={styles.dialWrap}>
           <CompassDial
             size={320}
-            palette={DIAL_DARK}
+            palette={DIAL_LIGHT}
             style={dialStyle}
             rotation={rotation}
             interactive={!locked}

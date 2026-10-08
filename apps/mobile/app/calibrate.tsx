@@ -26,7 +26,7 @@ import { Pressable, StyleSheet, View } from 'react-native';
 
 import { AppText } from '@/components/AppText';
 import { Button, Card, KeyValueRow } from '@/components/Card';
-import { CompassDial, DIAL_DARK, type CompassPhoto } from '@/components/CompassDial';
+import { CompassDial, DIAL_LIGHT, type CompassPhoto } from '@/components/CompassDial';
 import { HelpButton } from '@/components/HelpButton';
 import { Screen } from '@/components/Screen';
 import { azimuthAtTop, initialRotationFor } from '@/lib/compassDial';
@@ -121,7 +121,7 @@ export default function CalibrateScreen(): React.JSX.Element {
         <View style={styles.dialWrap}>
           <CompassDial
             size={320}
-            palette={DIAL_DARK}
+            palette={DIAL_LIGHT}
             style={dialStyle}
             rotation={rotation}
             interactive

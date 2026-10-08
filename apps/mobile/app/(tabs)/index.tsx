@@ -28,7 +28,7 @@ import { getApiClient } from '@/api/client';
 import { AppText, Label, Metric } from '@/components/AppText';
 import { Banner } from '@/components/Banner';
 import { Button, Panel, PressablePanel } from '@/components/Card';
-import { CompassDial, DIAL_DARK } from '@/components/CompassDial';
+import { CompassDial, DIAL_LIGHT } from '@/components/CompassDial';
 import { HelpButton } from '@/components/HelpButton';
 import { Screen } from '@/components/Screen';
 import { azimuthAtTop } from '@/lib/compassDial';
@@ -110,7 +110,7 @@ export default function CompassHomeScreen(): React.JSX.Element {
       <View style={styles.dialWrap}>
         <CompassDial
           size={320}
-          palette={DIAL_DARK}
+          palette={DIAL_LIGHT}
           style="zonghe"
           rotation={rotation}
           interactive={!sensorDriven}
