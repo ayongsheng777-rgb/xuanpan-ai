@@ -25,16 +25,17 @@
 
 import { Ionicons } from '@expo/vector-icons';
 import { Stack, useRouter } from 'expo-router';
-import React, { useCallback, useId } from 'react';
-import { StyleSheet, View } from 'react-native';
+import React, { useCallback, useId, useState } from 'react';
+import { Pressable, StyleSheet, View } from 'react-native';
 import Svg, { Defs, LinearGradient, Line, Path, Stop } from 'react-native-svg';
 
 import { getApiClient } from '@/api/client';
 import { AppText } from '@/components/AppText';
 import { Button } from '@/components/Card';
-import { CompassDial, DIAL_DARK } from '@/components/CompassDial';
+import { CompassDial, DIAL_LIGHT } from '@/components/CompassDial';
 import { HelpButton } from '@/components/HelpButton';
 import { Screen } from '@/components/Screen';
+import { Term } from '@/components/Term';
 import { stdevOf, type Grade, type Vector3 } from '@/lib/sensorQuality';
 import {
   DEFAULT_MIN_SPAN,
@@ -117,6 +118,23 @@ export default function SensorsScreen(): React.JSX.Element {
         }}
       />
       <Screen scroll style={styles.root}>
+        {/*
+          显眼的页内返回按钮（2026-10-08 用户实报 BUG 3：从测盘进传感器页后
+          "不能返回" —— 原生标题栏的返回箭头太小不易发现）。
+          用文字按钮，不依赖用户发现左上角小箭头。
+        */}
+        <Pressable
+          onPress={() => router.back()}
+          accessibilityRole="button"
+          accessibilityLabel="返回测盘"
+          style={({ pressed }) => [styles.backBtn, pressed && styles.backBtnPressed]}
+        >
+          <Ionicons name="arrow-back" size={20} color={instrument.accent} />
+          <AppText size="md" weight="medium" color={instrument.text}>
+            返回测盘
+          </AppText>
+        </Pressable>
+
         {/* ---------- 无数据态：先说清楚，别让用户对着「—」猜 ---------- */}
         {!sensor.available ? (
           <View style={[styles.card, styles.warnCard]}>
@@ -140,7 +158,7 @@ export default function SensorsScreen(): React.JSX.Element {
             // rotation = -方位角：让当前朝向的刻度转到屏幕正上方（磁针不随盘转）
             <CompassDial
               size={280}
-              palette={DIAL_DARK}
+              palette={DIAL_LIGHT}
               style="zonghe"
               rotation={-(azimuth ?? 0)}
             />
@@ -187,6 +205,9 @@ export default function SensorsScreen(): React.JSX.Element {
             </AppText>
           ) : null}
         </View>
+
+        {/* ---------- 罗盘快测：实时读数直接给分析（BUG 5） ---------- */}
+        {hasAzimuth ? <QuickAnalyze azimuth={azimuth} /> : null}
 
         {/* ---------- 综合质量 ---------- */}
         <View style={styles.card}>
@@ -360,6 +381,161 @@ export default function SensorsScreen(): React.JSX.Element {
   );
 }
 
+/**
+ * 罗盘快测 —— 2026-10-08 用户要求（BUG 5）：
+ * "实时数据采集直接给分析专业术语结果与AI白话讲解"。
+ *
+ * 点一下，拿当前方位角调一次确定性计算，立刻给出：
+ *   1. 专业术语结果（坐山/向山/二十四山，术语都可点出白话）；
+ *   2. "AI 白话讲解"按钮 —— 建会话、问 AI，用大白话讲一遍。
+ *
+ * 诚实边界（RULE-004）：快测**不代替**"采集 → 确认坐向 → 报告"正式链路。
+ * 传感器只给得出方向，给不出"哪一端是坐"，所以快测结论明确标"仅供参考"，
+ * 正式结论必须走采集流程由用户点选确认。卡片上写清楚，不让人误会。
+ */
+function QuickAnalyze({ azimuth }: { azimuth: number | null }): React.JSX.Element {
+  const analyze = useSubmit(getApiClient().calcCompass);
+  const aiAsk = useSubmit(async (degree: number, sitting: string, facing: string) => {
+    const client = getApiClient();
+    const session = await client.createSession({ title: `罗盘快测 ${degree.toFixed(1)}°` });
+    await client.patchInputs(session.session_id, {
+      compass: { degree, source: 'manual', confirmed_by_user: false },
+    });
+    const res = await client.ask(session.session_id, {
+      question_text:
+        `请用大白话讲解这次罗盘快测：方位角 ${degree.toFixed(1)}°，` +
+        `坐${sitting}向${facing}。要求：先给一句人话结论；每个术语第一次出现都带一句解释；` +
+        `最后提醒这是快测参考，正式结论需经坐向确认。`,
+      question_category: 'compass_quick',
+    });
+    return res.report.interpretation;
+  });
+
+  const [facts, setFacts] = useState<Record<string, unknown> | null>(null);
+  const [aiPlain, setAiPlain] = useState<{
+    plain_sections?: { title: string; body: string }[];
+    sections: { title: string; body: string }[];
+  } | null>(null);
+
+  const run = useCallback(async () => {
+    if (azimuth === null) return;
+    setFacts(null);
+    setAiPlain(null);
+    aiAsk.reset();
+    const r = await analyze.run({
+      degree: azimuth,
+      source: 'manual',
+      confirmed_by_user: false,
+    });
+    if (r) setFacts((r.facts?.['compass'] ?? r.facts) as Record<string, unknown>);
+  }, [azimuth, analyze, aiAsk]);
+
+  const runAi = useCallback(async () => {
+    if (azimuth === null) return;
+    const st = String(facts?.['sitting'] ?? '');
+    const fc = String(facts?.['facing'] ?? '');
+    if (!st) return;
+    const interp = await aiAsk.run(azimuth, st, fc);
+    if (interp) setAiPlain(interp);
+  }, [azimuth, facts, aiAsk]);
+
+  const sitting = String(facts?.['sitting'] ?? '');
+  const facing = String(facts?.['facing'] ?? '');
+
+  return (
+    <View style={styles.card}>
+      <AppText size="md" weight="semibold" color={instrument.text} style={styles.qaTitle}>
+        罗盘快测
+      </AppText>
+      <AppText size="xs" color={instrument.textSecondary} style={styles.qaNote}>
+        拿当前读数直接算一次，立刻告诉你这个方向在术语里叫什么。术语点一下就有大白话。
+      </AppText>
+      <Button
+        label={azimuth === null ? '暂无读数' : `智能分析 ${azimuth.toFixed(1)}°`}
+        disabled={azimuth === null}
+        loading={analyze.loading}
+        onPress={() => void run()}
+        style={styles.qaBtn}
+      />
+      {analyze.error ? (
+        <AppText size="sm" color={instrument.danger} style={styles.qaNote}>
+          分析失败：{analyze.error}
+        </AppText>
+      ) : null}
+
+      {facts && sitting ? (
+        <View style={styles.qaResult}>
+          <AppText size="sm" color={instrument.text} style={styles.qaLine}>
+            <Term name="方位角" /> {Number(facts['exact_degree'] ?? azimuth).toFixed(1)}°，落在
+            <Term name="二十四山" /> 的「{sitting}」格
+          </AppText>
+          <AppText size="sm" color={instrument.text} style={styles.qaLine}>
+            <Term name="坐山" /> {sitting} · <Term name="向山" /> {facing}
+          </AppText>
+          <AppText size="xs" color={instrument.textSecondary} style={styles.qaNote}>
+            快测仅供参考：传感器定得出方向，定不出"哪一端是坐"。正式结论请走「采集当前读数」由你点选确认。
+          </AppText>
+          <Button
+            label="AI 白话讲解"
+            variant="secondary"
+            loading={aiAsk.loading}
+            onPress={() => void runAi()}
+            style={styles.qaBtn}
+          />
+          {aiAsk.error ? (
+            <AppText size="sm" color={instrument.danger} style={styles.qaNote}>
+              AI 讲解失败：{aiAsk.error}
+            </AppText>
+          ) : null}
+          {aiPlain ? <AiPlainText interpretation={aiPlain} /> : null}
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+/** AI 返回的白话版优先显示；没有白话版就显示专业版并如实说明。 */
+function AiPlainText({
+  interpretation,
+}: {
+  interpretation: { plain_sections?: { title: string; body: string }[]; sections: { title: string; body: string }[] };
+}): React.JSX.Element {
+  const plains = interpretation.plain_sections ?? [];
+  if (plains.length > 0) {
+    return (
+      <View style={styles.aiBox}>
+        {plains.map((s, i) => (
+          <View key={i} style={styles.aiSection}>
+            <AppText size="sm" weight="semibold" color={instrument.text}>
+              {s.title}
+            </AppText>
+            <AppText size="sm" color={instrument.text} style={styles.aiBody}>
+              {s.body}
+            </AppText>
+          </View>
+        ))}
+      </View>
+    );
+  }
+  return (
+    <View style={styles.aiBox}>
+      <AppText size="xs" color={instrument.textSecondary} style={styles.qaNote}>
+        这次 AI 只给了专业版，没有白话版，如实说明，不拿专业版冒充。
+      </AppText>
+      {interpretation.sections.map((s, i) => (
+        <View key={i} style={styles.aiSection}>
+          <AppText size="sm" weight="semibold" color={instrument.text}>
+            {s.title}
+          </AppText>
+          <AppText size="sm" color={instrument.text} style={styles.aiBody}>
+            {s.body}
+          </AppText>
+        </View>
+      ))}
+    </View>
+  );
+}
+
 function BreakdownItem({
   label,
   score,
@@ -459,6 +635,38 @@ function AxisRow({
 
 const styles = StyleSheet.create({
   root: { backgroundColor: instrument.bg },
+  /** 页内返回按钮 —— 大字 + 图标，不依赖用户发现标题栏小箭头 */
+  backBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space[2],
+    alignSelf: 'flex-start',
+    marginTop: space[3],
+    paddingVertical: space[2],
+    paddingHorizontal: space[3],
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: instrument.border,
+    backgroundColor: instrument.surface,
+  },
+  backBtnPressed: { backgroundColor: instrument.surfaceAlt },
+  /* ---------- 罗盘快测 ---------- */
+  qaTitle: { marginBottom: space[1] },
+  qaNote: { marginTop: space[2], lineHeight: 18 },
+  qaBtn: { marginTop: space[3] },
+  qaResult: { marginTop: space[3], gap: space[2] },
+  qaLine: { lineHeight: 24 },
+  aiBox: {
+    marginTop: space[2],
+    padding: space[3],
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: instrument.border,
+    backgroundColor: instrument.surfaceAlt,
+    gap: space[2],
+  },
+  aiSection: { gap: 4 },
+  aiBody: { lineHeight: 24 },
   card: {
     marginTop: space[4],
     backgroundColor: instrument.surface,

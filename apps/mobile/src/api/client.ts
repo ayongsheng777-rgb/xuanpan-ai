@@ -32,6 +32,7 @@
  * 且每次调用都显式写成 `this.request(...)`。
  */
 
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
 
 import {
@@ -39,6 +40,11 @@ import {
   normalizeCandidateUrls,
   pickFirstReachable,
 } from '../lib/apiCandidates';
+import {
+  clearApiBaseUrlOverride,
+  loadApiBaseUrlOverride,
+  saveApiBaseUrlOverride,
+} from './baseUrlStore';
 
 import type {
   AiProvidersResponse,
@@ -634,8 +640,47 @@ export function getApiClient(): ApiClient {
   return _client;
 }
 
-/** 切换后端地址（「我的 → 网络线路」用） */
+/**
+ * 切换后端地址（「我的 → 网络线路」用），并**持久化到手机本地**。
+ *
+ * 2026-10-08 用户实报：原来只换内存单例，App 重启就丢 —— 改的地址存不住。
+ * 现在同步写 AsyncStorage，下次启动 `initBaseUrl` 会优先读回它。
+ *
+ * 写盘失败不抛异常：内存里的地址已经生效并通过了探活，不能因为存盘失败
+ * 把一次成功的「测试并应用」变成报错。最坏情况是下次启动回到默认地址，
+ * 用户会在「网络线路」里看到实际生效的地址，不会产生"我设了但没生效"
+ * 的假象 —— 显示层永远以 `getApiClient().baseUrl` 为准。
+ */
 export function setApiBaseUrl(baseUrl: string): ApiClient {
   _client = new ApiClient({ baseUrl });
+  void saveApiBaseUrlOverride(AsyncStorage, baseUrl).catch(() => {});
   return _client;
+}
+
+/**
+ * 启动时确定后端地址，一处收口：
+ *
+ * 1. 先读用户手设的覆盖值 —— 有就直接用，**不再自动探活切线**。
+ *    用户亲手设的地址优先级最高，静默覆盖它就是 BUG 1 的另一种形态。
+ * 2. 没有覆盖值才走原来的自动探活（构建期候选表先连上先用）。
+ *
+ * 返回最终生效的地址。调用方（根布局）不 await、不处理失败 ——
+ * 启动期连不上是常态，红屏会让用户连手改入口都进不去。
+ */
+export async function initBaseUrl(): Promise<string> {
+  const override = await loadApiBaseUrlOverride(AsyncStorage);
+  if (override) {
+    setApiBaseUrl(override);
+    return override;
+  }
+  const picked = await autoSelectBaseUrl();
+  return picked ?? getApiClient().baseUrl;
+}
+
+/** 清掉手设的后端地址并回到自动选线（「恢复默认」按钮用）。 */
+export async function resetApiBaseUrl(): Promise<string> {
+  await clearApiBaseUrlOverride(AsyncStorage);
+  _client = null;
+  const picked = await autoSelectBaseUrl();
+  return picked ?? getApiClient().baseUrl;
 }
