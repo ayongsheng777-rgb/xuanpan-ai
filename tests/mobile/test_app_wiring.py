@@ -29,6 +29,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 
@@ -586,3 +587,33 @@ def test_home_compass_is_sensor_driven() -> None:
     )
     assert "当前方位（仿真）" not in src, '首页读数旁还挂着"仿真"字样'
     assert "useSensorSnapshot(true)" in src, "首页没有订阅传感器"
+
+
+# ==========================================================================
+# 断言 10：Android 构建的 Kotlin 版本必须钉住 1.9.25
+# ==========================================================================
+
+
+def test_android_kotlin_version_pinned_for_compose() -> None:
+    """expo-build-properties 必须把 android.kotlinVersion 钉在 1.9.25。
+
+    挡住的错：2026-10-08 EAS 云构建失败 —— Compose Compiler 1.5.15 要求
+    Kotlin 1.9.25，而默认的 1.9.24 不兼容，导致
+    :expo-modules-core:compileReleaseKotlin 编译失败，整个 APK 构建失败。
+    这个错在 tsc / expo export / 本地单测里都不会出现，只有云构建能暴露，
+    所以用静态守卫钉住配置，防止有人手滑删掉这行。
+    """
+    app_json = json.loads(
+        (_REPO_ROOT / "apps/mobile" / "app.json").read_text(encoding="utf-8")
+    )
+    plugins = app_json["expo"]["plugins"]
+    ebp = next(
+        (p for p in plugins if isinstance(p, list) and p[0] == "expo-build-properties"),
+        None,
+    )
+    assert ebp is not None, "app.json 里找不到 expo-build-properties 插件配置"
+    kv = ebp[1].get("android", {}).get("kotlinVersion")
+    assert kv == "1.9.25", (
+        f"android.kotlinVersion 必须是 1.9.25（Compose Compiler 1.5.15 要求），"
+        f"当前是 {kv!r} —— 删掉它会导致 EAS 云构建在 compileReleaseKotlin 失败"
+    )
