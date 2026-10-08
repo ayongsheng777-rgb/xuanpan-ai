@@ -102,9 +102,21 @@ class TestMeta:
         body = client.get("/api/v1/meta/capabilities").json()
         assert isinstance(body["fenjin_table_available"], bool)
 
-    def test_qian_sets_marks_demo(self, client: TestClient) -> None:
+    def test_qian_sets_carry_demo_flag(self, client: TestClient) -> None:
+        """每个签库都必须带布尔 `demo` 字段，且当前不应再存在演示库。
+
+        原断言是「必须存在一个演示库」—— 演示库（demo_guanyin）已于 2026-10-08
+        按用户要求移除（见 `packages/fortune-core/fortune_core/qian.py` 顶部注释），
+        该断言随之过时：库删掉后它在任何干净检出上都必然失败。
+        改为当前真实约束：字段契约仍在（前端靠它给演示库挂角标，字段没了会静默不挂），
+        且不应再出现被标记为演示的库。
+        """
         sets = client.get("/api/v1/meta/qian-sets").json()["sets"]
-        assert any(s.get("demo") for s in sets), "演示签库须自带 demo 标记"
+        assert sets, "签库列表不应为空"
+        assert all(isinstance(s.get("demo"), bool) for s in sets), (
+            f"每个签库都须带布尔 demo 字段：{sets}"
+        )
+        assert not any(s["demo"] for s in sets), "演示库已于 2026-10-08 移除，不应再出现"
 
 
 # ==========================================================================
