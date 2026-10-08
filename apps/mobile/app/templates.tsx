@@ -230,9 +230,8 @@ export default function TemplatesScreen(): React.JSX.Element {
       ) : null}
 
       {!loading && !error && items.length === 0 && !creating ? (
-        /* 深色域自绘空态：Card 的 EmptyState 用的是浅色 token（textSecondary
-           #6B6154），压在 instrument.bg #0A1626 上对比度不足 —— 空的页面
-           加上看不见的说明，等于告诉用户"这里坏了"。 */
+        /* 空态说明：instrument 已是明亮金色域（2026-10-08），直接用其 token，
+           不再需要深色域的特殊处理。 */
         <View style={styles.empty}>
           <Ionicons name="albums-outline" size={28} color={instrument.muted} />
           <AppText size="md" weight="medium" color={instrument.text} center style={styles.emptyTitle}>

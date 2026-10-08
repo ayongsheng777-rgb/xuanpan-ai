@@ -19,14 +19,15 @@
 
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import React from 'react';
-import { StyleSheet, View } from 'react-native';
+import React, { useState } from 'react';
+import { Pressable, StyleSheet, View } from 'react-native';
 
 import { AppText } from '@/components/AppText';
-import { PressablePanel } from '@/components/Card';
+import { Button, PressablePanel } from '@/components/Card';
 import { HelpButton } from '@/components/HelpButton';
+import { InfoPopup } from '@/components/InfoPopup';
 import { Screen } from '@/components/Screen';
-import { instrument, radius, space } from '@/theme/tokens';
+import { colors, instrument, radius, space } from '@/theme/tokens';
 
 type SourceKey = 'camera' | 'library' | 'sensor' | 'manual' | 'template';
 
@@ -91,9 +92,12 @@ export default function TestScreen(): React.JSX.Element {
   const router = useRouter();
 
   return (
-    <Screen scroll bottomInsetExtra={space[8]} style={styles.root}>
-      {/* 标题栏由页面自己画 —— tab 的浅色标题栏压在这个深色页面上会割裂。
-          故 _layout.tsx 把本 tab 的 header 关掉（与首页同一处理）。 */}
+    <Screen style={styles.root}>
+      {/*
+        一屏布局（2026-10-08 用户要求 BUG 6）：不滚动、积木式宫格。
+        五个来源做成 2 列积木块，一屏放下；每块的详细说明（desc/caveat）
+        收进弹出框，点右上角小问号看 —— 页面只留"选哪个"的决策信息。
+      */}
       <View style={styles.headerRow}>
         <AppText size="xl" weight="bold" color={instrument.text} track="tight">
           测盘
@@ -104,53 +108,68 @@ export default function TestScreen(): React.JSX.Element {
       <AppText size="md" weight="medium" color={instrument.text} style={styles.sectionLead}>
         请选择数据来源
       </AppText>
-      <AppText size="xs" color={instrument.textSecondary} style={styles.lead}>
-        五条来源最终都汇入同一条确认管线 —— 无论从哪来，坐向都必须经你确认
-        才会进入计算。
-      </AppText>
 
-      {SOURCES.map((s) => (
-        <SourceCard key={s.key} source={s} onPress={() => router.push(s.href as never)} />
-      ))}
-
-      <View style={styles.foot}>
-        <AppText size="xs" color={instrument.muted} style={styles.footLine}>
-          所有数值由确定性代码计算，AI 只负责解释，不参与计算、也不得修改结果。
-        </AppText>
-        <AppText size="xs" color={instrument.muted} style={styles.footLine}>
-          罗盘照片会上传到服务端完成识别（默认不保留原图）；传感器读数在设备本地计算，不上传。
-        </AppText>
+      <View style={styles.grid}>
+        {SOURCES.map((s) => (
+          <SourceBlock key={s.key} source={s} onPress={() => router.push(s.href as never)} />
+        ))}
       </View>
+
+      <AppText size="xs" color={instrument.muted} style={styles.footLine}>
+        五条来源最终都汇入同一条确认管线 —— 坐向必须经你确认才会进入计算。
+      </AppText>
     </Screen>
   );
 }
 
-function SourceCard({ source, onPress }: { source: Source; onPress: () => void }): React.JSX.Element {
+/**
+ * 积木块：图标 + 标题，点块进入；点右上角小问号弹出详细说明。
+ * 一块只做一件事，字越少越好 —— 详情在弹出框里。
+ */
+function SourceBlock({ source, onPress }: { source: Source; onPress: () => void }): React.JSX.Element {
+  const [infoOpen, setInfoOpen] = useState(false);
   return (
-    <PressablePanel
-      onPress={onPress}
-      accessibilityLabel={`${source.title}：${source.desc}`}
-      style={styles.cardWrap}
-      contentStyle={styles.card}
-    >
-      <View style={styles.iconWrap}>
-        <Ionicons name={source.icon} size={22} color={instrument.accent} />
-      </View>
-      <View style={styles.body}>
-        <AppText size="md" weight="semibold" color={instrument.text}>
+    <>
+      <PressablePanel
+        onPress={onPress}
+        accessibilityLabel={`${source.title}：${source.desc}`}
+        style={styles.blockWrap}
+        contentStyle={styles.block}
+      >
+        <View style={styles.blockIcon}>
+          <Ionicons name={source.icon} size={30} color={instrument.accent} />
+        </View>
+        <AppText size="sm" weight="semibold" color={instrument.text} center style={styles.blockTitle}>
           {source.title}
         </AppText>
-        <AppText size="xs" color={instrument.textSecondary} style={styles.desc}>
+        <Pressable
+          onPress={() => setInfoOpen(true)}
+          hitSlop={10}
+          accessibilityRole="button"
+          accessibilityLabel={`${source.title}的详细说明`}
+          style={styles.blockInfo}
+        >
+          <Ionicons name="information-circle-outline" size={18} color={instrument.muted} />
+        </Pressable>
+      </PressablePanel>
+
+      <InfoPopup
+        visible={infoOpen}
+        onClose={() => setInfoOpen(false)}
+        title={source.title}
+        subtitle="选之前先看看"
+      >
+        <AppText size="sm" color={colors.text} style={styles.popupBody}>
           {source.desc}
         </AppText>
         {source.caveat ? (
-          <AppText size="xs" color={instrument.muted} style={styles.caveat}>
-            {source.caveat}
+          <AppText size="sm" color={colors.textSecondary} style={styles.popupBody}>
+            注意：{source.caveat}
           </AppText>
         ) : null}
-      </View>
-      <Ionicons name="chevron-forward" size={18} color={instrument.muted} />
-    </PressablePanel>
+        <Button label={`进入${source.title}`} onPress={() => { setInfoOpen(false); onPress(); }} />
+      </InfoPopup>
+    </>
   );
 }
 
@@ -161,28 +180,26 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
   },
-  sectionLead: { marginTop: space[4] },
-  lead: { marginTop: space[2], marginBottom: space[3] },
-  /* 外框只管定位；底/边/圆角/内边距由 `PressablePanel` 给 —— 见 Card.tsx「三个表面原语」 */
-  cardWrap: { marginTop: space[2] },
-  card: {
-    flexDirection: 'row',
+  sectionLead: { marginTop: space[4], marginBottom: space[3] },
+  /* 积木宫格：2 列，一屏放下 5 块 */
+  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: space[3] },
+  blockWrap: { width: '48%', flexGrow: 1 },
+  block: {
     alignItems: 'center',
-    gap: space[3],
-    marginBottom: 0,
+    gap: space[2],
+    paddingVertical: space[4],
+    minHeight: 128,
   },
-  iconWrap: {
-    width: 40,
-    height: 40,
-    /* 内嵌图形用 radius.sm，比外层容器的 lg 紧一档 */
-    borderRadius: radius.sm,
+  blockIcon: {
+    width: 56,
+    height: 56,
+    borderRadius: radius.md,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: instrument.surfaceAlt,
   },
-  body: { flex: 1 },
-  desc: { marginTop: 2, lineHeight: 17 },
-  caveat: { marginTop: space[1], lineHeight: 16 },
-  foot: { marginTop: space[5], gap: space[1] },
-  footLine: { lineHeight: 17 },
+  blockTitle: { lineHeight: 20 },
+  blockInfo: { position: 'absolute', top: space[2], right: space[2], padding: space[1] },
+  popupBody: { lineHeight: 24 },
+  footLine: { marginTop: space[4], lineHeight: 18 },
 });

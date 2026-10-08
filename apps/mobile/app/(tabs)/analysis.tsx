@@ -18,10 +18,12 @@
 
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import React from 'react';
+import React, { useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import { AppText } from '@/components/AppText';
+import { Button } from '@/components/Card';
+import { InfoPopup } from '@/components/InfoPopup';
 import { Screen } from '@/components/Screen';
 import { colors, radius, space } from '@/theme/tokens';
 
@@ -43,7 +45,7 @@ interface Entry {
 const ENTRIES: readonly Entry[] = [
   {
     key: 'bazi',
-    icon: 'planet-outline',
+    icon: 'planet',
     title: '八字命盘',
     desc: '录入出生时间，排出四柱、大运与流年',
     bound: '旺衰与用神由计算层给出，本页不自造流派判词',
@@ -51,7 +53,7 @@ const ENTRIES: readonly Entry[] = [
   },
   {
     key: 'divine',
-    icon: 'sparkles-outline',
+    icon: 'sparkles',
     title: '六爻 · 灵签',
     desc: '登记实际摇出的结果，或抽取可复现的签文',
     bound: '不提供「帮我摇一卦」—— 摇卦结果必须由你实际摇出',
@@ -59,7 +61,7 @@ const ENTRIES: readonly Entry[] = [
   },
   {
     key: 'qianji',
-    icon: 'game-controller-outline',
+    icon: 'game-controller',
     title: '灵签机',
     desc: '街机式抽签：按住摇签筒、开奖看签文，再解签',
     bound: '签号由种子唯一确定，动画只是表现层；签库为演示样例',
@@ -67,7 +69,7 @@ const ENTRIES: readonly Entry[] = [
   },
   {
     key: 'almanac',
-    icon: 'calendar-outline',
+    icon: 'calendar',
     title: '黄历择日',
     desc: '查某天宜忌，或为某件事挑日子',
     bound: '流派差异与未覆盖项会在结果里显式列出，不装作唯一答案',
@@ -75,7 +77,7 @@ const ENTRIES: readonly Entry[] = [
   },
   {
     key: 'sanshi',
-    icon: 'grid-outline',
+    icon: 'grid',
     title: '三式排盘',
     desc: '奇门遁甲 / 大六壬 / 太乙神数',
     bound: '太乙本版只做年局，月/日/时局未实现（结果中已注明）',
@@ -87,130 +89,123 @@ export default function AnalysisScreen(): React.JSX.Element {
   const router = useRouter();
 
   return (
-    <Screen scroll style={styles.root}>
-      <AppText size="xs" color={colors.textSecondary} style={styles.lead}>
-        排盘与解读都在这里。盘面全部由确定性代码计算，AI 只负责把它讲成人话 ——
-        计算过程 AI 既不参与，也没有权限修改结果。
+    <Screen style={styles.root}>
+      {/*
+        一屏布局（2026-10-08 用户要求 BUG 6）：不滚动、积木式宫格。
+        读盘报告 + 5 个术式做成 2 列积木块；每块的说明（desc/bound）
+        收进弹出框 —— 页面只留"点哪个"的决策信息。
+      */}
+      <AppText size="md" weight="medium" color={colors.text} style={styles.lead}>
+        排盘与解读都在这里
       </AppText>
 
-      {/* ---------- 读盘报告 ---------- */}
-      <AppText size="sm" weight="semibold" color={colors.textSecondary} style={styles.sectionTitle}>
-        读盘报告
-      </AppText>
-
-      <Pressable
-        onPress={() => router.push('/history')}
-        accessibilityRole="button"
-        accessibilityLabel="从历史记录打开一份读盘报告"
-        style={({ pressed }) => [styles.reportCard, pressed && styles.cardPressed]}
-      >
-        <View style={styles.reportIcon}>
-          <Ionicons name="document-text-outline" size={22} color={colors.primary} />
-        </View>
-        <View style={styles.body}>
-          <AppText size="md" weight="medium" color={colors.text}>
-            打开已确认盘面的报告
-          </AppText>
-          <AppText size="xs" color={colors.textSecondary} style={styles.desc}>
-            从历史记录里选一条。报告分三标签：盘面事实 / 传统分析 / AI 解读
-          </AppText>
-          <AppText size="xs" color={colors.muted} style={styles.bound}>
-            只有你确认过坐向的盘面才有报告 —— 未经确认的数据不进计算
-          </AppText>
-        </View>
-        <Ionicons name="chevron-forward" size={18} color={colors.muted} />
-      </Pressable>
-
-      {/* ---------- 术式排盘 ---------- */}
-      <AppText size="sm" weight="semibold" color={colors.textSecondary} style={styles.sectionTitle}>
-        术式排盘
-      </AppText>
-
-      {ENTRIES.map((e) => (
-        <Pressable
-          key={e.key}
-          onPress={() => router.push(e.href as never)}
-          accessibilityRole="button"
-          accessibilityLabel={`${e.title}：${e.desc}`}
-          style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}
-        >
-          <View style={styles.iconWrap}>
-            <Ionicons name={e.icon} size={22} color={colors.primary} />
-          </View>
-          <View style={styles.body}>
-            <AppText size="md" weight="medium" color={colors.text}>
-              {e.title}
-            </AppText>
-            <AppText size="xs" color={colors.textSecondary} style={styles.desc}>
-              {e.desc}
-            </AppText>
-            <AppText size="xs" color={colors.muted} style={styles.bound}>
-              {e.bound}
-            </AppText>
-          </View>
-          <Ionicons name="chevron-forward" size={18} color={colors.muted} />
-        </Pressable>
-      ))}
-
-      <View style={styles.foot}>
-        <AppText size="xs" color={colors.muted} style={styles.footLine}>
-          本 App 提供的是传统文化研究与自省参考，不构成医疗、投资或法律建议。
-          涉及健康、财务、诉讼等决策，请咨询相应领域的专业人士。
-        </AppText>
-        <AppText size="xs" color={colors.muted} style={styles.footLine}>
-          遇流派分歧时给出并列口径，不替用户择一。
-        </AppText>
+      <View style={styles.grid}>
+        <EntryBlock
+          icon="document-text"
+          title="读盘报告"
+          desc="从历史记录里选一条已确认的盘面，看它的报告。"
+          bound="报告分三标签：盘面事实 / 传统分析 / AI 解读。只有你确认过坐向的盘面才有报告。"
+          onPress={() => router.push('/history' as never)}
+        />
+        {ENTRIES.map((e) => (
+          <EntryBlock
+            key={e.key}
+            icon={e.icon}
+            title={e.title}
+            desc={e.desc}
+            bound={e.bound}
+            onPress={() => router.push(e.href as never)}
+          />
+        ))}
       </View>
+
+      <AppText size="xs" color={colors.muted} style={styles.footLine}>
+        盘面全部由确定性代码计算，AI 只负责讲成人话，不参与计算、也不得修改结果。
+      </AppText>
     </Screen>
+  );
+}
+
+/** 积木块：图标 + 标题，点块进入；点问号弹出"这是什么、能干什么"。 */
+function EntryBlock({
+  icon,
+  title,
+  desc,
+  bound,
+  onPress,
+}: {
+  icon: keyof typeof Ionicons.glyphMap;
+  title: string;
+  desc: string;
+  bound: string;
+  onPress: () => void;
+}): React.JSX.Element {
+  const [infoOpen, setInfoOpen] = useState(false);
+  return (
+    <>
+      <Pressable
+        onPress={onPress}
+        accessibilityRole="button"
+        accessibilityLabel={`${title}：${desc}`}
+        style={({ pressed }) => [styles.block, pressed && styles.blockPressed]}
+      >
+        <View style={styles.blockIcon}>
+          <Ionicons name={icon} size={30} color={colors.primary} />
+        </View>
+        <AppText size="sm" weight="semibold" color={colors.text} center style={styles.blockTitle}>
+          {title}
+        </AppText>
+        <Pressable
+          onPress={() => setInfoOpen(true)}
+          hitSlop={10}
+          accessibilityRole="button"
+          accessibilityLabel={`${title}的详细说明`}
+          style={styles.blockInfo}
+        >
+          <Ionicons name="information-circle-outline" size={18} color={colors.muted} />
+        </Pressable>
+      </Pressable>
+      <InfoPopup visible={infoOpen} onClose={() => setInfoOpen(false)} title={title} subtitle="选之前先看看">
+        <AppText size="sm" color={colors.text} style={styles.popupBody}>
+          {desc}
+        </AppText>
+        <AppText size="sm" color={colors.textSecondary} style={styles.popupBody}>
+          注意：{bound}
+        </AppText>
+        <Button label={`进入${title}`} onPress={() => { setInfoOpen(false); onPress(); }} />
+      </InfoPopup>
+    </>
   );
 }
 
 const styles = StyleSheet.create({
   root: { backgroundColor: colors.bg },
-  lead: { lineHeight: 19, marginBottom: space[4] },
-  sectionTitle: { letterSpacing: 0.6, marginBottom: space[2] },
-  card: {
-    flexDirection: 'row',
+  lead: { lineHeight: 22, marginBottom: space[3] },
+  /* 积木宫格：2 列，一屏放下 6 块 */
+  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: space[3] },
+  block: {
+    width: '48%',
+    flexGrow: 1,
     alignItems: 'center',
-    gap: space[3],
-    marginBottom: space[2],
-    padding: space[3],
+    gap: space[2],
+    paddingVertical: space[4],
+    minHeight: 128,
     borderRadius: radius.lg,
     borderWidth: 1,
     borderColor: colors.border,
     backgroundColor: colors.surface,
   },
-  cardPressed: { backgroundColor: colors.surfaceAlt },
-  reportCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: space[3],
-    marginBottom: space[5],
-    padding: space[3],
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.surface,
-  },
-  reportIcon: {
-    width: 40,
-    height: 40,
+  blockPressed: { backgroundColor: colors.surfaceAlt },
+  blockIcon: {
+    width: 56,
+    height: 56,
     borderRadius: radius.md,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: colors.surfaceAlt,
   },
-  iconWrap: {
-    width: 40,
-    height: 40,
-    borderRadius: radius.md,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.surfaceAlt,
-  },
-  body: { flex: 1 },
-  desc: { marginTop: 2, lineHeight: 17 },
-  bound: { marginTop: space[1], lineHeight: 16 },
-  foot: { marginTop: space[5], gap: space[2] },
-  footLine: { lineHeight: 18 },
+  blockTitle: { lineHeight: 20 },
+  blockInfo: { position: 'absolute', top: space[2], right: space[2], padding: space[1] },
+  popupBody: { lineHeight: 24 },
+  footLine: { marginTop: space[4], lineHeight: 18 },
 });

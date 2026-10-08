@@ -8,11 +8,19 @@
  */
 
 import { Ionicons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { Linking, Pressable, StyleSheet, TextInput, View } from 'react-native';
 
-import { ApiClient, getApiClient, resolveBaseUrl, setApiBaseUrl } from '@/api/client';
+import {
+  ApiClient,
+  getApiClient,
+  resetApiBaseUrl,
+  resolveBaseUrl,
+  setApiBaseUrl,
+} from '@/api/client';
+import { loadApiBaseUrlOverride } from '@/api/baseUrlStore';
 import type { AiProvidersResponse, CapabilitiesResponse } from '@/api/types';
 import { AppText } from '@/components/AppText';
 import { Banner } from '@/components/Banner';
@@ -124,8 +132,22 @@ function ProfileCard({ onGoProfile }: { onGoProfile: () => void }): React.JSX.El
 // ==========================================================================
 
 function NetworkCard({ onApplied }: { onApplied: () => void }): React.JSX.Element {
-  const [value, setValue] = useState(resolveBaseUrl());
+  // 输入框初始值：优先显示用户上次手设并已存住的地址，没有才显示构建默认值。
+  // 读存储是异步的，先给空字符串，读回来再填 —— 避免一闪而过显示错地址。
+  const [value, setValue] = useState('');
   const [applied, setApplied] = useState<string | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    void (async () => {
+      const override = await loadApiBaseUrlOverride(AsyncStorage);
+      if (!alive) return;
+      setValue(override ?? resolveBaseUrl());
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   const apply = useSubmit(async (url: string) => {
     const trimmed = url.trim().replace(/\/+$/, '');
@@ -136,16 +158,24 @@ function NetworkCard({ onApplied }: { onApplied: () => void }): React.JSX.Elemen
     // 否则用户改了个错地址，界面会立刻变成"全部请求都失败"，连改回来的入口都难找
     const probe = new ApiClient({ baseUrl: trimmed });
     await probe.health();
+    // setApiBaseUrl 内部已持久化到手机本地：下次打开 App 仍然用这个地址
     setApiBaseUrl(trimmed);
     setApplied(trimmed);
     return trimmed;
+  });
+
+  const reset = useSubmit(async () => {
+    const url = await resetApiBaseUrl();
+    setValue(url);
+    setApplied(null);
+    return url;
   });
 
   return (
     <Card title="网络线路">
       <AppText size="xs" color="muted" style={styles.note}>
         后端服务地址。默认 {resolveBaseUrl()}。
-        真机调试需改成运行后端那台机器的局域网 IP（如 http://192.168.1.10:8360）。
+        真机需改成运行后端那台机器的地址（如 http://192.168.1.10:8360）。
       </AppText>
 
       <TextInput
@@ -174,14 +204,29 @@ function NetworkCard({ onApplied }: { onApplied: () => void }): React.JSX.Elemen
       ) : null}
       {applied ? (
         <AppText size="sm" color="success" style={styles.applyMsg}>
-          ✓ 已连接到 {applied}
+          ✓ 已保存并连接到 {applied}，下次打开 App 仍然用这个地址
         </AppText>
       ) : null}
 
       <AppText size="xs" color="muted" style={styles.note}>
-        注：地址目前仅在本次运行内生效，暂未做持久化（本地存储依赖已引入，后续可接）。
+        手设的地址会一直记住，除非你点下面的「恢复默认」。恢复默认后，
+        App 重启会自动试连构建时配好的地址，哪个通就用哪个。
       </AppText>
-      <Button label="刷新服务端状态" variant="ghost" onPress={onApplied} style={styles.refreshBtn} />
+      <View style={styles.networkBtnRow}>
+        <Button
+          label="恢复默认"
+          variant="ghost"
+          loading={reset.loading}
+          onPress={() => reset.run()}
+          style={styles.networkBtn}
+        />
+        <Button label="刷新服务端状态" variant="ghost" onPress={onApplied} style={styles.networkBtn} />
+      </View>
+      {reset.error ? (
+        <AppText size="sm" color="danger" style={styles.applyMsg}>
+          {reset.error}
+        </AppText>
+      ) : null}
     </Card>
   );
 }
@@ -297,7 +342,8 @@ const styles = StyleSheet.create({
   },
   applyBtn: { marginTop: space[3] },
   applyMsg: { marginTop: space[2] },
-  refreshBtn: { marginTop: space[3] },
+  networkBtnRow: { flexDirection: 'row', gap: space[2], marginTop: space[3] },
+  networkBtn: { flex: 1 },
   privacyLine: { lineHeight: 22 },
   rules: { gap: space[1], marginTop: space[2] },
   rule: { lineHeight: 20 },

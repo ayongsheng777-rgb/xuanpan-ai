@@ -38,7 +38,7 @@ const STICK_COUNT = 16;
 const MIN_SHAKE_MS = 700;
 const ROLL_MS = 900;
 
-/** 等级 → 街机配色与喝彩词（演示库五个等级 + 观音签库三个等级全覆盖） */
+/** 等级 → 街机配色与喝彩词（观音签库三个等级全覆盖） */
 const LEVEL_STYLE: Record<string, { color: string; cheer: string }> = {
   上上: { color: '#C9A227', cheer: '大吉大利！' },
   上吉: { color: '#D97B29', cheer: '上吉之签！' },
@@ -48,7 +48,7 @@ const LEVEL_STYLE: Record<string, { color: string; cheer: string }> = {
   下下: { color: colors.muted, cheer: '宜静不宜动' },
 };
 
-/** 默认签库：用户指定的观音签（第三方来源）；演示库仍可切换回去 */
+/** 默认签库：观音灵签一百签（第三方来源，2026-10-07 用户指定引入） */
 const DEFAULT_SET_ID = 'guanyin';
 
 interface Stick {
@@ -99,6 +99,8 @@ export default function QianjiScreen(): React.JSX.Element {
   const patch = useSubmit(getApiClient().patchInputs);
 
   const shakeTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+  /** 看门狗：onPressOut 因任何原因没触发时（如切后台），60 秒后强制收尾 */
+  const shakeWatchdog = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pressStart = useRef(0);
   const popY = useRef(new Animated.Value(0)).current;
   const revealScale = useRef(new Animated.Value(0.6)).current;
@@ -134,6 +136,7 @@ export default function QianjiScreen(): React.JSX.Element {
   useEffect(
     () => () => {
       if (shakeTimer.current) clearInterval(shakeTimer.current);
+      if (shakeWatchdog.current) clearTimeout(shakeWatchdog.current);
     },
     [],
   );
@@ -142,6 +145,10 @@ export default function QianjiScreen(): React.JSX.Element {
     if (shakeTimer.current) {
       clearInterval(shakeTimer.current);
       shakeTimer.current = null;
+    }
+    if (shakeWatchdog.current) {
+      clearTimeout(shakeWatchdog.current);
+      shakeWatchdog.current = null;
     }
     setSticks(makeSticks());
   }, []);
@@ -157,7 +164,14 @@ export default function QianjiScreen(): React.JSX.Element {
     popY.setValue(0);
     revealScale.setValue(0.6);
     shakeTimer.current = setInterval(() => setSticks(jitterSticks()), 100);
-  }, [phase, popY, revealScale]);
+    // 兜底：onPressOut 因任何原因没触发时，60 秒后强制回到 idle，
+    // 签筒永不卡在"摇签中…"。正常松手会在 onPressOut 里清掉它。
+    if (shakeWatchdog.current) clearTimeout(shakeWatchdog.current);
+    shakeWatchdog.current = setTimeout(() => {
+      stopShakeVisual();
+      setPhase((p) => (p === 'shaking' ? 'idle' : p));
+    }, 60_000);
+  }, [phase, popY, revealScale, stopShakeVisual]);
 
   /** 松手：保证最短摇晃时长 → 停抖 → 弹签 → 老虎机定格 → 开奖 */
   const onPressOut = useCallback(async () => {
@@ -288,37 +302,43 @@ export default function QianjiScreen(): React.JSX.Element {
       </View>
 
       {/* ---------- 大按钮 ---------- */}
-      {phase === 'idle' ? (
-        <Pressable
-          onPressIn={onPressIn}
-          onPressOut={onPressOut}
-          accessibilityRole="button"
-          accessibilityLabel="按住摇签，松手出签"
-          style={({ pressed }) => [styles.bigButton, pressed && styles.bigButtonPressed]}
-        >
-          <AppText size="lg" weight="bold" center style={styles.bigButtonText}>
-            按住摇签
-          </AppText>
-          <AppText size="xs" center style={styles.bigButtonSub}>
-            松手出签
-          </AppText>
-        </Pressable>
-      ) : (
-        <View style={styles.bigButtonBusy}>
+      {/*
+        ⚠️ Pressable 必须常驻、不能按 phase 条件卸载：
+        2026-10-08 用户实报 BUG —— 原来 `phase==='idle'` 才渲染 Pressable，
+        手指按住后 setPhase('shaking') 直接把按钮卸载了，松手时 onPressOut
+        永远收不到，签筒就卡在"摇签中…"。现在按钮一直在，只是非 idle 时
+        禁用按压、只换文案；onPressIn/onPressOut 内部仍有 phase 守卫。
+      */}
+      <Pressable
+        onPressIn={onPressIn}
+        onPressOut={onPressOut}
+        disabled={phase !== 'idle'}
+        accessibilityRole="button"
+        accessibilityLabel="按住摇签，松手出签"
+        style={({ pressed }) => [
+          phase === 'idle' ? styles.bigButton : styles.bigButtonBusy,
+          pressed && phase === 'idle' && styles.bigButtonPressed,
+        ]}
+      >
+        {phase === 'idle' ? (
+          <>
+            <AppText size="lg" weight="bold" center style={styles.bigButtonText}>
+              按住摇签
+            </AppText>
+            <AppText size="xs" center style={styles.bigButtonSub}>
+              松手出签
+            </AppText>
+          </>
+        ) : (
           <AppText size="md" weight="semibold" center color="textSecondary">
             {phase === 'shaking' ? '摇签中…' : '开奖！'}
           </AppText>
-        </View>
-      )}
+        )}
+      </Pressable>
 
       {err ? (
         <Banner tone="error" title="请求失败">
           {err}
-        </Banner>
-      ) : null}
-      {facts['is_demo_data'] === true ? (
-        <Banner tone="warning" title="演示数据">
-          当前使用演示签库（自撰样例），非传世签文
         </Banner>
       ) : null}
 
