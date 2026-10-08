@@ -334,12 +334,12 @@ def xuanpan_name(name: str, surname: str | None = None) -> dict[str, Any]:
 
 @server.tool(structured_output=True)
 @_domain_errors_as_tool_error
-def xuanpan_qian(seed: int, set_id: str = "demo_guanyin") -> dict[str, Any]:
+def xuanpan_qian(seed: int, set_id: str = "guanyin") -> dict[str, Any]:
     """灵签抽签。
 
     参数:
         seed: 抽签随机种子（整数）。
-        set_id: 签库标识（默认 demo_guanyin）。
+        set_id: 签库标识（默认 guanyin，即观音灵签一百签）。
 
     返回: 结构化 dict（签号 / 签名 / 签诗 / 等级 / 解读）。
     """

@@ -133,7 +133,7 @@ class QianInput(ApiModel):
     """抽签。seed 为整数，同一 seed 永远得到同一签（可复现）。"""
 
     seed: int
-    set_id: str = "demo_guanyin"
+    set_id: str = "guanyin"
 
 
 class NamingInput(ApiModel):

@@ -5,13 +5,14 @@
 因为无法保证文本的准确性与版本一致性 —— 而"看起来像但其实是错的"签文，
 恰恰是本项目最想避免的问题（参见 RULE-001 的实测佐证）。
 
-因此签库分两类，元数据中明确区分：
-- `data/qian/demo_guanyin.json`：**自撰演示样例**，`demo: true`
-- `data/qian/guanyin.json`：**第三方来源**（见文件内 `note` 的出处与获取日期），
-  `demo: false` 但**未做传世版本校对** —— 文本准确性以来源为准，
-  由用户自行判断是否采用（2026-10-07 由用户指定引入）
+因此：`data/qian/guanyin/` 是**第三方来源**（见 manifest.json 内 `note`
+的出处与获取日期），**未做传世版本校对** —— 文本准确性以来源为准，
+由用户自行判断是否采用（2026-10-07 由用户指定引入）。
 
-引擎本身完整可用：只要把合法签库放进 `data/qian/`，即可直接启用。
+演示样例库（`demo_guanyin`）已于 2026-10-08 按用户要求移除：
+演示签文会让人误以为是真签文，而"看起来像但其实是错的"正是本项目
+最想避免的问题。引擎本身完整可用：只要把合法签库放进 `data/qian/`，
+即可直接启用。
 签库两种形态（`load_qian_set` 自动识别）：
 - 单文件：`data/qian/<set_id>.json`（含 `signs` 数组）
 - 分卷：`data/qian/<set_id>/manifest.json`（元数据）+
@@ -31,7 +32,7 @@ from typing import Any, Final
 from .exceptions import DomainDataMissingError, InvalidInputError
 
 DEFAULT_DATA_DIR: Final[Path] = Path(__file__).resolve().parent.parent / "data" / "qian"
-DEFAULT_SET_ID: Final[str] = "demo_guanyin"
+DEFAULT_SET_ID: Final[str] = "guanyin"
 
 
 @dataclass(frozen=True, slots=True)
@@ -186,7 +187,7 @@ def draw_qian(
         seed: 任意整数。**由调用方决定其来源**（时间、用户摇签结果的哈希等）。
               引擎不做随机，保证可复现、可测试、可留痕。
 
-    >>> draw_qian(0, set_id="demo_guanyin").number
+    >>> draw_qian(0, set_id="guanyin").number
     1
     """
     data = load_qian_set(set_id, data_dir)
