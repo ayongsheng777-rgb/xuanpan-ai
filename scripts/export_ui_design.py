@@ -113,7 +113,8 @@ VOLUMES: tuple[Volume, ...] = (
         blurb=(
             "承载术数语义的组件。读数与几何的呈现方式直接关系到「用户会不会误读」，"
             "例如：罗盘盘式的图层与配色角色、坐向修正的环形选择器、"
-            "识别步骤列表（只由真实返回驱动）、断卦结论的中性色规则。"
+            "识别步骤列表（只由真实返回驱动）、断卦结论的中性色规则，"
+            "以及签库选择器（`QianSetPicker`：演示库挂角标，避免被当成正式签库）。"
         ),
         files=(
             "src/components/CompassDial.tsx",
@@ -121,6 +122,7 @@ VOLUMES: tuple[Volume, ...] = (
             "src/components/StepList.tsx",
             "src/components/DuanCard.tsx",
             "src/components/FactList.tsx",
+            "src/components/QianSetPicker.tsx",
         ),
     ),
     Volume(
@@ -147,7 +149,8 @@ VOLUMES: tuple[Volume, ...] = (
         title="命盘 / 占测 / 三式页面",
         blurb=(
             "术数计算结果的呈现层：八字命盘、六爻与灵签、三式（奇门 / 六壬 / 太乙）、"
-            "黄历择日、罗盘牌库。这些页面的共性是「信息密度高、字段多」，"
+            "黄历择日、罗盘牌库，以及灵签机（摇签筒 / 老虎机签号）与每日早报"
+            "（黄历宜忌 + 个人运程 + 打卡）。这些页面的共性是「信息密度高、字段多」，"
             "因此空态、缺项（`null` → 「未定」）与长文案折行是主要设计难点。"
         ),
         files=(
@@ -156,13 +159,16 @@ VOLUMES: tuple[Volume, ...] = (
             "app/sanshi.tsx",
             "app/almanac.tsx",
             "app/templates.tsx",
+            "app/qianji.tsx",
+            "app/morning.tsx",
         ),
     ),
     Volume(
         slug="04-pages-divination",
         title="导航与系统页",
         blurb=(
-            "底栏骨架（决定信息架构）、测盘、分析、历史、我的，以及罗盘校准。"
+            "底栏骨架（决定信息架构）、测盘、分析、历史、我的，以及罗盘校准；"
+            "另含从「我的」进入的用户信息设置页（昵称 / 性别 / 出生日期与时辰，本地存储）。"
             "底栏当前是「罗盘 ｜ 测盘 ｜ 分析 ｜ 历史 ｜ 我的」——"
             "命盘与占测已并入「分析」内页，理由见 `(tabs)/_layout.tsx` 顶部注释。"
         ),
@@ -173,6 +179,7 @@ VOLUMES: tuple[Volume, ...] = (
             "app/(tabs)/history.tsx",
             "app/(tabs)/mine.tsx",
             "app/calibrate.tsx",
+            "app/profile.tsx",
         ),
     ),
     Volume(
@@ -191,7 +198,8 @@ VOLUMES: tuple[Volume, ...] = (
         blurb=(
             "不是纯视觉，但直接决定界面看起来什么样：环形与盘面的几何计算、"
             "盘面配色角色、迷你曲线、传感器质量判据、异步状态机、"
-            "以及三式的九宫与十二宫布局。这些模块被刻意做成不依赖 React Native 的纯函数，"
+            "以及三式的九宫与十二宫布局；另含用户信息的本地存取（`profile.ts`，"
+            "决定每日运程按谁的生辰算）。这些模块被刻意做成不依赖 React Native 的纯函数，"
             "才能在无设备的条件下被真跑验证。"
         ),
         files=(
@@ -206,6 +214,7 @@ VOLUMES: tuple[Volume, ...] = (
             "src/lib/useAsync.ts",
             "src/lib/date.ts",
             "src/lib/apiCandidates.ts",
+            "src/lib/profile.ts",
             "src/services/useSensors.ts",
         ),
     ),
