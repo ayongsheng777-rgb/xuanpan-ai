@@ -617,3 +617,198 @@ def test_android_kotlin_version_pinned_for_compose() -> None:
         f"android.kotlinVersion 必须是 1.9.25（Compose Compiler 1.5.15 要求），"
         f"当前是 {kv!r} —— 删掉它会导致 EAS 云构建在 compileReleaseKotlin 失败"
     )
+
+
+# ==========================================================================
+# 断言 11：后端地址的人工覆盖必须持久化（BUG 1，2026-10-08 用户实报）
+# ==========================================================================
+
+
+def test_api_baseurl_override_is_persisted() -> None:
+    """setApiBaseUrl 必须写盘，不能只换内存单例。
+
+    挡住的错：「我的 → 网络线路」里改的地址，App 重启就丢。
+    要求：
+      1. client.ts 的 setApiBaseUrl 把地址写进 baseUrlStore（持久化）；
+      2. 根布局启动时走 initBaseUrl（先读人工覆盖，没有才自动探活）；
+      3. 「我的」页提供「恢复默认」入口（清掉覆盖值）。
+    行为级校验另见 test_api_baseurl_persist.py（真跑 baseUrlStore.ts）。
+    """
+    client = (_REPO_ROOT / "apps/mobile/src/api/client.ts").read_text(encoding="utf-8")
+    assert "saveApiBaseUrlOverride" in client, (
+        "client.ts 的 setApiBaseUrl 没有调用持久化 —— 重启又会丢地址"
+    )
+    assert "export async function initBaseUrl" in client, (
+        "client.ts 缺少 initBaseUrl —— 启动时没人读回人工覆盖值"
+    )
+
+    layout = (_REPO_ROOT / "apps/mobile/app/_layout.tsx").read_text(encoding="utf-8")
+    assert "initBaseUrl" in layout, "根布局没有调用 initBaseUrl"
+
+    mine = (_REPO_ROOT / "apps/mobile/app/(tabs)/mine.tsx").read_text(encoding="utf-8")
+    assert "恢复默认" in mine, "「我的 → 网络线路」缺少「恢复默认」入口"
+    assert "下次打开 App 仍然用这个地址" in mine, (
+        "应用成功后没有告诉用户地址会被记住 —— 用户会以为还是没存住"
+    )
+
+
+# ==========================================================================
+# 断言 12：灵签机大按钮不得按 phase 条件卸载（BUG 2a，2026-10-08 用户实报）
+# ==========================================================================
+
+
+def test_qianji_button_stays_mounted_during_shake() -> None:
+    """摇签按钮必须常驻 —— 按住后 phase 变成 shaking 时不能把 Pressable 卸载。
+
+    挡住的错：原来 `{phase === 'idle' ? <Pressable …/> : <View …/>}`，
+    手指按住 → onPressIn 把 phase 置为 shaking → Pressable 被卸载 →
+    松手时 onPressOut 永远收不到 → 签筒卡在"摇签中…"。
+    这是 RN 的经典坑：按压过程中卸载 Pressable，release 事件直接丢失。
+    """
+    src = (_REPO_ROOT / "apps/mobile/app/qianji.tsx").read_text(encoding="utf-8")
+    # 不允许出现"phase==='idle' 才渲染 Pressable"的条件卸载写法
+    assert not re.search(
+        r"phase\s*===\s*['\"]idle['\"]\s*\?\s*\(\s*<Pressable", src
+    ), "摇签 Pressable 又被写成了按 phase 条件渲染 —— 松手事件会丢失"
+    # 按压回调必须还在
+    assert "onPressIn={onPressIn}" in src and "onPressOut={onPressOut}" in src
+    # 看门狗兜底必须在：任何原因导致 onPressOut 丢失都不许永久卡住
+    assert "shakeWatchdog" in src, "缺少摇签看门狗 —— onPressOut 丢失时会永久卡住"
+
+
+# ==========================================================================
+# 断言 13：传感器页必须有显眼的页内返回按钮（BUG 3，2026-10-08 用户实报）
+# ==========================================================================
+
+
+def test_sensors_page_has_visible_back_button() -> None:
+    """从测盘进传感器页后，用户必须有一眼能看到的返回入口。
+
+    挡住的错：原来只依赖原生标题栏左上角的小返回箭头，用户反馈"不能返回"。
+    要求：页内有一个带文字的返回按钮，调用 router.back()。
+    """
+    src = (_REPO_ROOT / "apps/mobile/app/sensors.tsx").read_text(encoding="utf-8")
+    assert "返回测盘" in src, "传感器页缺少页内返回按钮"
+    assert "router.back()" in src, "返回按钮没有调用 router.back()"
+
+
+# ==========================================================================
+# 断言 14：金色明亮主题（BUG 7，2026-10-08 用户决策：明亮为主、金色做背景）
+# ==========================================================================
+
+
+def _parse_token_block(src: str, name: str) -> dict[str, str]:
+    """从 tokens.ts 源码里抠出 `export const <name> = { … }` 的键值（色值）。"""
+    m = re.search(rf"export const {name} = \{{(.*?)\}} as const;", src, re.S)
+    assert m, f"tokens.ts 里找不到 {name}"
+    return dict(re.findall(r"(\w+):\s*'(#[0-9A-Fa-f]{6})'", m.group(1)))
+
+
+def _luminance(hex6: str) -> float:
+    """相对亮度（0=黑，1=白），只用于"够不够亮"的粗判。"""
+    r, g, b = (int(hex6[i : i + 2], 16) / 255 for i in (1, 3, 5))
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b
+
+
+def test_instrument_theme_is_light_and_golden() -> None:
+    """instrument 必须是明亮金色域 —— 用户明确不要深色仪器风了。
+
+    挡住的错：有人把 instrument.bg 又改回深色（如 #0A1626），
+    罗盘域页面瞬间回到"黑底"，与用户决策相悖。
+    要求：bg 够亮（亮度 > 0.75），且带金调（R 与 B 通道拉开差距）。
+    """
+    src = (_REPO_ROOT / "apps/mobile/src/theme/tokens.ts").read_text(encoding="utf-8")
+    inst = _parse_token_block(src, "instrument")
+    bg = inst["bg"]
+    assert _luminance(bg) > 0.75, f"instrument.bg {bg} 太暗 —— 用户要明亮主题"
+    r, g, b = (int(bg[i : i + 2], 16) for i in (1, 3, 5))
+    assert r - b > 30, f"instrument.bg {bg} 没有金调（R-B 差 {r-b}）"
+    # 文字必须深，保证浅底可读
+    assert _luminance(inst["text"]) < 0.3, f"instrument.text {inst['text']} 太浅，浅底看不清"
+
+
+def test_compass_pages_use_light_dial() -> None:
+    """罗盘页必须用浅色盘面 —— 深色盘配浅底会割裂。"""
+    for rel in [
+        "apps/mobile/app/(tabs)/index.tsx",
+        "apps/mobile/app/adjust.tsx",
+        "apps/mobile/app/sensors.tsx",
+        "apps/mobile/app/calibrate.tsx",
+    ]:
+        src = (_REPO_ROOT / rel).read_text(encoding="utf-8")
+        assert "DIAL_DARK" not in src, f"{rel} 还在用深色盘面 DIAL_DARK"
+        assert "DIAL_LIGHT" in src, f"{rel} 没有用浅色盘面 DIAL_LIGHT"
+
+
+def test_submenu_icons_are_solid_and_large() -> None:
+    """子菜单图标必须实心、够大（BUG 4：用户反馈图标"为空"看不清）。
+
+    要求：analysis.tsx 的术式入口用实心图标（非 -outline），尺寸 ≥ 26。
+    """
+    src = (_REPO_ROOT / "apps/mobile/app/(tabs)/analysis.tsx").read_text(encoding="utf-8")
+    for name in ["planet", "sparkles", "game-controller", "calendar", "grid"]:
+        assert f"icon: '{name}'" in src, f"analysis.tsx 的 {name} 又被换回描边图标"
+    # 积木块图标 30px（≥26），够显眼
+    assert "size={30}" in src, "子菜单图标尺寸不足"
+
+
+# ==========================================================================
+# 断言 15：白话讲解基础设施（BUG 5，2026-10-08 用户要求）
+# ==========================================================================
+
+
+def test_plain_terms_dictionary_covers_core_terms() -> None:
+    """术语白话词典必须覆盖核心术语 —— 每个术语一句话大白话。"""
+    src = (_REPO_ROOT / "apps/mobile/src/content/plainTerms.ts").read_text(encoding="utf-8")
+    for term in ["坐山", "向山", "二十四山", "磁北", "五行", "八卦", "大运", "日主", "用神"]:
+        assert f"{term}:" in src or f"'{term}'" in src or f'"{term}"' in src, (
+            f"白话词典缺术语「{term}」"
+        )
+
+
+def test_sensors_page_has_quick_analyze() -> None:
+    """传感器页必须有罗盘快测 —— 实时读数直接给专业术语分析与 AI 白话讲解。
+
+    挡住的错：快测入口被删掉，用户又回到"只有一个数字、看不懂"的状态。
+    要求：有智能分析按钮、术语可点出白话、有 AI 白话讲解按钮、
+    且明确标注快测仅供参考（RULE-004：不代替坐向确认）。
+    """
+    src = (_REPO_ROOT / "apps/mobile/app/sensors.tsx").read_text(encoding="utf-8")
+    assert "QuickAnalyze" in src, "传感器页缺少罗盘快测组件"
+    assert "智能分析" in src, "快测缺少智能分析按钮"
+    assert "AI 白话讲解" in src, "快测缺少 AI 白话讲解按钮"
+    assert "快测仅供参考" in src, "快测没有标注'仅供参考' —— 会让人误当正式结论"
+    assert "<Term " in src, "快测的术语没有接白话讲解（Term 组件）"
+
+
+def test_info_popup_exists() -> None:
+    """通用弹出信息框必须存在（BUG 6 也要用它）。"""
+    p = _REPO_ROOT / "apps/mobile/src/components/InfoPopup.tsx"
+    assert p.exists(), "缺少 InfoPopup 通用弹出框组件"
+    src = p.read_text(encoding="utf-8")
+    assert "Modal" in src and "onClose" in src
+
+
+# ==========================================================================
+# 断言 16：一屏布局 —— 测盘/分析用积木宫格，不滚动（BUG 6，2026-10-08 用户要求）
+# ==========================================================================
+
+
+def test_test_and_analysis_use_block_grid() -> None:
+    """测盘 / 分析必须是一屏积木宫格：不滚动、块上有问号弹详情。
+
+    挡住的错：改回长列表 + 滚动，详情全堆在页面里拉长版面。
+    要求：
+      1. 不用 <Screen scroll>（一屏放下）；
+      2. 有宫格容器（grid 样式）与积木块（SourceBlock / EntryBlock）；
+      3. 块上有信息按钮，点开 InfoPopup 看详情。
+    """
+    for rel, block in [
+        ("apps/mobile/app/(tabs)/test.tsx", "SourceBlock"),
+        ("apps/mobile/app/(tabs)/analysis.tsx", "EntryBlock"),
+    ]:
+        src = (_REPO_ROOT / rel).read_text(encoding="utf-8")
+        assert "<Screen scroll" not in src, f"{rel} 又改回滚动长页面了"
+        assert block in src, f"{rel} 缺少积木块组件 {block}"
+        assert "InfoPopup" in src, f"{rel} 的积木块没有接弹出式信息框"
+        assert "information-circle-outline" in src, f"{rel} 的积木块上没有问号按钮"

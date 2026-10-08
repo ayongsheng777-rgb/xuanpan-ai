@@ -201,17 +201,18 @@ class TestCast:
 
 
 class TestQian:
-    def test_demo_set_loads(self) -> None:
+    def test_default_set_is_guanyin(self) -> None:
+        """默认签库是观音一百签 —— 演示库已于 2026-10-08 按用户要求移除。"""
         data = load_qian_set()
-        assert data["demo"] is True
-        assert len(data["signs"]) == data["total"]
+        assert data["set_id"] == "guanyin"
+        assert data["demo"] is False
+        assert len(data["signs"]) == data["total"] == 100
 
     def test_list_sets(self) -> None:
         sets = {s["set_id"]: s for s in list_qian_sets()}
-        assert "demo_guanyin" in sets
-        # 演示集必须明确标 demo；真实签库（demo=False）允许存在，
-        # 由各自文件的元数据声明（见 test_qian_guanyin.py）
-        assert sets["demo_guanyin"]["demo"] is True
+        assert "guanyin" in sets
+        # 演示库必须不在列表里 —— 用户明确要求去掉
+        assert "demo_guanyin" not in sets
 
     def test_draw_is_deterministic(self) -> None:
         a = draw_qian(3)
@@ -219,21 +220,21 @@ class TestQian:
         assert a == b
 
     def test_seed_wraps(self) -> None:
-        assert draw_qian(0).number == draw_qian(6).number
+        assert draw_qian(0).number == draw_qian(100).number
 
     def test_seed_sequence_covers_all(self) -> None:
-        numbers = {draw_qian(i).number for i in range(6)}
-        assert len(numbers) == 6, "0..5 应覆盖全部 6 签"
+        numbers = {draw_qian(i).number for i in range(100)}
+        assert len(numbers) == 100, "0..99 应覆盖全部 100 签"
 
     def test_sign_fields_populated(self) -> None:
         q = draw_qian(0)
         assert q.level and q.title and q.poem
         assert q.interpretation and q.advice
 
-    def test_demo_flag_in_tradition(self) -> None:
+    def test_no_demo_flag_in_tradition(self) -> None:
         q = draw_qian(0)
-        assert q.to_facts()["is_demo_data"] is True
-        assert any("演示" in u for u in q.to_tradition()["uncertainties"])
+        assert q.to_facts()["is_demo_data"] is False
+        assert q.to_tradition()["uncertainties"] == []
 
     def test_missing_set_raises(self) -> None:
         with pytest.raises(DomainDataMissingError):

@@ -106,7 +106,8 @@ class TestUncertainties:
         assert u, "必须汇总出不确定性"
         assert any("分金" in x for x in u)
         assert any("阈值" in x for x in u)
-        assert any("演示" in x for x in u)
+        # 演示签库已于 2026-10-08 按用户要求移除，不再有"演示"不确定性；
+        # 观音签库 demo=False，其 uncertainties 为空是预期的。
 
     def test_deduplicated(self, full_context: FortuneContext) -> None:
         u = full_context.uncertainties()

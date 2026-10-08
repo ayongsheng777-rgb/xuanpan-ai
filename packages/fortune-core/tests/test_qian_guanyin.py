@@ -128,9 +128,9 @@ class TestEngineBehavior:
         assert r.title == "钟离成道"
         assert r.set_id == SET_ID
 
-    def test_demo_default_untouched(self) -> None:
-        """新增签库不得改变默认签库的行为。"""
+    def test_guanyin_is_default(self) -> None:
+        """默认签库是观音一百签（演示库已于 2026-10-08 按用户要求移除）。"""
         from fortune_core.qian import DEFAULT_SET_ID, draw_qian as draw
 
-        assert DEFAULT_SET_ID == "demo_guanyin"
-        assert draw(0).set_id == "demo_guanyin"
+        assert DEFAULT_SET_ID == "guanyin"
+        assert draw(0).set_id == "guanyin"
