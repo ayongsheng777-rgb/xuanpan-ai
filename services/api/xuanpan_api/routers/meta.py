@@ -85,28 +85,44 @@ def ai_providers(
     2026-10-08 修复：之前直接调模块级的 `list_providers()`，拿到的是
     进程启动时的 provider 实例，管理台改了密钥后这里显示的还是旧状态。
     现在走运行时配置重建的 router，与真实 AI 调用看到的一致。
+
+    **字段基准仍是 `CAPABILITY_MATRIX`，运行时只决定 `available`**：
+    UI 契约（`ProviderInfo`）要 `id` / `cost` / `description`，这三项只有
+    静态矩阵里有 —— provider 实例的 `describe()` 不提供。若整条响应改用
+    `describe()`，前端类型契约会缺字段、且 `id` 缺失会让前端按 id 取用直接崩。
     """
     from xuanpan_ai import CAPABILITY_MATRIX, list_endpoint_presets
 
     from ..deps import get_ai_router
 
-    # 用生效配置重建的 router，而非启动时的实例
     router_obj = get_ai_router(request, store)
-    providers = router_obj.available_providers() if router_obj else []
-    # available_providers 只返回可用的；要全量列表（含不可用的）用于 UI 展示
-    # 这里用 describe 拿全量，再用 available 集合标注状态
-    all_providers = []
-    available_ids = {p.get("id") for p in providers}
-    # 从 router 拿全量 provider 描述
-    if router_obj:
-        for p in router_obj._providers:  # noqa: SLF001 - 内部属性，展示用
-            info = p.describe()
-            info["available"] = info.get("id") in available_ids
-            all_providers.append(info)
+    if router_obj is None:
+        # 兜底：未装配运行时配置时退回静态探测（与旧行为一致）
+        from xuanpan_ai import list_providers
+
+        providers = list_providers()
+    else:
+        # 运行时可用集合。provider 实例的 `registry_id` 与矩阵 id 同源
+        # （`get_provider` 按注册表键写入），故可据此对齐。
+        available_ids: set[str] = set()
+        for p in getattr(router_obj, "_providers", None) or []:
+            registry_id = getattr(p, "registry_id", None)
+            if not registry_id:
+                continue
+            try:
+                if p.is_available():
+                    available_ids.add(registry_id)
+            except Exception:  # noqa: BLE001 - 环境探测失败按不可用处理
+                pass
+
+        providers = [
+            {**dict(entry), "available": entry["id"] in available_ids}
+            for entry in CAPABILITY_MATRIX
+        ]
 
     return {
         "matrix": [dict(x) for x in CAPABILITY_MATRIX],
-        "providers": all_providers,
+        "providers": providers,
         "endpoint_presets": list_endpoint_presets(),
     }
 
