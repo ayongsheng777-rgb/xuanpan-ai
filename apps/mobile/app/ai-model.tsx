@@ -27,6 +27,7 @@ import { colors, radius, space } from '@/theme/tokens';
 
 /** 能力白话：用户看到的是"用来干嘛"，不是英文单词。 */
 const CAPABILITY_PLAIN: Record<string, { title: string; desc: string }> = {
+  template: { title: '本地模板', desc: '手机里的规则生成，免费、离线、不会失败' },
   vision: { title: '看图识别', desc: '看罗盘照片，认出盘面和角度' },
   reasoning: { title: '智能解读', desc: '把算出来的盘讲成人话' },
   fast: { title: '快速问答', desc: '日常问答，速度快、便宜' },
