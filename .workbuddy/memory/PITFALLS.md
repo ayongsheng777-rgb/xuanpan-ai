@@ -108,6 +108,49 @@ safe-delete 是**按同一个 turn 内累计删除数**判的（>50 即拦），
 
 🔴 **`expo export --clear` 会被 `[safe-delete]` 拦** —— 重新导出产物时；报 `checkBulkDeleteGuard`（大批量删除保护），与吞 pytest 汇总行同一机制。改成输出到**新目录**、不加 `--clear`。
 
+### EAS 云构建（2026-10-09 实测）
+
+🔴 **token 与 projectId 必须同账号，否则报 `Entity Not Authorized`** —— 跑 `eas build` 时。
+症状看起来像 token 失效或权限不足，其实是**两个不同的 Expo 账号**：
+本项目 `app.json` 的旧 projectId `12fb128e-...` 属 **anyong555**，
+而手上的 token 属 **anyong777**（`ayongsheng777@gmail.com`）。
+判据：`eas whoami` 拿到用户名后，用 GraphQL 查该账号下的 app 列表比对 slug：
+```bash
+curl -s -X POST https://api.expo.dev/graphql -H "Authorization: Bearer $EXPO_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"query":"query{ account{ byName(accountName:\"<用户名>\"){ apps(limit:20, offset:0){ id slug } } } }"}'
+```
+（注意 `apps` 必须同时给 `limit` **和** `offset`，只给 `limit` 会校验失败。）
+
+🔴 **`eas init` 会先尝试读旧 projectId，读不到就直接中止** —— 迁移账号时。
+加 `--force` **没用**（它同样先读）。必须先**手工删掉 app.json 里的 `extra.eas.projectId`**，
+再跑 `eas init --account <新账号> --non-interactive`。
+
+🔴 **`eas init` 会把解析后的 `extra.apiBaseUrls` 与 `extra.router` 序列化进 app.json** ——
+迁移后必查。这两项本该由 `app.config.js` 在构建期算出，写死进 app.json 会留下一个
+"看着像真配置"的 `127.0.0.1:8360`，后来人很容易信以为真。手工清掉。
+
+🔴 **换 EAS 账号 = 换 Android 签名密钥** —— 迁移前必须告知用户。
+`android.package` 可以完全不变，但新项目下 EAS 会生成新 keystore →
+**已装旧包的手机必须先卸载**，无法覆盖升级（`INSTALL_FAILED_UPDATE_INCOMPATIBLE`）。
+
+🔵 **核验 APK 里的配置，读 `assets/app.config` 最直接** ——
+它是构建期配置的快照（JSON），`extra.apiBaseUrl` / `apiBaseUrls` / `owner` / `projectId`
+一眼可见，比翻 Hermes 字节码可靠得多。
+
+🔵 **`eas build` 输出会被 `| tail -N` 缓冲，中途完全看不到进度** ——
+想监控就用 GraphQL 查 build 状态（`status` / `artifacts.buildUrl`），别干等：
+```bash
+curl -s -X POST https://api.expo.dev/graphql -H "Authorization: Bearer $EXPO_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"query":"query{ app{ byId(appId:\"<id>\"){ builds(limit:1, offset:0){ id status artifacts{buildUrl} error{message} } } } }"}'
+```
+注意 `Build` 类型上**没有 `finishedAt`**（用 `updatedAt`）。
+
+🔵 **`eas credentials` 不支持 `--non-interactive`** —— 想在 CI 里查签名凭据时；
+改用 GraphQL 的 `app.androidAppCredentials`（注意该字段**不接受** `limit`/`offset`，
+且其下**没有** `androidKeystore` 子字段，能查到的只有 `applicationIdentifier`）。
+
 ---
 
 ## 4. 无头浏览器 / 截图 / CDP
