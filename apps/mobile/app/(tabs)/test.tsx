@@ -137,7 +137,7 @@ function SourceBlock({ source, onPress }: { source: Source; onPress: () => void 
         contentStyle={styles.block}
       >
         <View style={styles.blockIcon}>
-          <Ionicons name={source.icon} size={30} color={instrument.accent} />
+          <Ionicons name={source.icon} size={24} color={instrument.accent} />
         </View>
         <AppText size="sm" weight="semibold" color={instrument.text} center style={styles.blockTitle}>
           {source.title}
@@ -180,26 +180,26 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
   },
-  sectionLead: { marginTop: space[4], marginBottom: space[3] },
-  /* 积木宫格：2 列，一屏放下 5 块 */
-  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: space[3] },
+  sectionLead: { marginTop: space[2], marginBottom: space[2] },
+  /* 积木宫格：2 列，一屏放下 5 块（2026-10-08 用户反馈：必须真一屏，不滚动） */
+  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: space[2] },
   blockWrap: { width: '48%', flexGrow: 1 },
   block: {
     alignItems: 'center',
-    gap: space[2],
-    paddingVertical: space[4],
-    minHeight: 128,
+    gap: space[1],
+    paddingVertical: space[2],
+    minHeight: 104,
   },
   blockIcon: {
-    width: 56,
-    height: 56,
+    width: 44,
+    height: 44,
     borderRadius: radius.md,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: instrument.surfaceAlt,
   },
   blockTitle: { lineHeight: 20 },
-  blockInfo: { position: 'absolute', top: space[2], right: space[2], padding: space[1] },
+  blockInfo: { position: 'absolute', top: space[1], right: space[1], padding: space[1] },
   popupBody: { lineHeight: 24 },
-  footLine: { marginTop: space[4], lineHeight: 18 },
+  footLine: { marginTop: space[2], lineHeight: 16 },
 });

@@ -8,6 +8,8 @@
 
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
+import * as Font from 'expo-font';
+import { Ionicons } from '@expo/vector-icons';
 import React from 'react';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
@@ -26,6 +28,13 @@ export default function RootLayout(): React.JSX.Element {
   // 这个手改入口都进不去。失败时保持原地址，后续请求自然报错并给指引。
   React.useEffect(() => {
     void initBaseUrl();
+  }, []);
+
+  // 显式预加载 Ionicons 字体（2026-10-08 用户反馈：分析/传感器页图标空白）。
+  // @expo/vector-icons 在 EAS 生产构建中有时字体就绪滞后，图标先空白。
+  // 这里主动加载一次，不阻塞渲染；失败也不抛错，最坏与之前一致。
+  React.useEffect(() => {
+    void Font.loadAsync({ ...Ionicons.font }).catch(() => undefined);
   }, []);
 
   return (

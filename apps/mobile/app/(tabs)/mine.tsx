@@ -69,8 +69,9 @@ export default function MineScreen(): React.JSX.Element {
 // ==========================================================================
 
 function AiModelCard({ data }: { data: AiProvidersResponse | null }): React.JSX.Element {
+  const router = useRouter();
   return (
-    <Card title="AI 模型（由服务端配置）">
+    <Card title="AI 模型">
       <AppText size="xs" color="muted" style={styles.note}>
         密钥保存在服务端，不进入本 App。此处只展示服务端当前能用什么。
       </AppText>
@@ -108,6 +109,7 @@ function AiModelCard({ data }: { data: AiProvidersResponse | null }): React.JSX.
           </View>
         ))
       )}
+      <Button label="配置模型" onPress={() => router.push('/ai-model')} />
     </Card>
   );
 }

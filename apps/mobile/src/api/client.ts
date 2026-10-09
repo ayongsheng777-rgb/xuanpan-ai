@@ -233,6 +233,13 @@ export class ApiClient {
 
   aiProviders = (): Promise<AiProvidersResponse> => this.request('/api/v1/meta/ai-providers');
 
+  /** 选择 AI 模型（只改"用哪个"，不碰密钥；密钥在服务端管理台配）。 */
+  setAiModelSelection = (model: string, capability: string): Promise<{ model: string; capability: string }> =>
+    this.request('/api/v1/meta/ai-model-selection', {
+      method: 'POST',
+      body: JSON.stringify({ model, capability }),
+    });
+
   visionProviders = (): Promise<VisionProvidersResponse> =>
     this.request('/api/v1/meta/vision-providers');
 

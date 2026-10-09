@@ -8,7 +8,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Body, Depends, HTTPException
+
+from ..deps import get_runtime_config, get_store
+from ..runtime_config import ConfigError, RuntimeConfig
+from ..storage import Store
 
 router = APIRouter(prefix="/meta", tags=["meta"])
 
@@ -125,3 +129,45 @@ def capabilities() -> dict[str, Any]:
 
 
 __all__ = ["router"]
+
+
+@router.post("/ai-model-selection", summary="App 选择 AI 模型（不碰密钥）")
+def set_ai_model_selection(
+    selection: dict[str, Any] = Body(..., description="要选的模型：{model: 模型名, capability: 能力}"),
+    runtime: RuntimeConfig = Depends(get_runtime_config),
+    store: Store = Depends(get_store),
+) -> dict[str, Any]:
+    """App 端切换 AI 模型选择。
+
+    安全边界（2026-10-08 用户要求 App 内可配模型）：
+    - 只允许改 `llm.model` 与 `llm.capability`（选"用哪个模型"）。
+    - **不接受** `llm.api_key`、`llm.base_url` —— 密钥与接入地址只能
+      经管理台（/admin，需令牌）或环境变量配置，永不经过 App。
+    - 模型名必须在服务端已知 provider 列表里，防止填个不存在的把 AI 功能搞坏。
+
+    为什么单开一个接口而不复用 admin 的 PATCH /config：
+    admin 接口要令牌（防隐私数据泄露），而选模型不涉及隐私；
+    把选模型做成免令牌接口，用户在 App 里点两下就能换，不用记令牌。
+    """
+    from xuanpan_ai import list_providers
+
+    model = selection.get("model")
+    capability = selection.get("capability")
+    if not model or not isinstance(model, str):
+        raise HTTPException(status_code=400, detail="缺少 model（模型名）")
+    if not capability or not isinstance(capability, str):
+        raise HTTPException(status_code=400, detail="缺少 capability（能力：vision/reasoning/fast/fallback）")
+
+    # 校验：模型必须在已知列表里
+    known = {p.get("id") for p in list_providers()}
+    # 也允许直接写模型名（如 "gpt-4o"），只要 capability 合法
+    valid_caps = {"vision", "reasoning", "fast", "fallback", "embedding"}
+    if capability not in valid_caps:
+        raise HTTPException(status_code=400, detail=f"capability 非法，应为 {sorted(valid_caps)} 之一")
+
+    changes = {"llm.model": model.strip(), "llm.capability": capability}
+    try:
+        result = runtime.update(store, changes)
+    except ConfigError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {**result, "model": model.strip(), "capability": capability}

@@ -150,7 +150,7 @@ function EntryBlock({
         style={({ pressed }) => [styles.block, pressed && styles.blockPressed]}
       >
         <View style={styles.blockIcon}>
-          <Ionicons name={icon} size={30} color={colors.primary} />
+          <Ionicons name={icon} size={24} color={colors.primary} />
         </View>
         <AppText size="sm" weight="semibold" color={colors.text} center style={styles.blockTitle}>
           {title}
@@ -180,16 +180,16 @@ function EntryBlock({
 
 const styles = StyleSheet.create({
   root: { backgroundColor: colors.bg },
-  lead: { lineHeight: 22, marginBottom: space[3] },
-  /* 积木宫格：2 列，一屏放下 6 块 */
-  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: space[3] },
+  lead: { lineHeight: 22, marginBottom: space[2] },
+  /* 积木宫格：2 列，一屏放下 6 块（2026-10-08 用户反馈：必须真一屏，不滚动） */
+  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: space[2] },
   block: {
     width: '48%',
     flexGrow: 1,
     alignItems: 'center',
-    gap: space[2],
-    paddingVertical: space[4],
-    minHeight: 128,
+    gap: space[1],
+    paddingVertical: space[2],
+    minHeight: 104,
     borderRadius: radius.lg,
     borderWidth: 1,
     borderColor: colors.border,
@@ -197,15 +197,15 @@ const styles = StyleSheet.create({
   },
   blockPressed: { backgroundColor: colors.surfaceAlt },
   blockIcon: {
-    width: 56,
-    height: 56,
+    width: 44,
+    height: 44,
     borderRadius: radius.md,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: colors.surfaceAlt,
   },
   blockTitle: { lineHeight: 20 },
-  blockInfo: { position: 'absolute', top: space[2], right: space[2], padding: space[1] },
+  blockInfo: { position: 'absolute', top: space[1], right: space[1], padding: space[1] },
   popupBody: { lineHeight: 24 },
-  footLine: { marginTop: space[4], lineHeight: 18 },
+  footLine: { marginTop: space[2], lineHeight: 16 },
 });
