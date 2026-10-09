@@ -84,7 +84,10 @@ VOLUMES: tuple[Volume, ...] = (
         blurb=(
             "全 App 唯一的色值 / 间距 / 字号 / 圆角 / 阴影真源。"
             "五色由演示图逐像素中位数取样实测得出，不是随手挑的色板；"
-            "`instrument` 是罗盘域专用的深色仪器色域，与暖色中性阶双轨并存。"
+            "`instrument` 是罗盘域专用的**浅金仪器色域**（2026-10-08 用户决策"
+            "「明亮为主、金色做背景」），与暖色中性阶双轨并存。"
+            "2026-10-09 新增两组：`hud`（玄机装饰层 —— 回纹角花 / HUD 刻度 / 星宿连线，"
+            "只加结构与质感、不引入新色相）与 `fit`（单屏配比与列表折叠上限）。"
             "组件内禁止出现硬编码色值（对应 RULE-005「规则不散落」）。"
         ),
         files=("src/theme/tokens.ts",),
@@ -96,16 +99,24 @@ VOLUMES: tuple[Volume, ...] = (
             "与术数领域无关的通用 UI 原件：排版、容器、按钮、标签、横幅、分段切换、讲解入口，"
             "以及「点一下弹白话」的两件套（`Term` 行内术语 + `InfoPopup` 底部半屏卡片）。"
             "这些组件决定了全 App 的视觉基调，也是判断「设计系统是否被真正执行」的第一手材料。"
+            "2026-10-09 单屏改造新增四件：`PageHeader`（统一标题栏 + 带文字的返回入口）、"
+            "`Screen` 的 `FitSlot`/`FitSlots`（单屏弹性分区，页面骨架已不可滚动）、"
+            "`FoldList`（列表折叠为前 N 条 + 更多浮层）、"
+            "`Hud` 与 `InstrumentBlock`（玄机 HUD 装饰与道具化宫格块）。"
         ),
         files=(
             "src/components/AppText.tsx",
             "src/components/Screen.tsx",
+            "src/components/PageHeader.tsx",
             "src/components/Card.tsx",
             "src/components/Chip.tsx",
             "src/components/Banner.tsx",
             "src/components/SegmentedTabs.tsx",
             "src/components/HelpButton.tsx",
             "src/components/InfoPopup.tsx",
+            "src/components/FoldList.tsx",
+            "src/components/Hud.tsx",
+            "src/components/InstrumentBlock.tsx",
             "src/components/Term.tsx",
             "src/components/usePressScale.ts",
         ),
