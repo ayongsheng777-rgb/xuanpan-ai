@@ -80,6 +80,20 @@ Desktop.ini
 .workbuddy/tmp/
 *.tmp
 
+# ---- 评审用截图对照页（体积大且可重建，不进版本库）----
+# `.workbuddy/ui-redesign-v2/` 是改前/改后对照页，PNG 以 base64 内联，
+# 单文件约 9.6MB。它由 `scripts/ui_render/make_one_screen_report.py` 生成，
+# 随时可重跑 —— 该进版本库的是**生成器**，不是产物。
+.workbuddy/ui-redesign-v2/
+.workbuddy/ui-render/
+.workbuddy/*-proposals.html
+
+# ---- Agent 运行时的本地记忆库 ----
+# 与上面「需提交的 .workbuddy/memory/」是两套东西：
+# `.workbuddy-ai/` 由 Agent 运行时直接读写（工作区级 memory），属本机状态；
+# 需要进版本库的项目记忆写 `.workbuddy/memory/`。
+.workbuddy-ai/
+
 # ---- 运行时数据（不进版本库）----
 # 根 data/ 只装运行时产物：SQLite 库、上传原件、缓存。
 # ⚠️ 领域数据表**不在这里** —— fenjin120.py / naming.py / qian.py 的默认路径

@@ -117,11 +117,47 @@ safe-delete 是**按同一个 turn 内累计删除数**判的（>50 即拦），
 🟢 **Chromium 在本机起不来**（实测第三次遭遇：`Chrome exited early ... DevToolsActivePort`；`agent-browser` 与其 `--no-sandbox` 均无效）→ **管理台/网页的渲染验证只能做静态检查**。别把静态检查说成"已验证渲染"，要在交付里写明为已知不足。离线渲染探针 `scripts/ui_render/` 走的是 CDP，同样受此限。
 > ⚠️ 但 `docs/ui-render/` 的 19 页快照**确实拍出来过** —— 说明该结论**与具体调用方式有关**，不是无条件成立；下次做浏览器渲染先实测一次，别直接引用"起不来"而放弃。
 
+✅ **2026-10-09 结论修正：真实渲染在本机可用，"起不来"是**系统 Chrome 缺失**导致的误判。**
+本机**没有** `/Applications/Google Chrome.app`，而 `_CHROME_CANDIDATES` 只找系统 Chrome ——
+所以一直是"找不到浏览器 → skip"，被读成了"浏览器起不来"。
+装 Playwright 的 Chromium 即可（不要 `npx playwright install`，直接下到隔离工作区）：
+```bash
+cd ~/.workbuddy-ai/binaries/node/workspace && npm i playwright
+NODE_PATH=~/.workbuddy-ai/binaries/node/workspace/node_modules \
+  ~/.workbuddy-ai/binaries/node/versions/22.22.2-6/bin/node \
+  ~/.workbuddy-ai/binaries/node/workspace/node_modules/playwright/cli.js install chromium
+# 二进制落在 ~/.workbuddy-ai/binaries/node/workspace/pw-browsers/chromium-1248/chrome-mac-x64/
+#   Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing
+```
+然后 `XP_CHROME=<上面的路径>` 即可跑真渲染（`tests/mobile/test_ui_render.py` 读这个环境变量）。
+**沙箱内可以跑，不需要 `--no-sandbox`，也不需要沙箱外执行**（与本节第 1 条不矛盾：
+那条说的是"受限 shell 下静默 exit 0"，用 `subprocess.run` + 绝对路径不受影响）。
+`chromium-1248` 是版本号，换机/升级后会变，别写死 —— 用 `find` 定位。
+
 🔴 **`chrome --headless --screenshot --window-size=390,844` 在本机不生效** —— 做"手机尺寸截图"时；实测页面 `innerWidth=500`，截出的 390px 图是把 500px 布局**裁掉右边**，看着像横向溢出、实为假象。要用 CDP 的 `Emulation.setDeviceMetricsOverride`。
 
 🔴 **同一轮批量截图不要每页重启 Chrome** —— 批量任务；实例间互相干扰，实测**第二页起永久挂起**（20 分钟只出一页、无任何报错）。改为启动一次 Chrome + 每页独立 target。
 
 🔴 **CDP/WebSocket 脚本结束必须 `process.exit()`** —— 写 Node 浏览器自动化时；不关 WebSocket 会让事件循环一直存活 → 进程永不退出 → 调用方（pytest/shell）跟着挂死（实测卡过 14 分钟）。杀 Chrome 要用 `spawnSync('taskkill',['/F','/T','/PID',pid])`，`spawn` 异步派发不够。
+
+### 探针本身会骗人（2026-10-09 实测，判断"页面有没有滚动"时）
+
+🔴 **`documentElement.scrollHeight` 检测不到 RN 的 `ScrollView`** —— 判断页面有没有滚动时。
+RN 的 `ScrollView` 在**垂直 flex 父容器**里会被限制在视口高度内，于是文档高**恒等于**视口高。
+用它测出来的结论是"全部合格"，而实际有 8 个页面在滚。
+**必须另加内层探针**：遍历所有元素，找 `getComputedStyle(el).overflowY` ∈ {`auto`,`scroll`}
+且 `el.scrollHeight - el.clientHeight > 8` 的容器。
+▶ 元教训：**"整体高度没超"不等于"没有滚动"** —— 滚动可以发生在任意一个中间容器里。
+判断这类性质要扫**容器**，不能只看文档根。
+
+🔴 **`numberOfLines` 在 RN-web 上编译成 `-webkit-line-clamp`，是合法截断，必须从裁切探针排除** ——
+写"内容被裁掉"检测时。否则每个用了 `numberOfLines` 的文本都会命中
+（它们**本来就该**被截断），探针变成满屏假阳性，最后没人看。
+判据：`overflow:hidden` 且 `scrollHeight - clientHeight > 8`，**且** `webkitLineClamp === 'none'`。
+
+🔵 **探针必须先在"已知坏的"版本上验一次** —— 否则你不知道它是真在测，还是恒返回"合格"。
+本轮做法：改前用 `git worktree` 把 HEAD 检出来，**用同一套探针**测旧代码，
+拿到 5917px / 8 页的基线，再测新代码拿到 0。**没有这条基线，那个 0 分文不值。**
 
 ---
 
@@ -153,6 +189,23 @@ safe-delete 是**按同一个 turn 内累计删除数**判的（>50 即拦），
 ---
 
 ## 6. 前端"改完看似没事、实际错"
+
+🔴 **RN 的 `ScrollView` 默认带 `flexGrow: 1`，横向滚动条会跟着纵向长高、吃掉一半垂直空间** ——
+把横向 `ScrollView`（标签条、图片条）放进 `flex: 1` 的父容器时。
+`flexGrow: 1` 本来是给**纵向**滚动准备的，横向用不到但**照样生效**。
+2026-10-09 实测：`SegmentedTabs` 的下划线样式因此让 `divine.tsx` 的三段标签
+与内容区各分到 290px，550px 的输入卡被裁掉一半。
+**症状极具欺骗性**：截图上看只是"卡片下面被切了"，完全不像标签条的问题。
+修法：给横向条加 `flexGrow: 0, flexShrink: 0`。
+▶ 这条是**渲染探针的 `clipped` 检测**揪出来的 —— 纯看截图基本不可能归因。
+**凡是在 `flex` 容器里放横向 `ScrollView`，都要显式写 `flexGrow: 0`。**
+
+🔴 **只按屏宽算尺寸的组件，在"高度不够"时会静默裁掉底部** —— 做自适应盘面/图片时。
+`confirm/[sessionId].tsx` 原先用 `Math.min(width - 96, 260)` 算盘面直径，
+390 宽下得 260px，加上调节器约 456px 的周边内容 = 716px，
+而分区只有 644px → 底部 72px 被裁，**没有任何报错**。
+修法：尺寸同时受屏宽与**实测可用高度**约束（`onLayout` 拿 `slotH`，再减去周边固定高度）。
+▶ **判据：任何"按 `useWindowDimensions()` 算出来的尺寸"，都要问一句"高度够吗"。**
 
 🔴 **「内核做完了」≠「用户用得上」** —— 判定交付度必查**三条链路**：内核 → HTTP/MCP → App 界面。评估时先 grep App 有没有引用。
 
