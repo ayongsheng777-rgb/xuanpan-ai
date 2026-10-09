@@ -169,6 +169,61 @@ export const instrument = {
   curveFill: '#DAB37D',
 } as const;
 
+/**
+ * 玄机 HUD 装饰层 —— 浅金域上的"科技感"，**不引入任何新色相**。
+ *
+ * 2026-10-09 用户决策「浅金科技」：保留明亮金色底（`instrument`），
+ * 把玄学科技风（HUD 刻度、回纹角花、星宿连线、全息微光）作为**装饰层**叠上去。
+ *
+ * 为什么不直接照抄深色玄学规范的 rgba(0,240,255) 青色：
+ *   · 亮金底上放青色描边，对比度只有 1.6:1，刻度线直接看不见；
+ *   · 更关键的是 `test_instrument_theme_is_light_and_golden` 钉死了
+ *     instrument.bg 必须亮且带金调（用户 10-08 明确要"明亮为主"）——
+ *     深色玄学底与这条守卫正面冲突，按「项目硬约束 > 规范风格建议」裁决，
+ *     玄学科技风只保留**结构与质感**，配色仍走金系。
+ *
+ * 浅底上的"发光"与暗底不同：暗底靠外发光（box-shadow）提亮，
+ * 浅底必须靠**更深的金 + 更淡的填充**做出"光晕"的错觉，否则只会糊成一片。
+ */
+export const hud = {
+  /** 回纹 / 角花 / 榫卯倒角描边 —— 道具化卡片四角的 L 形饰线 */
+  frame: 'rgba(154, 107, 31, 0.30)',
+  /** HUD 刻度线 —— 罗盘外环的激光刻度 */
+  tick: 'rgba(154, 107, 31, 0.42)',
+  /** 主刻度线（每 8 格一根，比 tick 更实） */
+  tickMajor: 'rgba(154, 107, 31, 0.62)',
+  /** 全息光晕 —— 浅底上的"外发光"，用暖金淡填充 + 深金描边模拟 */
+  glow: 'rgba(218, 179, 125, 0.30)',
+  /** 星宿连线底纹（Opacity ≈10%，只作暗示，不与内容争） */
+  constellation: 'rgba(154, 107, 31, 0.10)',
+  /** 道具块激活态底 —— 选中时"亮起来" */
+  activeBg: 'rgba(218, 179, 125, 0.24)',
+  /** 扫描线 / 数据管道流光 */
+  scanline: 'rgba(154, 107, 31, 0.16)',
+} as const;
+
+/**
+ * 单屏配比 —— 用户 2026-10-09 要求「每个界面保持全部显示在手机屏幕上，不需滑动浏览」。
+ *
+ * 采用**弹性权重**而不是固定像素：手机屏高从 640 到 940 差 300px，
+ * 写死像素必然在某一端溢出。权重之和为 1，各段按剩余空间等比伸缩。
+ *
+ * 配比取自玄学科技风规范的「绝对高度约束」（顶 8~10% / 核心 45~50% /
+ * 面板 20~25% / 底栏 10%），但底栏高度由导航器自己占，故页面内只分三段。
+ */
+export const fit = {
+  /** 标题栏（含返回）—— 约 8% */
+  header: 0.1,
+  /** 核心功能区 / 主道具 —— 约 52% */
+  core: 0.52,
+  /** 状态 / 数据面板 —— 约 26% */
+  panel: 0.26,
+  /** 脚注 / 提示 —— 约 12% */
+  foot: 0.12,
+  /** 列表页「一屏可见条数」的兜底上限，超出走 FoldList 的「更多」浮层 */
+  listPreviewMax: 4,
+} as const;
+
 /** 半透明层（避免在组件里手写 rgba） */
 export const alpha = {
   primarySoft: 'rgba(1, 58, 108, 0.08)',
@@ -362,8 +417,8 @@ export const interaction = {
 } as const;
 
 export const theme = {
-  brand, neutral, semantic, colors, alpha, instrument,
-  tone, tint, element, interaction,
+  brand, neutral, semantic, colors, alpha, instrument, hud,
+  tone, tint, element, interaction, fit,
   space, radius, font, tracking, elevation, layout,
 } as const;
 
