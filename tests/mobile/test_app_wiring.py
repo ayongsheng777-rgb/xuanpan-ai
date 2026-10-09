@@ -744,12 +744,18 @@ def test_submenu_icons_are_solid_and_large() -> None:
     """子菜单图标必须实心、够大（BUG 4：用户反馈图标"为空"看不清）。
 
     要求：analysis.tsx 的术式入口用实心图标（非 -outline），尺寸 ≥ 26。
+
+    尺寸按**数值**判定，不钉死具体像素：一屏紧凑（2026-10-08 用户反馈
+    「必须真一屏，不滚动」）与「够大看得清」会来回拉锯，钉死数字会让每次
+    调尺寸都变成假红（本轮 30→24 即如此）—— 要守的是下限，不是某个值。
     """
     src = (_REPO_ROOT / "apps/mobile/app/(tabs)/analysis.tsx").read_text(encoding="utf-8")
     for name in ["planet", "sparkles", "game-controller", "calendar", "grid"]:
         assert f"icon: '{name}'" in src, f"analysis.tsx 的 {name} 又被换回描边图标"
-    # 积木块图标 30px（≥26），够显眼
-    assert "size={30}" in src, "子菜单图标尺寸不足"
+    match = re.search(r"<Ionicons\s+name=\{icon\}\s+size=\{(\d+)\}", src)
+    assert match, "找不到子菜单图标（应为 <Ionicons name={icon} size={N} />），检查已空转"
+    size = int(match.group(1))
+    assert size >= 26, f"子菜单图标尺寸不足：{size}px（下限 26，BUG 4 会复发）"
 
 
 # ==========================================================================

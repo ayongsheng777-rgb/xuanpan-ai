@@ -150,7 +150,10 @@ function EntryBlock({
         style={({ pressed }) => [styles.block, pressed && styles.blockPressed]}
       >
         <View style={styles.blockIcon}>
-          <Ionicons name={icon} size={24} color={colors.primary} />
+          {/* 26px：一屏紧凑（2026-10-08 用户反馈「必须真一屏」）与
+              「图标为空看不清」（BUG 4）的折中 —— 比原先 30/56 小一圈仍够大，
+              低于 26 会触发 test_app_wiring 的守卫。 */}
+          <Ionicons name={icon} size={26} color={colors.primary} />
         </View>
         <AppText size="sm" weight="semibold" color={colors.text} center style={styles.blockTitle}>
           {title}
@@ -197,8 +200,8 @@ const styles = StyleSheet.create({
   },
   blockPressed: { backgroundColor: colors.surfaceAlt },
   blockIcon: {
-    width: 44,
-    height: 44,
+    width: 46,
+    height: 46,
     borderRadius: radius.md,
     alignItems: 'center',
     justifyContent: 'center',
