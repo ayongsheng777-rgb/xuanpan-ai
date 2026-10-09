@@ -94,6 +94,11 @@ Desktop.ini
 # 需要进版本库的项目记忆写 `.workbuddy/memory/`。
 .workbuddy-ai/
 
+# ---- 构建产物：APK（单包约 90MB，不进版本库）----
+# 由 EAS 云构建产出，下载链接在构建页；要归档就归档**链接与 commit**，不是二进制。
+# 当前包：xuanpan-ai-0.1.0-b1-preview.apk（anyong777/xuanpan-ai build 360e885c）
+.workbuddy/apk/
+
 # ---- 运行时数据（不进版本库）----
 # 根 data/ 只装运行时产物：SQLite 库、上传原件、缓存。
 # ⚠️ 领域数据表**不在这里** —— fenjin120.py / naming.py / qian.py 的默认路径
