@@ -9,12 +9,26 @@
  * 3. **每日一票**：「今日一签」每天只有一支（种子 = 当天日期），天然可复现；
  *    「随意一签」每次取当前时刻为种子。
  *
- * 解签两条路：传统签解（引擎自带的签文解读，内联展开）与 AI 解签
+ * 解签两条路：传统签解（引擎自带的签文解读）与 AI 解签
  *（保存为会话 → 走报告流程，与占测页同一链路）。
+ *
+ * ## 单屏做法（2026-10-09）
+ *
+ * 街机主交互（签筒舞台）放**唯一弹性区** `FitSlot weight={1}`；
+ * 选签库 / 选模式只在待机时占位，摇签与开奖时让位给结果。
+ * 摇签大按钮**固定在弹性区下方、始终可见**（见下方 ⚠️ 说明）。
+ * 签文与解签较长，收进 `InfoPopup`，页面只留等级、签号与签题。
+ *
+ * ## ⚠️ 摇签按钮为什么必须常驻（BUG 2a，2026-10-08 用户实报）
+ *
+ * 原来 `phase==='idle'` 才渲染 Pressable：手指按住 → onPressIn 把 phase 置为
+ * shaking → Pressable 被卸载 → 松手时 onPressOut 永远收不到 → 签筒卡在"摇签中"。
+ * 现在按钮一直在，只是非 idle 时禁用按压、只换文案；onPressIn/onPressOut 内部仍有
+ * phase 守卫。改造版面时**务必保持它不被条件卸载**。
  */
 
 import { Ionicons } from '@expo/vector-icons';
-import { Stack, useRouter } from 'expo-router';
+import { useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Animated, Pressable, StyleSheet, View } from 'react-native';
 
@@ -23,9 +37,10 @@ import type { LayerPreview } from '@/api/types';
 import { AppText } from '@/components/AppText';
 import { Banner } from '@/components/Banner';
 import { Button, Card, KeyValueRow } from '@/components/Card';
-import { helpHeaderRight } from '@/components/HelpButton';
+import { InfoPopup } from '@/components/InfoPopup';
+import { PageHeader } from '@/components/PageHeader';
 import { QianSetPicker } from '@/components/QianSetPicker';
-import { Screen } from '@/components/Screen';
+import { FitSlot, Screen } from '@/components/Screen';
 import { SegmentedTabs } from '@/components/SegmentedTabs';
 import { todayISODate } from '@/lib/date';
 import { useSubmit } from '@/lib/useAsync';
@@ -228,10 +243,11 @@ export default function QianjiScreen(): React.JSX.Element {
   const level = String(facts['level'] ?? '');
   const levelStyle = LEVEL_STYLE[level] ?? { color: colors.textSecondary, cheer: level };
   const err = calc.error ?? create.error ?? patch.error;
+  const poem = Array.isArray(facts['poem']) ? (facts['poem'] as string[]) : [];
 
   return (
-    <Screen scroll>
-      <Stack.Screen options={{ title: '灵签机', headerRight: helpHeaderRight('qianji') }} />
+    <Screen>
+      <PageHeader title="灵签机" back helpTopic="qianji" tone="light" />
 
       {/* ---------- 街机招牌 ---------- */}
       <View style={styles.marquee}>
@@ -240,7 +256,7 @@ export default function QianjiScreen(): React.JSX.Element {
             <Animated.View key={i} style={[styles.lamp, { opacity: v }]} />
           ))}
         </View>
-        <AppText size="xl" weight="bold" center color="primary" track="wide">
+        <AppText size="lg" weight="bold" center color="primary" track="wide">
           灵 签 机
         </AppText>
         <AppText size="xs" color="muted" center style={styles.marqueeSub}>
@@ -248,67 +264,67 @@ export default function QianjiScreen(): React.JSX.Element {
         </AppText>
       </View>
 
-      <QianSetPicker
-        value={setId}
-        onChange={(id) => {
-          if (phase === 'idle' && id !== setId) {
-            setSetId(id);
-            reset();
-          }
-        }}
-      />
-      <SegmentedTabs
-        items={[
-          { key: 'daily', label: '今日一签' },
-          { key: 'free', label: '随意一签' },
-        ]}
-        value={mode}
-        onChange={(k) => {
-          if (phase === 'idle') {
-            setMode(k as DrawMode);
-            reset();
-          }
-        }}
-      />
-      <View style={styles.spacer} />
-
-      {/* ---------- 签筒舞台 ---------- */}
-      <View style={styles.stage}>
-        <View style={styles.sticksArea}>
-          {sticks.map((s) => (
-            <View
-              key={s.id}
-              style={[
-                styles.stick,
-                { transform: [{ translateX: s.dx }, { translateY: s.dy }, { rotate: s.rot }] },
-              ]}
-            />
-          ))}
-          {/* 弹出的那支签 */}
-          {phase === 'revealing' ? (
-            <Animated.View style={[styles.popStick, { transform: [{ translateY: popY }] }]}>
-              <AppText size="md" weight="bold" center color="primary">
-                {rollNumber ?? '·'}
-              </AppText>
-            </Animated.View>
-          ) : null}
+      {/* ---------- 选签库 / 选模式：仅待机时占位（摇签与开奖时让位给结果） ---------- */}
+      {phase === 'idle' ? (
+        <View>
+          <QianSetPicker
+            value={setId}
+            onChange={(id) => {
+              if (phase === 'idle' && id !== setId) {
+                setSetId(id);
+                reset();
+              }
+            }}
+          />
+          <SegmentedTabs
+            items={[
+              { key: 'daily', label: '今日一签' },
+              { key: 'free', label: '随意一签' },
+            ]}
+            value={mode}
+            onChange={(k) => {
+              if (phase === 'idle') {
+                setMode(k as DrawMode);
+                reset();
+              }
+            }}
+          />
         </View>
-        <View style={styles.tube}>
-          <View style={styles.tubeRim} />
-          <AppText size="lg" weight="bold" center style={styles.tubeText}>
-            签
-          </AppText>
-        </View>
-      </View>
+      ) : null}
 
-      {/* ---------- 大按钮 ---------- */}
-      {/*
-        ⚠️ Pressable 必须常驻、不能按 phase 条件卸载：
-        2026-10-08 用户实报 BUG —— 原来 `phase==='idle'` 才渲染 Pressable，
-        手指按住后 setPhase('shaking') 直接把按钮卸载了，松手时 onPressOut
-        永远收不到，签筒就卡在"摇签中…"。现在按钮一直在，只是非 idle 时
-        禁用按压、只换文案；onPressIn/onPressOut 内部仍有 phase 守卫。
-      */}
+      {/* ---------- 签筒舞台（唯一弹性区） ---------- */}
+      {/* overflow 放开：弹出的那支签要越过弹性区上边界，被裁掉就看不到"出签"了 */}
+      <FitSlot weight={1} center style={styles.stageSlot}>
+        <View style={styles.stage}>
+          <View style={styles.sticksArea}>
+            {sticks.map((s) => (
+              <View
+                key={s.id}
+                style={[
+                  styles.stick,
+                  { transform: [{ translateX: s.dx }, { translateY: s.dy }, { rotate: s.rot }] },
+                ]}
+              />
+            ))}
+            {/* 弹出的那支签 */}
+            {phase === 'revealing' ? (
+              <Animated.View style={[styles.popStick, { transform: [{ translateY: popY }] }]}>
+                <AppText size="md" weight="bold" center color="primary">
+                  {rollNumber ?? '·'}
+                </AppText>
+              </Animated.View>
+            ) : null}
+          </View>
+          <View style={styles.tube}>
+            <View style={styles.tubeRim} />
+            <AppText size="lg" weight="bold" center style={styles.tubeText}>
+              签
+            </AppText>
+          </View>
+        </View>
+      </FitSlot>
+
+      {/* ---------- 大按钮：常驻（见文件头 ⚠️） ---------- */}
       <Pressable
         onPressIn={onPressIn}
         onPressOut={onPressOut}
@@ -342,54 +358,31 @@ export default function QianjiScreen(): React.JSX.Element {
         </Banner>
       ) : null}
 
-      {/* ---------- 开奖 ---------- */}
+      {/* ---------- 开奖摘要（签文与解签收进弹层） ---------- */}
       {phase === 'revealing' && preview ? (
-        <Animated.View style={{ transform: [{ scale: revealScale }] }}>
-          <Card title={`${levelStyle.cheer}`}>
-            <AppText size="xl" weight="bold" center style={[styles.levelText, { color: levelStyle.color }]}>
-              第 {rollNumber} 签 · {level}
-            </AppText>
-            <AppText size="lg" weight="semibold" center color="primary" style={styles.signTitle}>
-              {String(facts['title'] ?? '')}
-            </AppText>
-            {(Array.isArray(facts['poem']) ? (facts['poem'] as string[]) : []).map((line, i) => (
-              <AppText key={i} size="md" center style={styles.poemLine}>
-                {line}
-              </AppText>
-            ))}
-            <KeyValueRow label="种子" value={seedUsed === null ? '' : `${seedUsed}${mode === 'daily' ? '（今日一签，可复现）' : ''}`} />
-            <KeyValueRow label="签库" value={String(facts['set_name'] ?? '')} last />
-          </Card>
-          {String(tradition['source_note'] ?? '') ? (
-            <AppText size="xs" color="muted" style={styles.sourceNote}>
-              {String(tradition['source_note'])}
-            </AppText>
-          ) : null}
+        <Card title={levelStyle.cheer}>
+          <AppText size="lg" weight="bold" center style={[styles.levelText, { color: levelStyle.color }]}>
+            第 {rollNumber} 签 · {level}
+          </AppText>
+          <AppText size="md" weight="semibold" center color="primary" numberOfLines={1}>
+            {String(facts['title'] ?? '')}
+          </AppText>
+        </Card>
+      ) : null}
 
+      {phase === 'revealing' && preview ? (
+        <>
           <Button
-            label={showTradition ? '收起传统解签' : '看传统解签'}
+            label="看签文与解签"
             variant="secondary"
             icon={<Ionicons name="book-outline" size={18} color={colors.primary} />}
-            onPress={() => setShowTradition((v) => !v)}
-            style={styles.actionBtn}
+            onPress={() => setShowTradition(true)}
           />
-          {showTradition ? (
-            <Card title="传统解签 · 只读">
-              <AppText size="sm" style={styles.interp}>
-                {String(tradition['interpretation'] ?? '暂无')}
-              </AppText>
-              <AppText size="sm" color="textSecondary" style={styles.advice}>
-                建议：{String(tradition['advice'] ?? '暂无')}
-              </AppText>
-            </Card>
-          ) : null}
-
           <Button
             label="保存并 AI 解签"
             icon={<Ionicons name="sparkles" size={18} color={colors.onPrimary} />}
             loading={create.loading || patch.loading}
             onPress={onSaveAi}
-            style={styles.actionBtn}
           />
           {mode === 'daily' ? (
             <AppText size="xs" color="muted" center style={styles.dailyNote}>
@@ -398,12 +391,42 @@ export default function QianjiScreen(): React.JSX.Element {
           ) : (
             <Button label="再来一签" variant="ghost" onPress={reset} />
           )}
-        </Animated.View>
+        </>
       ) : null}
 
       <AppText size="xs" color="muted" center style={styles.disclaimer}>
         签文解签属传统文化娱乐参考
       </AppText>
+
+      {/* ---------- 签文与解签（长内容收进弹层） ---------- */}
+      <InfoPopup
+        visible={showTradition}
+        onClose={() => setShowTradition(false)}
+        title="签文与解签"
+        subtitle={rollNumber === null ? '' : `第 ${rollNumber} 签 · ${level}`}
+      >
+        {poem.map((line, i) => (
+          <AppText key={i} size="md" center style={styles.poemLine}>
+            {line}
+          </AppText>
+        ))}
+        <KeyValueRow
+          label="种子"
+          value={seedUsed === null ? '' : `${seedUsed}${mode === 'daily' ? '（今日一签，可复现）' : ''}`}
+        />
+        <KeyValueRow label="签库" value={String(facts['set_name'] ?? '')} last />
+        {String(tradition['source_note'] ?? '') ? (
+          <AppText size="xs" color="muted" style={styles.sourceNote}>
+            {String(tradition['source_note'])}
+          </AppText>
+        ) : null}
+        <AppText size="sm" style={styles.interp}>
+          {String(tradition['interpretation'] ?? '暂无')}
+        </AppText>
+        <AppText size="sm" color="textSecondary" style={styles.advice}>
+          建议：{String(tradition['advice'] ?? '暂无')}
+        </AppText>
+      </InfoPopup>
     </Screen>
   );
 }
@@ -416,19 +439,18 @@ const styles = StyleSheet.create({
     borderRadius: radius.lg,
     borderWidth: 1,
     borderColor: colors.border,
-    paddingVertical: space[3],
-    marginBottom: space[3],
+    paddingVertical: space[2],
   },
   lampRow: {
     flexDirection: 'row',
     justifyContent: 'center',
     gap: space[2],
-    marginBottom: space[2],
+    marginBottom: space[1],
   },
   lamp: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#E0A92E' },
-  marqueeSub: { marginTop: space[1] },
-  spacer: { height: space[3] },
-  stage: { alignItems: 'center', marginBottom: space[2] },
+  marqueeSub: { marginTop: 1 },
+  stageSlot: { overflow: 'visible' },
+  stage: { alignItems: 'center' },
   sticksArea: {
     width: TUBE_W + 90,
     height: 120,
@@ -481,31 +503,29 @@ const styles = StyleSheet.create({
   },
   tubeText: { color: '#F5EDD8', fontSize: 40 },
   bigButton: {
-    marginTop: space[4],
+    marginTop: space[2],
     backgroundColor: '#C0392B',
     borderRadius: 999,
-    paddingVertical: space[4],
+    paddingVertical: space[3],
     borderBottomWidth: 6,
     borderBottomColor: '#7E241A',
   },
   bigButtonPressed: { transform: [{ scale: 0.96 }], borderBottomWidth: 2 },
   bigButtonBusy: {
-    marginTop: space[4],
+    marginTop: space[2],
     borderRadius: 999,
-    paddingVertical: space[4],
+    paddingVertical: space[3],
     backgroundColor: colors.surfaceAlt,
     borderWidth: 1,
     borderColor: colors.border,
   },
   bigButtonText: { color: '#FFFFFF' },
   bigButtonSub: { color: '#F5CBA7', marginTop: 2 },
-  actionBtn: { marginTop: space[3] },
   levelText: { marginBottom: space[2], letterSpacing: 2 },
-  signTitle: { marginBottom: space[3] },
-  poemLine: { lineHeight: 30 },
+  poemLine: { lineHeight: 28 },
   interp: { lineHeight: 22 },
   advice: { lineHeight: 22, marginTop: space[2] },
-  dailyNote: { marginTop: space[3] },
-  sourceNote: { marginTop: space[2], lineHeight: 18 },
-  disclaimer: { marginTop: space[4], marginBottom: space[2] },
+  dailyNote: { marginTop: space[2] },
+  sourceNote: { lineHeight: 18 },
+  disclaimer: { marginTop: space[1] },
 });

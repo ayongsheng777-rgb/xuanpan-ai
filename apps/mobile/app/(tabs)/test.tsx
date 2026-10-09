@@ -1,5 +1,5 @@
 /**
- * 测盘 —— 参考图第 7 屏「请选择数据来源」。
+ * 测盘 —— 单屏道具阵（2026-10-09 重设计）。
  *
  * 这一页存在的意义是**把五条来源摆在一起**，而不是让用户在首页猜。
  * 五条来源的产物是同一样东西（一份坐向数据），但可信度与代价差别很大：
@@ -15,19 +15,25 @@
  *
  * 🔴 本页不显示任何"当前方位/磁场"读数。那是传感器页的职责（一页一事）——
  * 在这里显示一个读数为 0° 的静态罗盘，会被读成"方位就是 0°"。
+ *
+ * ## 单屏做法
+ *
+ * 五块按「2×2 + 1 居中」排（玄学科技风规范的原话），三行**等高平分**剩余高度：
+ * 行用 `flex: 1` 而不是固定高度，屏幕高时块自己长高，不留大片空白；
+ * 屏幕矮时也不会溢出（块内文字固定两行、图标固定 44）。
+ * 详细说明（desc/caveat）收进每块右上角的问号弹层，页面只留"选哪个"的决策信息。
  */
 
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import React, { useState } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import React from 'react';
+import { StyleSheet, View } from 'react-native';
 
 import { AppText } from '@/components/AppText';
-import { Button, PressablePanel } from '@/components/Card';
-import { HelpButton } from '@/components/HelpButton';
-import { InfoPopup } from '@/components/InfoPopup';
-import { Screen } from '@/components/Screen';
-import { colors, instrument, radius, space } from '@/theme/tokens';
+import { InstrumentBlock } from '@/components/InstrumentBlock';
+import { PageHeader } from '@/components/PageHeader';
+import { FitSlot, Screen } from '@/components/Screen';
+import { instrument, space } from '@/theme/tokens';
 
 type SourceKey = 'camera' | 'library' | 'sensor' | 'manual' | 'template';
 
@@ -91,115 +97,59 @@ const SOURCES: readonly Source[] = [
 export default function TestScreen(): React.JSX.Element {
   const router = useRouter();
 
+  /** 前四块按 2×2 排，第五块单独一行居中 —— 见文件头注释 */
+  const firstFour = SOURCES.slice(0, 4);
+  const last = SOURCES[4]!;
+
+  const renderBlock = (s: Source) => (
+    <InstrumentBlock
+      key={s.key}
+      title={s.title}
+      desc={s.desc}
+      bound={s.caveat}
+      width="auto"
+      minHeight={0}
+      fill
+      icon={<Ionicons name={s.icon} size={26} color={instrument.accent} />}
+      onPress={() => router.push(s.href as never)}
+    />
+  );
+
   return (
     <Screen style={styles.root}>
-      {/*
-        一屏布局（2026-10-08 用户要求 BUG 6）：不滚动、积木式宫格。
-        五个来源做成 2 列积木块，一屏放下；每块的详细说明（desc/caveat）
-        收进弹出框，点右上角小问号看 —— 页面只留"选哪个"的决策信息。
-      */}
-      <View style={styles.headerRow}>
-        <AppText size="xl" weight="bold" color={instrument.text} track="tight">
-          测盘
-        </AppText>
-        <HelpButton topic="test" color={instrument.textSecondary} />
-      </View>
+      <PageHeader title="测盘" subtitle="请选择数据来源" helpTopic="test" />
 
-      <AppText size="md" weight="medium" color={instrument.text} style={styles.sectionLead}>
-        请选择数据来源
-      </AppText>
+      {/* 道具阵：2×2 + 1 居中，三行等高平分剩余高度 */}
+      <FitSlot weight={1}>
+        <View style={styles.grid}>
+          <View style={styles.row}>
+            <View style={styles.cell}>{renderBlock(firstFour[0]!)}</View>
+            <View style={styles.cell}>{renderBlock(firstFour[1]!)}</View>
+          </View>
+          <View style={styles.row}>
+            <View style={styles.cell}>{renderBlock(firstFour[2]!)}</View>
+            <View style={styles.cell}>{renderBlock(firstFour[3]!)}</View>
+          </View>
+          {/* 第五块居中，宽度与上面四块一致（48% ≈ 半宽减间隙） */}
+          <View style={styles.rowCenter}>
+            <View style={styles.cellHalf}>{renderBlock(last)}</View>
+          </View>
+        </View>
+      </FitSlot>
 
-      <View style={styles.grid}>
-        {SOURCES.map((s) => (
-          <SourceBlock key={s.key} source={s} onPress={() => router.push(s.href as never)} />
-        ))}
-      </View>
-
-      <AppText size="xs" color={instrument.muted} style={styles.footLine}>
+      <AppText size="xs" color={instrument.muted} numberOfLines={2} style={styles.foot}>
         五条来源最终都汇入同一条确认管线 —— 坐向必须经你确认才会进入计算。
       </AppText>
     </Screen>
   );
 }
 
-/**
- * 积木块：图标 + 标题，点块进入；点右上角小问号弹出详细说明。
- * 一块只做一件事，字越少越好 —— 详情在弹出框里。
- */
-function SourceBlock({ source, onPress }: { source: Source; onPress: () => void }): React.JSX.Element {
-  const [infoOpen, setInfoOpen] = useState(false);
-  return (
-    <>
-      <PressablePanel
-        onPress={onPress}
-        accessibilityLabel={`${source.title}：${source.desc}`}
-        style={styles.blockWrap}
-        contentStyle={styles.block}
-      >
-        <View style={styles.blockIcon}>
-          <Ionicons name={source.icon} size={24} color={instrument.accent} />
-        </View>
-        <AppText size="sm" weight="semibold" color={instrument.text} center style={styles.blockTitle}>
-          {source.title}
-        </AppText>
-        <Pressable
-          onPress={() => setInfoOpen(true)}
-          hitSlop={10}
-          accessibilityRole="button"
-          accessibilityLabel={`${source.title}的详细说明`}
-          style={styles.blockInfo}
-        >
-          <Ionicons name="information-circle-outline" size={18} color={instrument.muted} />
-        </Pressable>
-      </PressablePanel>
-
-      <InfoPopup
-        visible={infoOpen}
-        onClose={() => setInfoOpen(false)}
-        title={source.title}
-        subtitle="选之前先看看"
-      >
-        <AppText size="sm" color={colors.text} style={styles.popupBody}>
-          {source.desc}
-        </AppText>
-        {source.caveat ? (
-          <AppText size="sm" color={colors.textSecondary} style={styles.popupBody}>
-            注意：{source.caveat}
-          </AppText>
-        ) : null}
-        <Button label={`进入${source.title}`} onPress={() => { setInfoOpen(false); onPress(); }} />
-      </InfoPopup>
-    </>
-  );
-}
-
 const styles = StyleSheet.create({
   root: { backgroundColor: instrument.bg },
-  headerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  sectionLead: { marginTop: space[2], marginBottom: space[2] },
-  /* 积木宫格：2 列，一屏放下 5 块（2026-10-08 用户反馈：必须真一屏，不滚动） */
-  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: space[2] },
-  blockWrap: { width: '48%', flexGrow: 1 },
-  block: {
-    alignItems: 'center',
-    gap: space[1],
-    paddingVertical: space[2],
-    minHeight: 104,
-  },
-  blockIcon: {
-    width: 44,
-    height: 44,
-    borderRadius: radius.md,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: instrument.surfaceAlt,
-  },
-  blockTitle: { lineHeight: 20 },
-  blockInfo: { position: 'absolute', top: space[1], right: space[1], padding: space[1] },
-  popupBody: { lineHeight: 24 },
-  footLine: { marginTop: space[2], lineHeight: 16 },
+  grid: { flex: 1, gap: space[2] },
+  row: { flexDirection: 'row', flex: 1, gap: space[2] },
+  rowCenter: { flexDirection: 'row', flex: 1, justifyContent: 'center' },
+  cell: { flex: 1 },
+  cellHalf: { width: '48%' },
+  foot: { lineHeight: 16 },
 });

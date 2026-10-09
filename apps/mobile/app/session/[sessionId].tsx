@@ -9,6 +9,20 @@
  * 一个容易被忽略但必须显示的东西：`build_error`。内核升级后旧输入可能不再成立
  * （例如某个字段的取值被收紧），此时后端的做法是**如实报"算不出来"**而不是返回空结果。
  * 界面必须显式呈现它 —— 否则用户看到的是"盘面空了一格"，会以为是自己没填。
+ *
+ * ## 2026-10-09 单屏化
+ *
+ * 原先是一整页长滚动：记录 / 坐向确认 / 盘面还原 / 识别原件 / 原始输入 /
+ * 盘面事实 / 传统分析 / 不确定性 依次堆叠，要滚好几屏。
+ * 现在按「用户来看什么」收进四个分段（`SegmentedTabs`），同一时刻只占一份空间：
+ *
+ *   概览 —— 这条记录是什么 + 坐向确认状态
+ *   盘面 —— 按当前内核重算出来的盘面还原
+ *   输入 —— 你当初填了什么（识别原件 + 原始输入）
+ *   结果 —— 盘面事实 + 传统分析 + 不确定性
+ *
+ * 各术式区块（按模块名分组的多条记录）走 `FoldList`：页内只放前几条，
+ * 其余进「更多」浮层。业务逻辑一字未动，只重排版面。
  */
 
 import { Ionicons } from '@expo/vector-icons';
@@ -23,7 +37,10 @@ import { Banner, UncertaintyList } from '@/components/Banner';
 import { Button, Card, EmptyState, KeyValueRow } from '@/components/Card';
 import { CompassDial } from '@/components/CompassDial';
 import { FactList } from '@/components/FactList';
-import { Screen } from '@/components/Screen';
+import { FoldList } from '@/components/FoldList';
+import { PageHeader } from '@/components/PageHeader';
+import { FitSlot, Screen } from '@/components/Screen';
+import { SegmentedTabs } from '@/components/SegmentedTabs';
 import { initialRotationFor } from '@/lib/compassDial';
 import { DEFAULT_DIAL_STYLE } from '@/lib/dialStyle';
 import { indexOfName } from '@/lib/ring24';
@@ -52,6 +69,15 @@ const ORIGIN_LABEL: Record<string, string> = {
   import: '导入',
 };
 
+type Section = 'overview' | 'dial' | 'input' | 'result';
+
+const SECTIONS = [
+  { key: 'overview' as const, label: '概览' },
+  { key: 'dial' as const, label: '盘面' },
+  { key: 'input' as const, label: '输入' },
+  { key: 'result' as const, label: '结果' },
+];
+
 export default function SessionDetailScreen(): React.JSX.Element {
   const router = useRouter();
   const { sessionId } = useLocalSearchParams<{ sessionId?: string }>();
@@ -60,6 +86,8 @@ export default function SessionDetailScreen(): React.JSX.Element {
   const api = useMemo(() => getApiClient(), []);
   const session = useAsync(useCallback(() => api.getSession(id), [api, id]), [id]);
 
+  const [section, setSection] = useState<Section>('overview');
+
   /**
    * 盘面可用宽度。
    *
@@ -67,9 +95,12 @@ export default function SessionDetailScreen(): React.JSX.Element {
    * 320pt 的老机型上这个值只有 256 —— 写死 280 会**溢出被裁掉一小圈**，
    * 而盘面恰恰是"看排位对不对"用的，缺一圈就失效了，且不会报任何错。
    * 故先量再画（未量到之前不渲染，避免先用一个会溢出的尺寸画一帧）。
+   *
+   * 上限取 260（原来是 320）：盘面还原单独占一个分段，分段高度有限，
+   * 260 既看得清排位，又不会把下方的说明挤出可视区。
    */
   const [dialBox, setDialBox] = useState(0);
-  const dialSize = Math.min(320, dialBox);
+  const dialSize = Math.min(260, dialBox);
 
   const remove = useSubmit(useCallback(() => api.deleteSession(id), [api, id]));
 
@@ -155,162 +186,123 @@ export default function SessionDetailScreen(): React.JSX.Element {
   });
 
   return (
-    <Screen scroll bottomInsetExtra={space[10]}>
-      <Card title="记录">
-        <AppText size="lg" weight="semibold" color="primary">
-          {d.title || '未命名'}
-        </AppText>
-        <View style={styles.chipRow}>
-          {d.modules.length > 0 ? (
-            d.modules.map((m: ModuleName) => (
-              <View key={m} style={styles.chip}>
-                <AppText size="xs" color="textSecondary">
-                  {MODULE_LABEL[m] ?? m}
-                </AppText>
-              </View>
-            ))
-          ) : (
-            <AppText size="xs" color="muted">
-              尚未录入任何信息
-            </AppText>
-          )}
-          {hasReport ? (
-            <View style={[styles.chip, styles.chipReport]}>
-              <AppText size="xs" color="primary">
-                {d.report_count} 份报告
-              </AppText>
-            </View>
-          ) : null}
-        </View>
-
-        <View style={styles.kvBlock}>
-          {d.question.category ? (
-            <KeyValueRow label="所问类别" value={d.question.category} />
-          ) : null}
-          {d.question.text ? <KeyValueRow label="问题" value={d.question.text} /> : null}
-          <KeyValueRow label="来源" value={ORIGIN_LABEL[d.origin] ?? d.origin} />
-          <KeyValueRow label="创建时间" value={formatStamp(d.created_at)} />
-          <KeyValueRow label="最近更新" value={formatStamp(d.updated_at)} last />
-        </View>
-      </Card>
+    <Screen bottomInsetExtra={space[4]}>
+      <PageHeader
+        title="会话详情"
+        back
+        helpTopic="session"
+        tone="light"
+        subtitle={d.title || '未命名'}
+      />
 
       {d.build_error ? (
         <Banner tone="error" title="这份记录当前算不出来">
           {d.build_error}
-          {'\n'}这通常意味着录入的内容在内核升级后不再成立。原始输入仍完整保留在下方，
-          可以据此重新录入。
+          {'\n'}这通常意味着录入的内容在内核升级后不再成立。原始输入仍完整保留在「输入」标签里。
         </Banner>
       ) : null}
 
-      {d.confirm_state ? (
-        <Card title="坐向确认">
-          <AppText size="xl" weight="bold" color="primary" style={styles.confirmMain}>
-            坐 {d.confirm_state.sitting} 山 ／ 向 {d.confirm_state.facing} 山
-          </AppText>
-          {d.confirm_state.degree !== null ? (
-            <AppText size="sm" color="textSecondary" style={styles.confirmSub}>
-              提交角度 {d.confirm_state.degree.toFixed(2)}°
-            </AppText>
-          ) : (
-            <AppText size="sm" color="muted" style={styles.confirmSub}>
-              未提交实测角度，分金按山心角计算
-            </AppText>
-          )}
-          {d.confirm_state.user_note ? (
-            <AppText size="sm" color="textSecondary" style={styles.confirmNote}>
-              备注：{d.confirm_state.user_note}
-            </AppText>
-          ) : null}
-          <AppText size="xs" color="muted" style={styles.confirmHint}>
-            已由你确认（RULE-004）。照片识别原件单独保留在下方，便于核对当时依据。
-          </AppText>
-        </Card>
-      ) : d.recognition?.compass_detected ? (
-        <Banner tone="warning" title="识别结果尚未确认">
-          这张照片识别出了候选坐向，但还没有经过你的确认，因此不计入计算。
-        </Banner>
-      ) : null}
+      <SegmentedTabs items={SECTIONS} value={section} onChange={setSection} />
 
-      {archivedSitting >= 0 ? (
-        <Card title="盘面还原">
-          <View
-            style={styles.dialWrap}
-            onLayout={(e) => setDialBox(e.nativeEvent.layout.width)}
-          >
-            {dialBox > 0 ? (
-              <CompassDial
-                size={dialSize}
-                style={DEFAULT_DIAL_STYLE}
-                sitting={archivedSitting}
-                measuredDegree={d.confirm_state?.degree ?? null}
-                rotation={archivedRotation}
-              />
-            ) : null}
-          </View>
-          <AppText size="xs" color="muted" center style={styles.dialHint}>
-            顶部读数是当年的坐山方向（有实测角就按实测角，否则按山心角）。
-            {'\n'}
-            这是按当前内核重算出来的盘面，不是存档里的截图；盘式（层数）属显示设置、
-            不随记录存档，故这里用与其它页面相同的盘式。
-          </AppText>
-        </Card>
-      ) : null}
+      <FitSlot weight={1}>
+        {section === 'overview' ? (
+          <>
+            <Card title="记录">
+              <View style={styles.chipRow}>
+                {d.modules.length > 0 ? (
+                  d.modules.map((m: ModuleName) => (
+                    <View key={m} style={styles.chip}>
+                      <AppText size="xs" color="textSecondary">
+                        {MODULE_LABEL[m] ?? m}
+                      </AppText>
+                    </View>
+                  ))
+                ) : (
+                  <AppText size="xs" color="muted">
+                    尚未录入任何信息
+                  </AppText>
+                )}
+                {hasReport ? (
+                  <View style={[styles.chip, styles.chipReport]}>
+                    <AppText size="xs" color="primary">
+                      {d.report_count} 份报告
+                    </AppText>
+                  </View>
+                ) : null}
+              </View>
 
-      {d.recognition ? <RecognitionBlock recognition={d.recognition} /> : null}
+              <View style={styles.kvBlock}>
+                {d.question.category ? (
+                  <KeyValueRow label="所问类别" value={d.question.category} />
+                ) : null}
+                {d.question.text ? <KeyValueRow label="问题" value={d.question.text} /> : null}
+                <KeyValueRow label="来源" value={ORIGIN_LABEL[d.origin] ?? d.origin} />
+                <KeyValueRow label="创建时间" value={formatStamp(d.created_at)} />
+                <KeyValueRow label="最近更新" value={formatStamp(d.updated_at)} last />
+              </View>
+            </Card>
 
-      {d.modules.length > 0 ? (
-        <Card title="已录入的原始输入">
-          {Object.entries(d.inputs).map(([column, value]) => {
-            if (!value || Object.keys(value).length === 0) return null;
-            return (
-              <View key={column} style={styles.inputBlock}>
-                <AppText size="sm" weight="semibold" color="primary">
-                  {INPUT_LABEL[column] ?? column}
+            {d.confirm_state ? (
+              <Card title="坐向确认">
+                <AppText size="xl" weight="bold" color="primary" style={styles.confirmMain}>
+                  坐 {d.confirm_state.sitting} 山 ／ 向 {d.confirm_state.facing} 山
                 </AppText>
-                <View style={styles.inputInner}>
-                  <FactList data={value} />
-                </View>
-              </View>
-            );
-          })}
-          <AppText size="xs" color="muted" style={styles.storageNote}>
-            这里存的是你输入的原文，不是计算结果 —— 计算结果每次打开都按当前内核重算，
-            所以内核升级后不会出现"库里一份、内核一份"的两套数据。
-          </AppText>
-        </Card>
-      ) : null}
+                {d.confirm_state.degree !== null ? (
+                  <AppText size="sm" color="textSecondary" style={styles.confirmSub}>
+                    提交角度 {d.confirm_state.degree.toFixed(2)}°
+                  </AppText>
+                ) : (
+                  <AppText size="sm" color="muted" style={styles.confirmSub}>
+                    未提交实测角度，分金按山心角计算
+                  </AppText>
+                )}
+                {d.confirm_state.user_note ? (
+                  <AppText size="sm" color="textSecondary" numberOfLines={2} style={styles.confirmNote}>
+                    备注：{d.confirm_state.user_note}
+                  </AppText>
+                ) : null}
+                <AppText size="xs" color="muted" numberOfLines={2} style={styles.confirmHint}>
+                  已由你确认（RULE-004）。照片识别原件单独保留在「输入」标签，便于核对当时依据。
+                </AppText>
+              </Card>
+            ) : d.recognition?.compass_detected ? (
+              <Banner tone="warning" title="识别结果尚未确认">
+                这张照片识别出了候选坐向，但还没有经过你的确认，因此不计入计算。
+              </Banner>
+            ) : null}
+          </>
+        ) : null}
 
-      {Object.keys(d.facts).length > 0 ? (
-        <Card title="盘面事实（只读，重算结果）">
-          {Object.entries(d.facts).map(([key, value]) => (
-            <View key={key} style={styles.inputBlock}>
-              <AppText size="sm" weight="semibold" color="primary">
-                {MODULE_LABEL[key] ?? key}
+        {section === 'dial' ? (
+          archivedSitting >= 0 ? (
+            <Card title="盘面还原">
+              <View
+                style={styles.dialWrap}
+                onLayout={(e) => setDialBox(e.nativeEvent.layout.width)}
+              >
+                {dialBox > 0 ? (
+                  <CompassDial
+                    size={dialSize}
+                    style={DEFAULT_DIAL_STYLE}
+                    sitting={archivedSitting}
+                    measuredDegree={d.confirm_state?.degree ?? null}
+                    rotation={archivedRotation}
+                  />
+                ) : null}
+              </View>
+              <AppText size="xs" color="muted" center numberOfLines={3} style={styles.dialHint}>
+                顶部读数是当年的坐山方向（有实测角就按实测角，否则按山心角）。
+                这是按当前内核重算出来的盘面，不是存档里的截图。
               </AppText>
-              <View style={styles.inputInner}>
-                <FactList data={value} />
-              </View>
-            </View>
-          ))}
-        </Card>
-      ) : null}
+            </Card>
+          ) : (
+            <EmptyState title="没有可还原的盘面" hint="这份记录没有已确认的坐向。" />
+          )
+        ) : null}
 
-      {Object.keys(d.tradition).length > 0 ? (
-        <Card title="传统分析（只读）">
-          {Object.entries(d.tradition).map(([key, value]) => (
-            <View key={key} style={styles.inputBlock}>
-              <AppText size="sm" weight="semibold" color="primary">
-                {MODULE_LABEL[key] ?? key}
-              </AppText>
-              <View style={styles.inputInner}>
-                <FactList data={value} />
-              </View>
-            </View>
-          ))}
-        </Card>
-      ) : null}
-
-      <UncertaintyList items={d.uncertainties} />
+        {section === 'input' ? <InputSection d={d} /> : null}
+        {section === 'result' ? <ResultSection d={d} /> : null}
+      </FitSlot>
 
       <Button
         label={hasReport ? '查看 / 重新生成报告' : '生成 AI 解读报告'}
@@ -340,6 +332,100 @@ export default function SessionDetailScreen(): React.JSX.Element {
         </AppText>
       </Pressable>
     </Screen>
+  );
+}
+
+// ==========================================================================
+// 「输入」分段 —— 识别原件 + 原始输入
+// ==========================================================================
+
+function InputSection({ d }: { d: SessionDetail }): React.JSX.Element {
+  /** 只保留真的填过的列；null / 空对象是"这一项没录入"，不是"数据丢了" */
+  const inputs = Object.entries(d.inputs).filter(
+    (entry): entry is [string, Record<string, unknown>] =>
+      entry[1] !== null && Object.keys(entry[1]).length > 0,
+  );
+
+  return (
+    <>
+      {d.recognition ? <RecognitionBlock recognition={d.recognition} /> : null}
+
+      {d.modules.length > 0 ? (
+        <Card title="已录入的原始输入">
+          <FoldList
+            items={inputs}
+            max={2}
+            keyOf={([column]) => column}
+            moreTitle="全部原始输入"
+            tone="light"
+            renderItem={([column, value]) => (
+              <View>
+                <AppText size="sm" weight="semibold" color="primary">
+                  {INPUT_LABEL[column] ?? column}
+                </AppText>
+                <View style={styles.inputInner}>
+                  <FactList data={value} />
+                </View>
+              </View>
+            )}
+            empty={
+              <AppText size="sm" color="muted">
+                没有可展示的原始输入。
+              </AppText>
+            }
+          />
+          <AppText size="xs" color="muted" numberOfLines={2} style={styles.storageNote}>
+            这里存的是你输入的原文，不是计算结果 —— 计算结果每次打开都按当前内核重算。
+          </AppText>
+        </Card>
+      ) : null}
+    </>
+  );
+}
+
+// ==========================================================================
+// 「结果」分段 —— 盘面事实 + 传统分析 + 不确定性
+// ==========================================================================
+
+function ResultSection({ d }: { d: SessionDetail }): React.JSX.Element {
+  const facts = Object.entries(d.facts).filter(([, v]) => Object.keys(v).length > 0);
+  const tradition = Object.entries(d.tradition).filter(([, v]) => Object.keys(v).length > 0);
+
+  return (
+    <>
+      {facts.length > 0 ? (
+        <FoldList
+          items={facts}
+          /* 每个模块块都比较高，一屏只放 2 块；其余进「更多」浮层（浮层可滚） */
+          max={2}
+          keyOf={([key]) => key}
+          moreTitle="全部盘面事实"
+          tone="light"
+          renderItem={([key, value]) => (
+            <Card title={MODULE_LABEL[key] ?? key}>
+              <FactList data={value} />
+            </Card>
+          )}
+        />
+      ) : null}
+
+      {tradition.length > 0 ? (
+        <FoldList
+          items={tradition}
+          max={2}
+          keyOf={([key]) => key}
+          moreTitle="全部传统分析"
+          tone="light"
+          renderItem={([key, value]) => (
+            <Card title={MODULE_LABEL[key] ?? key}>
+              <FactList data={value} />
+            </Card>
+          )}
+        />
+      ) : null}
+
+      <UncertaintyList items={d.uncertainties} />
+    </>
   );
 }
 
@@ -378,9 +464,8 @@ function RecognitionBlock({
         </View>
       ) : null}
 
-      <AppText size="xs" color="muted" style={styles.recogNote}>
-        识别原件不被你的确认结果覆盖 —— 这样"当时机器看到了什么"与"你最终怎么定"
-        永远是两条独立可核对的记录。
+      <AppText size="xs" color="muted" numberOfLines={2} style={styles.recogNote}>
+        识别原件不被你的确认结果覆盖 —— "当时机器看到了什么"与"你最终怎么定"是两条独立可核对的记录。
       </AppText>
     </Card>
   );
@@ -423,11 +508,10 @@ const styles = StyleSheet.create({
   regionBlock: { marginTop: space[2], gap: 2 },
   regionLine: { lineHeight: 17 },
 
-  inputBlock: { marginTop: space[3] },
   inputInner: { marginTop: space[1] },
   storageNote: { marginTop: space[3], lineHeight: 16 },
 
   delErr: { marginTop: space[3] },
-  deleteRow: { alignItems: 'center', paddingVertical: space[5] },
+  deleteRow: { alignItems: 'center', paddingVertical: space[3] },
   delHint: { marginTop: space[1] },
 });

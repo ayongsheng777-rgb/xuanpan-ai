@@ -1,10 +1,22 @@
 /**
- * 我的 —— 设置与说明。
+ * 我的 —— 设置与说明（2026-10-09 单屏重设计）。
  *
  * ⚠️ **本页不提供模型 API Key 的录入**（AGENTS.md §5.5 红线：密钥不进 APK、
  * 不写死在 JS、不返回前端）。模型能力与可用性一律从服务端
  * `/meta/ai-providers` 读取后**只读展示** ——
  * 客户端只负责告诉用户"服务端现在能用什么"，密钥始终留在服务端。
+ *
+ * ## 单屏做法：分段标签替代滚动
+ *
+ * 本页原有 6 张卡（AI 模型 / 我的信息 / 网络线路 / 隐私与数据 / 数据管理 / 关于），
+ * 竖排下来要滚两屏多。现在收进三个分段标签：
+ *
+ *   模型 —— 服务端可用模型（只读）+ 配置入口
+ *   我的 —— 我的信息（本地）+ 网络线路（后端地址）
+ *   关于 —— 隐私与数据 + 版本与底线
+ *
+ * 同一时刻只显示一组，**没有一组需要滚动**。分段的划分依据是"用户来找什么"：
+ * 想知道"AI 现在能用哪个"去模型，想改地址/生日去我的，其余归关于。
  */
 
 import { Ionicons } from '@expo/vector-icons';
@@ -25,14 +37,27 @@ import type { AiProvidersResponse, CapabilitiesResponse } from '@/api/types';
 import { AppText } from '@/components/AppText';
 import { Banner } from '@/components/Banner';
 import { Button, Card, Divider, KeyValueRow } from '@/components/Card';
+import { FoldList } from '@/components/FoldList';
+import { InfoPopup } from '@/components/InfoPopup';
+import { PageHeader } from '@/components/PageHeader';
 import { Screen } from '@/components/Screen';
+import { SegmentedTabs } from '@/components/SegmentedTabs';
 import { useAsync, useSubmit } from '@/lib/useAsync';
 import { colors, radius, space, tint } from '@/theme/tokens';
 
 const APP_VERSION = '0.1.0';
 
+type Section = 'model' | 'mine' | 'about';
+
+const SECTIONS = [
+  { key: 'model' as const, label: '模型' },
+  { key: 'mine' as const, label: '我的' },
+  { key: 'about' as const, label: '关于' },
+];
+
 export default function MineScreen(): React.JSX.Element {
   const router = useRouter();
+  const [section, setSection] = useState<Section>('model');
 
   const load = useCallback(async () => {
     const client = getApiClient();
@@ -47,19 +72,39 @@ export default function MineScreen(): React.JSX.Element {
   const { data, loading, error, reload } = useAsync(load, []);
 
   return (
-    <Screen scroll onRefresh={reload} refreshing={loading && data !== null}>
+    <Screen>
+      <PageHeader
+        title="我的"
+        helpTopic="mine"
+        tone="light"
+        onRefresh={reload}
+        refreshing={loading && data !== null}
+      />
+
+      <SegmentedTabs items={SECTIONS} value={section} onChange={setSection} />
+
       {error ? (
         <Banner tone="error" title="无法读取服务端配置">
-          {error}
+          <AppText size="sm">{error}</AppText>
         </Banner>
       ) : null}
 
-      <AiModelCard data={data?.providers ?? null} />
-      <ProfileCard onGoProfile={() => router.push('/profile')} />
-      <NetworkCard onApplied={reload} />
-      <PrivacyCard caps={data?.caps ?? null} />
-      <DataCard onGoHistory={() => router.push('/history')} />
-      <AboutCard disclaimer={data?.disclaimer ?? null} />
+      {section === 'model' ? <AiModelCard data={data?.providers ?? null} /> : null}
+
+      {section === 'mine' ? (
+        <>
+          <ProfileCard onGoProfile={() => router.push('/profile')} />
+          <NetworkCard onApplied={reload} />
+        </>
+      ) : null}
+
+      {section === 'about' ? (
+        <>
+          <PrivacyCard caps={data?.caps ?? null} />
+          <DataCard onGoHistory={() => router.push('/history')} />
+          <AboutCard disclaimer={data?.disclaimer ?? null} />
+        </>
+      ) : null}
     </Screen>
   );
 }
@@ -70,6 +115,8 @@ export default function MineScreen(): React.JSX.Element {
 
 function AiModelCard({ data }: { data: AiProvidersResponse | null }): React.JSX.Element {
   const router = useRouter();
+  const providers = data?.providers ?? [];
+
   return (
     <Card title="AI 模型">
       <AppText size="xs" color="muted" style={styles.note}>
@@ -81,33 +128,34 @@ function AiModelCard({ data }: { data: AiProvidersResponse | null }): React.JSX.
           读取中…
         </AppText>
       ) : (
-        data.providers.map((p, i, arr) => (
-          <View key={p.id} style={styles.providerRow}>
-            <View style={styles.providerHead}>
-              <AppText size="md" weight="medium">
-                {p.name}
-              </AppText>
-              <View
-                style={[
-                  styles.statusPill,
-                  { backgroundColor: p.available ? tint.jadePill : colors.surfaceAlt },
-                ]}
-              >
-                <AppText size="xs" color={p.available ? 'success' : 'muted'}>
-                  {p.available ? '可用' : p.requires_api_key ? '未配置密钥' : '不可用'}
+        <FoldList
+          items={providers}
+          max={3}
+          keyOf={(p) => p.id}
+          moreTitle="全部模型"
+          renderItem={(p) => (
+            <View style={styles.providerRow}>
+              <View style={styles.providerHead}>
+                <AppText size="md" weight="medium" numberOfLines={1} style={styles.providerName}>
+                  {p.name}
                 </AppText>
+                <View
+                  style={[
+                    styles.statusPill,
+                    { backgroundColor: p.available ? tint.jadePill : colors.surfaceAlt },
+                  ]}
+                >
+                  <AppText size="xs" color={p.available ? 'success' : 'muted'}>
+                    {p.available ? '可用' : p.requires_api_key ? '未配置密钥' : '不可用'}
+                  </AppText>
+                </View>
               </View>
+              <AppText size="xs" color="textSecondary" numberOfLines={1} style={styles.providerDesc}>
+                {p.description} · 成本：{p.cost}
+              </AppText>
             </View>
-            <AppText size="xs" color="textSecondary" style={styles.providerDesc}>
-              {p.description}
-            </AppText>
-            <AppText size="xs" color="muted" style={styles.providerCost}>
-              成本：{p.cost}
-              {i === arr.length - 1 ? '' : ''}
-            </AppText>
-            {i < arr.length - 1 ? <Divider /> : null}
-          </View>
-        ))
+          )}
+        />
       )}
       <Button label="配置模型" onPress={() => router.push('/ai-model')} />
     </Card>
@@ -176,8 +224,7 @@ function NetworkCard({ onApplied }: { onApplied: () => void }): React.JSX.Elemen
   return (
     <Card title="网络线路">
       <AppText size="xs" color="muted" style={styles.note}>
-        后端服务地址。默认 {resolveBaseUrl()}。
-        真机需改成运行后端那台机器的地址（如 http://192.168.1.10:8360）。
+        后端服务地址。默认 {resolveBaseUrl()}。真机需改成运行后端那台机器的地址。
       </AppText>
 
       <TextInput
@@ -205,15 +252,11 @@ function NetworkCard({ onApplied }: { onApplied: () => void }): React.JSX.Elemen
         </AppText>
       ) : null}
       {applied ? (
-        <AppText size="sm" color="success" style={styles.applyMsg}>
+        <AppText size="sm" color="success" numberOfLines={1} style={styles.applyMsg}>
           ✓ 已保存并连接到 {applied}，下次打开 App 仍然用这个地址
         </AppText>
       ) : null}
 
-      <AppText size="xs" color="muted" style={styles.note}>
-        手设的地址会一直记住，除非你点下面的「恢复默认」。恢复默认后，
-        App 重启会自动试连构建时配好的地址，哪个通就用哪个。
-      </AppText>
       <View style={styles.networkBtnRow}>
         <Button
           label="恢复默认"
@@ -238,26 +281,39 @@ function NetworkCard({ onApplied }: { onApplied: () => void }): React.JSX.Elemen
 // ==========================================================================
 
 function PrivacyCard({ caps }: { caps: CapabilitiesResponse | null }): React.JSX.Element {
+  const [open, setOpen] = useState(false);
   return (
     <Card title="隐私与数据">
-      <AppText size="sm" style={styles.privacyLine}>
-        罗盘照片仅用于识别，分析完成后默认不保留原图；生辰信息仅用于排盘，
-        可随时一键删除全部记录。
-      </AppText>
-      <Divider />
-      <KeyValueRow
-        label="原图留存"
-        value="默认不留存（识别后即从内存释放）"
-      />
+      <KeyValueRow label="原图留存" value="默认不留存（识别后即从内存释放）" />
       <KeyValueRow
         label="数据外流"
-        value="罗盘照片会上传到服务端完成识别；AI 解读只接收结构化结果，不接收原图与原始生辰文本"
+        value="照片上传服务端识别；AI 只接收结构化结果"
+        last
       />
       <KeyValueRow
         label="分金规则表"
         value={caps ? (caps.fenjin_table_available ? '已就绪' : '未提供（分金仅输出几何格位）') : '读取中…'}
         last
       />
+      <Pressable
+        onPress={() => setOpen(true)}
+        accessibilityRole="button"
+        accessibilityLabel="隐私细节说明"
+        style={styles.link}
+      >
+        <Ionicons name="information-circle-outline" size={15} color={colors.primary} />
+        <AppText size="sm" color="primary" style={styles.linkText}>
+          隐私细节
+        </AppText>
+      </Pressable>
+      <InfoPopup visible={open} onClose={() => setOpen(false)} title="隐私与数据" subtitle="细节说明">
+        <AppText size="sm" color={colors.text} style={styles.popupBody}>
+          罗盘照片仅用于识别，分析完成后默认不保留原图；生辰信息仅用于排盘，可随时一键删除全部记录。
+        </AppText>
+        <AppText size="sm" color={colors.textSecondary} style={styles.popupBody}>
+          罗盘照片会上传到服务端完成识别；AI 解读只接收结构化结果，不接收原图与原始生辰文本。
+        </AppText>
+      </InfoPopup>
     </Card>
   );
 }
@@ -270,8 +326,7 @@ function DataCard({ onGoHistory }: { onGoHistory: () => void }): React.JSX.Eleme
   return (
     <Card title="数据管理">
       <AppText size="xs" color="muted" style={styles.note}>
-        删除在历史页逐条进行（长按或进入详情页）。批量清空需要服务端提供对应接口，
-        当前版本未实现，不做假按钮。
+        删除在历史页逐条进行。批量清空需要服务端提供对应接口，当前版本未实现，不做假按钮。
       </AppText>
       <Button label="打开历史，管理记录" variant="ghost" onPress={onGoHistory} />
     </Card>
@@ -290,25 +345,39 @@ const RULES = [
 ] as const;
 
 function AboutCard({ disclaimer }: { disclaimer: string | null }): React.JSX.Element {
+  const [open, setOpen] = useState(false);
   return (
     <Card title="关于">
       <KeyValueRow label="版本" value={APP_VERSION} />
       <KeyValueRow label="产品" value="玄盘 AI" last />
 
-      <Divider />
-      <AppText size="sm" weight="semibold" color="textSecondary">
-        本产品坚持的几条底线
-      </AppText>
-      <View style={styles.rules}>
+      <Pressable
+        onPress={() => setOpen(true)}
+        accessibilityRole="button"
+        accessibilityLabel="本产品坚持的几条底线"
+        style={styles.link}
+      >
+        <Ionicons name="shield-checkmark-outline" size={15} color={colors.primary} />
+        <AppText size="sm" color="primary" style={styles.linkText}>
+          本产品坚持的几条底线
+        </AppText>
+      </Pressable>
+
+      <InfoPopup
+        visible={open}
+        onClose={() => setOpen(false)}
+        title="本产品坚持的底线"
+        subtitle="四条不可让步的规则"
+      >
         {RULES.map((r) => (
-          <AppText key={r} size="sm" style={styles.rule}>
+          <AppText key={r} size="sm" color={colors.text} style={styles.popupBody}>
             · {r}
           </AppText>
         ))}
-      </View>
+      </InfoPopup>
 
       <Divider />
-      <AppText size="sm" color="textSecondary">
+      <AppText size="sm" color="textSecondary" numberOfLines={2}>
         {disclaimer ?? '以上内容属于传统文化娱乐/学习参考'}
       </AppText>
 
@@ -327,11 +396,11 @@ function AboutCard({ disclaimer }: { disclaimer: string | null }): React.JSX.Ele
 
 const styles = StyleSheet.create({
   note: { lineHeight: 18, marginBottom: space[3] },
-  providerRow: { paddingVertical: space[2] },
+  providerRow: { paddingVertical: space[1] },
   providerHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  providerName: { flex: 1, marginRight: space[2] },
   statusPill: { borderRadius: radius.pill, paddingHorizontal: space[2], paddingVertical: 2 },
-  providerDesc: { marginTop: space[1], lineHeight: 18 },
-  providerCost: { marginTop: 2 },
+  providerDesc: { marginTop: 2 },
   input: {
     borderWidth: 1,
     borderColor: colors.border,
@@ -346,9 +415,7 @@ const styles = StyleSheet.create({
   applyMsg: { marginTop: space[2] },
   networkBtnRow: { flexDirection: 'row', gap: space[2], marginTop: space[3] },
   networkBtn: { flex: 1 },
-  privacyLine: { lineHeight: 22 },
-  rules: { gap: space[1], marginTop: space[2] },
-  rule: { lineHeight: 20 },
-  link: { flexDirection: 'row', alignItems: 'center', marginTop: space[4] },
+  link: { flexDirection: 'row', alignItems: 'center', marginTop: space[3] },
   linkText: { marginLeft: space[2] },
+  popupBody: { lineHeight: 22 },
 });

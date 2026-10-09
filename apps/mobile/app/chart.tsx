@@ -9,29 +9,54 @@
  *
  * **本页不做任何旺衰/用神判断**：那些属流派规则，由计算层给出，
  * 此处只负责把结构化结果如实画出来（对应 RULE-001/005）。
+ *
+ * ## 单屏（2026-10-09 用户要求：一屏显示完、不滑动）
+ *
+ * 输入区固定在上方（高度恒定），结果收进分段标签：
+ *   四柱 / 事实 / 传统 / 断卦 —— 同一时刻只显示一段，故一屏放得下。
+ *
+ * 其中「盘面事实」「传统分析」是**由数据决定长度**的长列表，
+ * 「断卦」还带依据与不确定性清单 —— 三者一律收进 `InfoPopup` 点开看，
+ * 不把版面拉长。四柱是本页唯一的"盘面"，作为弹性区。
+ *
+ * 数据一字不改：没算出来仍是「未定 / —」，不编造（RULE-003）。
  */
 
 import { Ionicons } from '@expo/vector-icons';
-import { Stack, useRouter } from 'expo-router';
+import { useRouter } from 'expo-router';
 import React, { useCallback, useMemo, useState } from 'react';
-import { Pressable, StyleSheet, TextInput, View } from 'react-native';
+import { StyleSheet, TextInput, View } from 'react-native';
 
 import { getApiClient } from '@/api/client';
 import type { BaziInput, DuanResponse, LayerPreview } from '@/api/types';
 import { AppText } from '@/components/AppText';
 import { Banner } from '@/components/Banner';
-import { Button, Card, Divider, KeyValueRow } from '@/components/Card';
+import { Button, Card, Divider, EmptyState, KeyValueRow } from '@/components/Card';
 import { Tag } from '@/components/Chip';
 import { DuanCard, verdictTone } from '@/components/DuanCard';
 import { FactList } from '@/components/FactList';
-import { helpHeaderRight } from '@/components/HelpButton';
-import { Screen } from '@/components/Screen';
+import { InfoPopup } from '@/components/InfoPopup';
+import { PageHeader } from '@/components/PageHeader';
+import { FitSlot, Screen } from '@/components/Screen';
 import { SegmentedTabs } from '@/components/SegmentedTabs';
 import { useSubmit } from '@/lib/useAsync';
-import { alpha, colors, radius, space } from '@/theme/tokens';
+import { colors, radius, space } from '@/theme/tokens';
 
 type Gender = 'male' | 'female';
 type Calendar = 'solar' | 'lunar';
+
+/** 结果分段 —— 同一时刻只渲染一段，是一屏装得下的关键 */
+type ResultTab = 'pillars' | 'facts' | 'tradition' | 'duan';
+
+const RESULT_TABS = [
+  { key: 'pillars' as const, label: '四柱' },
+  { key: 'facts' as const, label: '事实' },
+  { key: 'tradition' as const, label: '传统' },
+  { key: 'duan' as const, label: '断卦' },
+];
+
+/** 长内容浮层 —— 由数据决定长度的列表一律点开看，不占版面 */
+type Popup = 'facts' | 'tradition' | 'duan' | 'uncertain' | null;
 
 export default function ChartScreen(): React.JSX.Element {
   const router = useRouter();
@@ -49,6 +74,9 @@ export default function ChartScreen(): React.JSX.Element {
   const [savedSessionId, setSavedSessionId] = useState<string | null>(null);
   /** 旺衰与运程倾向 —— 与排盘同批取回，见 onCalc 的说明 */
   const [duanResult, setDuanResult] = useState<DuanResponse | null>(null);
+  /** 纯版面状态：结果分段与浮层，不影响任何计算 */
+  const [tab, setTab] = useState<ResultTab>('pillars');
+  const [popup, setPopup] = useState<Popup>(null);
 
   const calc = useSubmit(getApiClient().calcBazi);
   const duan = useSubmit(getApiClient().duanBazi);
@@ -87,6 +115,9 @@ export default function ChartScreen(): React.JSX.Element {
     if (result) {
       setPreview(result);
       setSavedSessionId(null);
+      // 新盘面回到第一段，避免停在上一盘的"断卦"段看到空内容
+      setTab('pillars');
+      setPopup(null);
     }
 
     // 旺衰与运程倾向**与排盘一起**取回：两者都是本地确定性计算、零成本，
@@ -122,21 +153,18 @@ export default function ChartScreen(): React.JSX.Element {
   const err = calc.error ?? save.error ?? createSession.error;
 
   return (
-    <Screen scroll onRefresh={onCalc} refreshing={calc.loading}>
-      {/* 本页已从底栏「命盘」tab 收进「分析」内页，标题在此声明 */}
-      <Stack.Screen
-        options={{ title: '八字命盘', headerRight: helpHeaderRight('chart') }}
-      />
-      <SegmentedTabs
-        items={[
-          { key: 'solar', label: '公历' },
-          { key: 'lunar', label: '农历' },
-        ]}
-        value={calendar}
-        onChange={(k) => setCalendar(k as Calendar)}
+    <Screen>
+      <PageHeader
+        title="八字命盘"
+        back
+        helpTopic="chart"
+        tone="light"
+        onRefresh={onCalc}
+        refreshing={calc.loading}
       />
 
-      <Card title="出生信息" style={styles.formCard}>
+      {/* ---------- 输入区：固定高度，一屏内的恒定部分 ---------- */}
+      <Card title="出生信息">
         <Row>
           <NumField label="年" value={year} onChange={setYear} width={96} />
           <NumField label="月" value={month} onChange={setMonth} />
@@ -145,12 +173,11 @@ export default function ChartScreen(): React.JSX.Element {
         <Row>
           <NumField label="时" value={hour} onChange={setHour} />
           <NumField label="分" value={minute} onChange={setMinute} />
-          <NumField label="出生地经度" value={longitude} onChange={setLongitude} width={104} />
+          <NumField label="经度" value={longitude} onChange={setLongitude} width={104} />
         </Row>
 
-        <AppText size="xs" color="muted" style={styles.fieldHint}>
-          经度用于真太阳时修正（东八区标准经线 120°）。留空则不修正 ——
-          不修正会在临近时辰边界时引入误差，报告里会如实标注。
+        <AppText size="xs" color="muted" numberOfLines={1} style={styles.fieldHint}>
+          经度用于真太阳时修正；留空则不修正
         </AppText>
 
         <View style={styles.genderRow}>
@@ -178,78 +205,194 @@ export default function ChartScreen(): React.JSX.Element {
         </Banner>
       ) : null}
 
+      {/* ---------- 结果区：分段标签 + 唯一的弹性区 ---------- */}
+      <FitSlot weight={1} style={styles.col}>
+        {preview ? (
+          <>
+            <SegmentedTabs items={RESULT_TABS} value={tab} onChange={setTab} />
+
+            <FitSlot weight={1}>
+              {tab === 'pillars' ? (
+                <Card title="四柱">
+                  <AppText size="xl" weight="bold" color="primary" center style={styles.pillars}>
+                    {pillars ?? '—'}
+                  </AppText>
+                  <KeyValueRow
+                    label="日主"
+                    emphasized
+                    value={String((preview.facts['bazi']?.['day_master'] as string) ?? '未定')}
+                  />
+                  <KeyValueRow
+                    label="节气"
+                    value={String((preview.facts['bazi']?.['solar_term'] as string) ?? '未定')}
+                    last
+                  />
+
+                  {preview.uncertainties.length > 0 ? (
+                    <Button
+                      label={`不确定性说明（${preview.uncertainties.length} 条）`}
+                      variant="ghost"
+                      onPress={() => setPopup('uncertain')}
+                      style={styles.paneBtn}
+                    />
+                  ) : null}
+                </Card>
+              ) : null}
+
+              {tab === 'facts' ? (
+                <LongPane
+                  title="盘面事实 · 只读"
+                  hint="四柱、纳音、旬空、胎元命宫、五行分布、真太阳时等，由确定性代码算出。"
+                  onOpen={() => setPopup('facts')}
+                />
+              ) : null}
+
+              {tab === 'tradition' ? (
+                <LongPane
+                  title="传统分析 · 只读"
+                  hint="十神、旺衰、喜用忌神等派生规则 —— 属流派规则，结论不唯一。"
+                  onOpen={() => setPopup('tradition')}
+                />
+              ) : null}
+
+              {tab === 'duan' ? (
+                duanResult ? (
+                  <Card title="断卦 · 旺衰与运程倾向">
+                    {/* verdict 是「身强 / 身弱」，属**日主状态**而非吉凶，
+                        故用中性主色，不染朱红 —— 把它说成凶兆等于替计算层下结论。 */}
+                    <View style={styles.verdictRow}>
+                      <AppText size="xxl" weight="bold" color="primary">
+                        {duanResult.verdict}
+                      </AppText>
+                      <AppText size="xs" color="muted" style={styles.verdictLabel}>
+                        日主状态 · {duanResult.school}
+                      </AppText>
+                    </View>
+                    <Button
+                      label="查看依据与大运倾向"
+                      variant="secondary"
+                      onPress={() => setPopup('duan')}
+                      style={styles.paneBtn}
+                    />
+                  </Card>
+                ) : (
+                  <EmptyState
+                    title="还没有断卦结果"
+                    hint="点右上角刷新重新排盘，旺衰与运程倾向会与四柱一起取回"
+                  />
+                )
+              ) : null}
+            </FitSlot>
+          </>
+        ) : (
+          <EmptyState title="还没有盘面" hint="填好出生信息，点「排盘」先在屏幕上核对四柱" />
+        )}
+      </FitSlot>
+
+      {/* ---------- 底部动作 ---------- */}
       {preview ? (
-        <>
-          <Card title="四柱">
-            <AppText size="xl" weight="bold" color="primary" center style={styles.pillars}>
-              {pillars ?? '—'}
+        savedSessionId ? (
+          <Card highlight>
+            <AppText size="sm" weight="semibold" color="success">
+              ✓ 已保存
             </AppText>
-            <KeyValueRow
-              label="日主"
-              emphasized
-              value={String((preview.facts['bazi']?.['day_master'] as string) ?? '未定')}
-            />
-            <KeyValueRow
-              label="节气"
-              value={String((preview.facts['bazi']?.['solar_term'] as string) ?? '未定')}
-              last
-            />
-          </Card>
-
-          <Card title="盘面事实 · 只读">
-            <FactList data={preview.facts['bazi'] ?? {}} omit={['pillars', 'warnings']} />
-          </Card>
-
-          <Card title="传统分析 · 只读">
-            <FactList data={preview.tradition['bazi'] ?? {}} omit={['warnings']} />
-          </Card>
-
-          {preview.uncertainties.length > 0 ? (
-            <Banner tone="warning" title={`不确定性说明（${preview.uncertainties.length} 条）`}>
-              {preview.uncertainties.map((u, i) => (
-                <AppText key={i} size="sm" style={styles.uncertainty}>
-                  · {u}
-                </AppText>
-              ))}
-            </Banner>
-          ) : null}
-
-          {/* 断卦 —— verdict 是「身强 / 身弱」，属**日主状态**而非吉凶，
-              故 verdictLabel 显式写明语义；着色也走中性档。
-              把它染成朱红等于把中性事实说成凶兆。 */}
-          {duanResult ? (
-            <DuanCard duan={duanResult} verdictLabel="日主状态" title="断卦 · 旺衰与运程倾向">
-              <BaziDuanDetail duan={duanResult} />
-            </DuanCard>
-          ) : null}
-
-          {savedSessionId ? (
-            <Card highlight>
-              <AppText size="sm" weight="semibold" color="success">
-                ✓ 已保存
-              </AppText>
-              <Button
-                label="生成 AI 解读"
-                icon={<Ionicons name="sparkles" size={18} color={colors.onPrimary} />}
-                style={styles.aiBtn}
-                onPress={() => router.push(`/report/${savedSessionId}`)}
-              />
-            </Card>
-          ) : (
             <Button
-              label="保存并生成 AI 解读"
-              variant="secondary"
-              onPress={onSave}
-              loading={busy}
+              label="生成 AI 解读"
+              icon={<Ionicons name="sparkles" size={18} color={colors.onPrimary} />}
+              style={styles.aiBtn}
+              onPress={() => router.push(`/report/${savedSessionId}`)}
             />
-          )}
-        </>
+          </Card>
+        ) : (
+          <Button
+            label="保存并生成 AI 解读"
+            variant="secondary"
+            onPress={onSave}
+            loading={busy}
+          />
+        )
       ) : null}
 
       <AppText size="xs" color="muted" center style={styles.disclaimer}>
         以上内容属于传统文化娱乐/学习参考
       </AppText>
+
+      {/* ---------- 长内容浮层（数据一字不改，只是换个地方看） ---------- */}
+      {preview ? (
+        <>
+          <InfoPopup
+            visible={popup === 'facts'}
+            onClose={() => setPopup(null)}
+            title="盘面事实 · 只读"
+            subtitle="由确定性代码算出，AI 不得修改"
+          >
+            <FactList data={preview.facts['bazi'] ?? {}} omit={['pillars', 'warnings']} />
+          </InfoPopup>
+
+          <InfoPopup
+            visible={popup === 'tradition'}
+            onClose={() => setPopup(null)}
+            title="传统分析 · 只读"
+            subtitle="固定规则派生，不经手 AI"
+          >
+            <FactList data={preview.tradition['bazi'] ?? {}} omit={['warnings']} />
+          </InfoPopup>
+
+          <InfoPopup
+            visible={popup === 'uncertain'}
+            onClose={() => setPopup(null)}
+            title="不确定性说明"
+            subtitle={`${preview.uncertainties.length} 条`}
+          >
+            {preview.uncertainties.map((u, i) => (
+              <AppText key={i} size="sm" color={colors.text} style={styles.popupBody}>
+                · {u}
+              </AppText>
+            ))}
+          </InfoPopup>
+        </>
+      ) : null}
+
+      <InfoPopup
+        visible={popup === 'duan'}
+        onClose={() => setPopup(null)}
+        title="断卦 · 旺衰与运程倾向"
+        subtitle="依据、喜用忌神与大运逐运倾向"
+      >
+        {duanResult ? (
+          <DuanCard duan={duanResult} verdictLabel="日主状态" title="断卦 · 旺衰与运程倾向">
+            <BaziDuanDetail duan={duanResult} />
+          </DuanCard>
+        ) : null}
+      </InfoPopup>
     </Screen>
+  );
+}
+
+// ==========================================================================
+// 结果分段：长列表入口
+// ==========================================================================
+
+/**
+ * 「由数据决定长度」的分段 —— 页内只放一句话说明与入口，
+ * 完整列表在 `InfoPopup` 里看。这样一屏的高度与数据条数**无关**。
+ */
+function LongPane({
+  title,
+  hint,
+  onOpen,
+}: {
+  title: string;
+  hint: string;
+  onOpen: () => void;
+}): React.JSX.Element {
+  return (
+    <Card title={title}>
+      <AppText size="xs" color="muted" style={styles.paneHint}>
+        {hint}
+      </AppText>
+      <Button label="点开查看完整列表" variant="secondary" onPress={onOpen} style={styles.paneBtn} />
+    </Card>
   );
 }
 
@@ -365,7 +508,6 @@ function NumField({
 }
 
 const styles = StyleSheet.create({
-  formCard: { marginTop: space[3] },
   row: { flexDirection: 'row', gap: space[3], marginBottom: space[3] },
   field: { flex: 1 },
   input: {
@@ -379,18 +521,23 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: colors.text,
   },
-  fieldHint: { marginTop: space[1], lineHeight: 18 },
+  fieldHint: { marginTop: space[1], lineHeight: 16 },
   genderRow: {
     flexDirection: 'row',
     alignItems: 'center',
     marginTop: space[3],
   },
   genderToggle: { flex: 1, marginLeft: space[3], maxWidth: 160 },
-  submit: { marginTop: space[4] },
+  submit: { marginTop: space[3] },
   pillars: { marginBottom: space[3], letterSpacing: 2 },
-  uncertainty: { marginTop: 2 },
-  aiBtn: { marginTop: space[3] },
-  disclaimer: { marginTop: space[5] },
+
+  // ---- 结果分段 ----
+  col: { gap: space[2] },
+  paneHint: { lineHeight: 18, marginBottom: space[3] },
+  paneBtn: { marginTop: space[3] },
+  verdictRow: { flexDirection: 'row', alignItems: 'baseline', gap: space[3] },
+  verdictLabel: { flex: 1 },
+  popupBody: { lineHeight: 22 },
 
   // ---- 断卦细节 ----
   divider: { marginVertical: space[3] },
@@ -409,4 +556,7 @@ const styles = StyleSheet.create({
     borderRadius: radius.sm,
     backgroundColor: colors.bg,
   },
+
+  aiBtn: { marginTop: space[3] },
+  disclaimer: { marginTop: space[1] },
 });

@@ -18,12 +18,19 @@
  *   4. **盘体旋转是视角、不是数据**。用户旋转盘面是为了让画面与手里罗盘对齐，
  *      它不进 `CompassConfirmRequest`，也绝不影响坐山与实测角 ——
  *      把"看起来对齐了"当成"数据变了"是这一层最容易犯的错。
+ *
+ * ## 2026-10-09 单屏化
+ *
+ * 本页内容最多（识别依据 + 盘面调节台 + 备注 + 确认结果），原先要滚好几屏。
+ * 现在：盘面调节台作为**唯一弹性区**（`FitSlot`），其余全部收进浮层 ——
+ * 识别依据（候选列表走 `FoldList`）、备注、确认结果各自一个 `InfoPopup`，
+ * 入口固定在标题下方的状态行里。业务逻辑一字未动，只重排版面。
  */
 
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { StyleSheet, TextInput, View } from 'react-native';
+import { Pressable, StyleSheet, TextInput, useWindowDimensions, View } from 'react-native';
 
 import { getApiClient } from '@/api/client';
 import type { CompassConfirmRequest, LayerPreview, MountainCandidate } from '@/api/types';
@@ -32,7 +39,10 @@ import { Banner, UncertaintyList } from '@/components/Banner';
 import { Button, Card, EmptyState } from '@/components/Card';
 import { CompassAdjuster } from '@/components/CompassAdjuster';
 import { FactList } from '@/components/FactList';
-import { Screen } from '@/components/Screen';
+import { FoldList } from '@/components/FoldList';
+import { InfoPopup } from '@/components/InfoPopup';
+import { PageHeader } from '@/components/PageHeader';
+import { FitSlot, Screen } from '@/components/Screen';
 import { degreeToIndex, indexOfName, nameOfIndex, oppositeIndex } from '@/lib/ring24';
 import { useAsync, useSubmit } from '@/lib/useAsync';
 import { colors, font, radius, space } from '@/theme/tokens';
@@ -66,6 +76,30 @@ export default function ConfirmOrientationScreen(): React.JSX.Element {
    * 用户的修正另立一处，提交时才由它顶替 —— 原始识别值与人工修正值互不污染。
    */
   const [degreeOverride, setDegreeOverride] = useState<number | null>(null);
+
+  /** 三个浮层开关 —— 识别依据 / 备注 / 确认结果 */
+  const [openRecog, setOpenRecog] = useState(false);
+  const [openNote, setOpenNote] = useState(false);
+  const [openResult, setOpenResult] = useState(false);
+
+  /**
+   * 盘面外径 —— 同时受**屏宽**与**可用高度**约束。
+   *
+   * 2026-10-09 单屏改造后补的高度约束：原先只按屏宽算（`width - 96`，封顶 260），
+   * 在 390×844 上盘面 260px，而调节台剩下的按钮区（读数 + 4 排按钮 + 提示）
+   * 实测约 393px —— 两者相加 716px，超过分区实得的 644px，**底部提示被裁掉 72px**
+   * （`test_page_has_no_clipped_content` 抓到的就是这个）。
+   *
+   * 改法：量出分区实得高度 `slotH`，把非盘面部分（`ADJUSTER_CHROME_H`）扣掉，
+   * 剩下的全部给盘面。这样屏幕矮时盘面自动变小、屏幕高时变大，都不溢出。
+   * 那个常量是"读数 + 4 排按钮 + 提示"的实测高度，改调节台控件时需同步。
+   */
+  const { width } = useWindowDimensions();
+  const [slotH, setSlotH] = useState(0);
+  const dialSize =
+    slotH > 0
+      ? Math.max(140, Math.min(width - 96, slotH - ADJUSTER_CHROME_H - 24))
+      : Math.min(260, Math.max(180, width - 96));
 
   const detail = session.data;
   const recognition = detail?.recognition ?? null;
@@ -221,57 +255,194 @@ export default function ConfirmOrientationScreen(): React.JSX.Element {
   const alreadyConfirmed = confirmState?.confirmed === true;
 
   return (
-    <Screen scroll bottomInsetExtra={space[10]}>
-      {recognition ? (
-        <Banner tone="warning" title="识别结果需要你确认">
-          照片只能测出鱼丝线的位置，无法判断哪一端是坐山 —— 这是盘面本身缺少的信息。
-          请核对下方的坐向，必要时直接点环修正。
-        </Banner>
-      ) : (
-        <Banner tone="info" title="手动录入坐向">
-          该会话没有可用的识别结果，你可以直接点环选择坐山 —— 手动录入与照片识别
-          在计算层走的是同一条链路，结论精度完全一致。
-        </Banner>
-      )}
+    <Screen bottomInsetExtra={space[4]}>
+      <PageHeader title="确认坐向" back helpTopic="confirm" tone="light" />
+
+      {/* ---------- 状态行：一行说清来源，其余入口挂在这里 ---------- */}
+      <View style={styles.statusRow}>
+        <AppText size="xs" color="textSecondary" numberOfLines={1} style={styles.statusText}>
+          {recognition
+            ? `识别到 ${candidates.length} 处候选（互为对宫）`
+            : '无识别结果，手动点环选择坐山'}
+        </AppText>
+
+        {recognition ? (
+          <Pressable
+            onPress={() => setOpenRecog(true)}
+            accessibilityRole="button"
+            accessibilityLabel="查看识别依据"
+            style={styles.link}
+          >
+            <Ionicons name="information-circle-outline" size={14} color={colors.primary} />
+            <AppText size="xs" color="primary" style={styles.linkText}>
+              识别依据
+            </AppText>
+          </Pressable>
+        ) : null}
+
+        <Pressable
+          onPress={() => setOpenNote(true)}
+          accessibilityRole="button"
+          accessibilityLabel="编辑备注"
+          style={styles.link}
+        >
+          <Ionicons name="create-outline" size={14} color={colors.primary} />
+          <AppText size="xs" color="primary" style={styles.linkText}>
+            备注{note.trim() ? ' ·已填' : ''}
+          </AppText>
+        </Pressable>
+
+        {shownPreview ? (
+          <Pressable
+            onPress={() => setOpenResult(true)}
+            accessibilityRole="button"
+            accessibilityLabel="查看确认结果"
+            style={styles.link}
+          >
+            <Ionicons name="checkmark-circle-outline" size={14} color={colors.primary} />
+            <AppText size="xs" color="primary" style={styles.linkText}>
+              确认结果
+            </AppText>
+          </Pressable>
+        ) : null}
+      </View>
 
       {alreadyConfirmed && !preview ? (
-        <Banner tone="success" title="已确认">
-          坐 {confirmState?.sitting} ／ 向 {confirmState?.facing}
+        <AppText size="xs" color="success" numberOfLines={1} style={styles.confirmedLine}>
+          已确认：坐 {confirmState?.sitting} ／ 向 {confirmState?.facing}
           {confirmState?.user_note ? `；备注：${confirmState.user_note}` : ''}
-          。重新提交会覆盖上一次的确认结果，识别原件仍会保留以备追溯。
+        </AppText>
+      ) : null}
+
+      {/* ---------- 唯一弹性区：盘面调节台 ---------- */}
+      <FitSlot weight={1}>
+        <View
+          style={styles.fill}
+          onLayout={(e) => setSlotH(e.nativeEvent.layout.height)}
+        >
+          <Card title="确认坐向 · 盘面可逐项微调">
+            <CompassAdjuster
+              sitting={sitting}
+              rotation={rotation}
+              measuredDegree={measuredDegree}
+              onChangeSitting={handleSelectSitting}
+              onChangeRotation={setRotation}
+              onChangeMeasuredDegree={onManualDegree}
+              size={dialSize}
+            />
+          </Card>
+        </View>
+      </FitSlot>
+
+      {submit.error ? (
+        <Banner
+          tone={submit.fixable ? 'warning' : 'error'}
+          title={submit.fixable ? '输入需要调整' : '确认失败'}
+        >
+          {submit.error}
         </Banner>
       ) : null}
 
-      {recognition ? <RecognitionCard candidates={candidates} recognition={recognition} /> : null}
-
-      <Card title="确认坐向 · 盘面可逐项微调">
-        <CompassAdjuster
-          sitting={sitting}
-          rotation={rotation}
-          measuredDegree={measuredDegree}
-          onChangeSitting={handleSelectSitting}
-          onChangeRotation={setRotation}
-          onChangeMeasuredDegree={onManualDegree}
-          size={300}
+      {shownPreview ? (
+        <Button
+          label="生成 AI 解读报告"
+          size="lg"
+          icon={<Ionicons name="arrow-forward" size={18} color={colors.onPrimary} />}
+          onPress={() => router.push(`/report/${id}`)}
         />
+      ) : (
+        <Button
+          label={sitting === null ? '请先选择坐山' : '确认坐向'}
+          size="lg"
+          loading={submit.loading}
+          disabled={sitting === null}
+          icon={<Ionicons name="checkmark" size={18} color={colors.onPrimary} />}
+          onPress={() => void onConfirm()}
+        />
+      )}
 
-        {selectedCandidate ? (
-          <AppText size="xs" color="muted" center style={styles.candMeta}>
-            该山由照片实测支持，置信度 {(selectedCandidate.confidence * 100).toFixed(0)}%；
-            {degreeOverride === null
-              ? `实测角 ${selectedCandidate.angle.toFixed(2)}° 将用于分金精算`
-              : `${
-                  degreeFromCalibrate ? '由「校准与还原」对齐照片后带入' : '已手工校准为'
-                } ${degreeOverride.toFixed(2)}°（识别原值 ${selectedCandidate.angle.toFixed(2)}° 仍留存）`}
+      {/* ---------- 浮层 1：识别依据（候选列表走 FoldList） ---------- */}
+      {recognition ? (
+        <InfoPopup
+          visible={openRecog}
+          onClose={() => setOpenRecog(false)}
+          title="识别依据"
+          subtitle={`识别通道：${recognition.provider}`}
+        >
+          <AppText size="sm" color={colors.text}>
+            照片只能测出鱼丝线的位置，无法判断哪一端是坐山 —— 这是盘面本身缺少的信息，
+            请核对下方的坐向，必要时直接点环修正。
           </AppText>
-        ) : sitting !== null ? (
-          <AppText size="xs" color="muted" center style={styles.candMeta}>
-            该山没有照片实测支持，将以山心角计算 —— 分金只能落到正中格
-          </AppText>
-        ) : null}
-      </Card>
 
-      <Card title="备注（可选）">
+          <FoldList
+            items={candidates}
+            keyOf={(c) => c.name}
+            moreTitle="全部候选"
+            moreSubtitle={`共 ${candidates.length} 处`}
+            tone="light"
+            renderItem={(c) => (
+              <View style={styles.candRow}>
+                <AppText size="md" weight="semibold" color="primary">
+                  {c.name}
+                </AppText>
+                <AppText size="xs" color="textSecondary">
+                  {c.angle.toFixed(2)}° · 置信度 {(c.confidence * 100).toFixed(0)}%
+                </AppText>
+              </View>
+            )}
+            empty={
+              <AppText size="sm" color="muted">
+                本次没有可用的候选。
+              </AppText>
+            }
+          />
+
+          {selectedCandidate ? (
+            <AppText size="xs" color="muted" style={styles.candMeta}>
+              已选「{selectedCandidate.name}」由照片实测支持，置信度{' '}
+              {(selectedCandidate.confidence * 100).toFixed(0)}%；
+              {degreeOverride === null
+                ? `实测角 ${selectedCandidate.angle.toFixed(2)}° 将用于分金精算`
+                : `${
+                    degreeFromCalibrate ? '由「校准与还原」对齐照片后带入' : '已手工校准为'
+                  } ${degreeOverride.toFixed(2)}°（识别原值 ${selectedCandidate.angle.toFixed(2)}° 仍留存）`}
+            </AppText>
+          ) : sitting !== null ? (
+            <AppText size="xs" color="muted" style={styles.candMeta}>
+              已选「{nameOfIndex(sitting)}」没有照片实测支持，将以山心角计算 ——
+              分金只能落到正中格
+            </AppText>
+          ) : null}
+
+          {recognition.uncertain_regions.length > 0 ? (
+            <View style={styles.popupBlock}>
+              {recognition.uncertain_regions.map((r, i) => (
+                <AppText key={i} size="xs" color="warning" style={styles.regionLine}>
+                  · {r}
+                </AppText>
+              ))}
+            </View>
+          ) : null}
+
+          {recognition.warnings.length > 0 ? (
+            <View style={styles.popupBlock}>
+              {recognition.warnings.map((w, i) => (
+                <AppText key={i} size="xs" color="muted" style={styles.regionLine}>
+                  {w}
+                </AppText>
+              ))}
+            </View>
+          ) : null}
+        </InfoPopup>
+      ) : null}
+
+      {/* ---------- 浮层 2：备注 ---------- */}
+      <InfoPopup
+        visible={openNote}
+        onClose={() => setOpenNote(false)}
+        title="备注（可选）"
+        subtitle="会与确认结果一起留存"
+      >
         <TextInput
           value={note}
           onChangeText={setNote}
@@ -285,74 +456,20 @@ export default function ConfirmOrientationScreen(): React.JSX.Element {
         <AppText size="xs" color="muted" style={styles.noteHint}>
           备注会与确认结果一起留存，便于日后核对当时依据。
         </AppText>
-      </Card>
+      </InfoPopup>
 
-      {submit.error ? (
-        <Banner tone={submit.fixable ? 'warning' : 'error'} title={submit.fixable ? '输入需要调整' : '确认失败'}>
-          {submit.error}
-        </Banner>
-      ) : null}
-
+      {/* ---------- 浮层 3：确认结果 ---------- */}
       {shownPreview ? (
-        <ConfirmedResult
-          preview={shownPreview}
-          onNext={() => router.push(`/report/${id}`)}
-        />
-      ) : (
-        <Button
-          label={sitting === null ? '请先选择坐山' : '确认坐向'}
-          size="lg"
-          loading={submit.loading}
-          disabled={sitting === null}
-          icon={<Ionicons name="checkmark" size={18} color={colors.onPrimary} />}
-          onPress={() => void onConfirm()}
-        />
-      )}
+        <InfoPopup
+          visible={openResult}
+          onClose={() => setOpenResult(false)}
+          title="确认结果"
+          subtitle="盘面事实 / 传统分析 / 不确定性"
+        >
+          <ConfirmedResult preview={shownPreview} onNext={() => router.push(`/report/${id}`)} />
+        </InfoPopup>
+      ) : null}
     </Screen>
-  );
-}
-
-// ==========================================================================
-// 识别结果概要
-// ==========================================================================
-
-function RecognitionCard({
-  candidates,
-  recognition,
-}: {
-  candidates: readonly MountainCandidate[];
-  recognition: { provider: string; uncertain_regions: string[]; warnings: string[] };
-}): React.JSX.Element {
-  const names = candidates.map((c) => c.name);
-  return (
-    <Card title="识别到了什么">
-      <AppText size="sm" color="textSecondary">
-        检测到 {names.length} 处候选（互为对宫）：{names.join(' ／ ') || '—'}
-      </AppText>
-      <AppText size="xs" color="muted" style={styles.provider}>
-        识别通道：{recognition.provider}
-      </AppText>
-
-      {recognition.uncertain_regions.length > 0 ? (
-        <View style={styles.regionBlock}>
-          {recognition.uncertain_regions.map((r, i) => (
-            <AppText key={i} size="xs" color="warning" style={styles.regionLine}>
-              · {r}
-            </AppText>
-          ))}
-        </View>
-      ) : null}
-
-      {recognition.warnings.length > 0 ? (
-        <View style={styles.regionBlock}>
-          {recognition.warnings.map((w, i) => (
-            <AppText key={i} size="xs" color="muted" style={styles.regionLine}>
-              {w}
-            </AppText>
-          ))}
-        </View>
-      ) : null}
-    </Card>
   );
 }
 
@@ -395,12 +512,33 @@ function ConfirmedResult({
   );
 }
 
+/**
+ * `CompassAdjuster` 里**除盘面之外**的部分占用的高度（px）：
+ * 坐山/向山读数 + 盘体旋转 2 排按钮 + 坐山逐格微调 1 排 + 对齐/归零 1 排 + 底部提示。
+ *
+ * 2026-10-09 在 390×844 实测：盘面 260 时整卡 716px，故非盘面部分 ≈ 456。
+ * ⚠️ 改 `CompassAdjuster` 的控件行数或按钮尺寸时必须同步这个数，
+ *    否则盘面尺寸会算错（大了就裁、小了就浪费）——
+ *    `test_page_has_no_clipped_content` 会兜住"裁"的那一半。
+ */
+const ADJUSTER_CHROME_H = 456;
+
 const styles = StyleSheet.create({
   loadingText: { marginTop: space[10] },
-  candMeta: { marginTop: space[2], lineHeight: 16 },
-  provider: { marginTop: space[1] },
-  regionBlock: { marginTop: space[2], gap: 2 },
+  /** 让 Card 在弹性分区里拿到实测高度（`onLayout` 要用它算盘面尺寸） */
+  fill: { flex: 1 },
+
+  statusRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: space[3] },
+  statusText: { flexShrink: 1 },
+  link: { flexDirection: 'row', alignItems: 'center' },
+  linkText: { marginLeft: 2 },
+  confirmedLine: { lineHeight: 16 },
+
+  candRow: { paddingVertical: space[1] },
+  candMeta: { lineHeight: 16 },
+  popupBlock: { gap: 2 },
   regionLine: { lineHeight: 17 },
+
   input: {
     borderWidth: 1,
     borderColor: colors.border,
@@ -414,6 +552,6 @@ const styles = StyleSheet.create({
     textAlignVertical: 'top',
     backgroundColor: colors.surfaceAlt,
   },
-  noteHint: { marginTop: space[2], lineHeight: 16 },
+  noteHint: { lineHeight: 16 },
   layerNote: { marginTop: space[2], lineHeight: 16 },
 });

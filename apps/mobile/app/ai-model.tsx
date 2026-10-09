@@ -10,9 +10,15 @@
  * - 密钥在服务端管理台（/admin）或环境变量里配。
  * - 选模型调 POST /meta/ai-model-selection，后端只接受 model/capability，
  *   拒绝 api_key/base_url，从接口层就堵死。
+ *
+ * ## 单屏做法（2026-10-09）
+ *
+ * 模型数量由服务端决定，竖排会滚。列表改用 `FoldList`（页内 4 条 + 「更多」浮层看全部），
+ * 放唯一弹性区 `FitSlot weight={1}`；「密钥在哪配」的长说明收进 `InfoPopup`。
+ * 每条模型前缀它所属能力的白话名，分组信息不丢。
  */
 
-import { useRouter } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
 import React, { useCallback, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
@@ -20,10 +26,12 @@ import { getApiClient } from '@/api/client';
 import { useAsync } from '@/lib/useAsync';
 import { AppText } from '@/components/AppText';
 import { Button, Card } from '@/components/Card';
+import { FoldList } from '@/components/FoldList';
 import { InfoPopup } from '@/components/InfoPopup';
-import { Screen } from '@/components/Screen';
-import type { AiProvidersResponse, ProviderInfo } from '@/api/types';
-import { colors, radius, space } from '@/theme/tokens';
+import { PageHeader } from '@/components/PageHeader';
+import { FitSlot, Screen } from '@/components/Screen';
+import type { ProviderInfo } from '@/api/types';
+import { colors, radius, space, tint } from '@/theme/tokens';
 
 /** 能力白话：用户看到的是"用来干嘛"，不是英文单词。 */
 const CAPABILITY_PLAIN: Record<string, { title: string; desc: string }> = {
@@ -36,13 +44,13 @@ const CAPABILITY_PLAIN: Record<string, { title: string; desc: string }> = {
 };
 
 export default function AiModelScreen(): React.JSX.Element {
-  const router = useRouter();
   const { data, loading, error, reload } = useAsync(
     useCallback(() => getApiClient().aiProviders(), []),
   );
   const [selecting, setSelecting] = useState<ProviderInfo | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState<string | null>(null);
+  const [keyInfoOpen, setKeyInfoOpen] = useState(false);
 
   const doSelect = async (p: ProviderInfo) => {
     setSaving(true);
@@ -59,77 +67,98 @@ export default function AiModelScreen(): React.JSX.Element {
     }
   };
 
-  // 按能力分组
-  const byCap = new Map<string, ProviderInfo[]>();
-  for (const p of data?.providers ?? []) {
-    const list = byCap.get(p.capability) ?? [];
-    list.push(p);
-    byCap.set(p.capability, list);
-  }
+  const providers = data?.providers ?? [];
 
   return (
-    <Screen style={styles.root}>
-      <AppText size="xl" weight="bold" color={colors.text} style={styles.title}>
-        AI 模型
-      </AppText>
-      <AppText size="sm" color={colors.textSecondary} style={styles.lead}>
-        按用途选模型，不用记品牌。密钥保存在服务端，不进手机。
-      </AppText>
+    <Screen>
+      <PageHeader title="AI 模型" back tone="light" />
 
-      {loading && <AppText color={colors.muted}>读取中…</AppText>}
-      {error && (
+      {loading && data === null ? (
+        <AppText size="sm" color="muted">
+          读取中…
+        </AppText>
+      ) : null}
+
+      {error ? (
         <Card title="连不上后端">
           <AppText size="sm" color={colors.textSecondary}>
             读不到模型列表：{error}。先检查「我的 → 网络线路」。
           </AppText>
           <Button label="重试" onPress={() => void reload()} />
         </Card>
-      )}
+      ) : null}
 
-      {[...byCap.entries()].map(([cap, providers]) => {
-        const plain = CAPABILITY_PLAIN[cap] ?? { title: cap, desc: '' };
-        return (
-          <Card key={cap} title={plain.title}>
-            <AppText size="xs" color={colors.muted} style={styles.capDesc}>
-              {plain.desc}
-            </AppText>
-            {providers.map((p) => (
-              <Pressable
-                key={p.id}
-                onPress={() => setSelecting(p)}
-                style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
-              >
-                <View style={styles.rowMain}>
-                  <AppText size="md" weight="medium" color={colors.text}>
-                    {p.name}
-                  </AppText>
-                  <AppText size="xs" color={colors.muted} numberOfLines={1}>
-                    {p.description}
-                  </AppText>
-                </View>
-                <View
-                  style={[
-                    styles.pill,
-                    { backgroundColor: p.available ? '#E8F5E9' : colors.surfaceAlt },
-                  ]}
+      {/* 唯一弹性区：模型列表（页内 N 条 + 更多浮层看全部） */}
+      <FitSlot weight={1}>
+        <Card title="按用途选模型">
+          <AppText size="xs" color="muted" numberOfLines={2} style={styles.note}>
+            按用途选模型，不用记品牌。密钥保存在服务端，不进手机 —— 点一条即切换该用途所用的模型。
+          </AppText>
+          <FoldList
+            items={providers}
+            max={4}
+            keyOf={(p) => p.id}
+            moreTitle="全部模型"
+            tone="light"
+            empty={
+              <AppText size="sm" color="muted">
+                服务端暂未提供可用模型。
+              </AppText>
+            }
+            renderItem={(p) => {
+              const plain = CAPABILITY_PLAIN[p.capability] ?? { title: p.capability, desc: '' };
+              return (
+                <Pressable
+                  onPress={() => setSelecting(p)}
+                  style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
                 >
-                  <AppText size="xs" color={p.available ? 'success' : 'muted'}>
-                    {p.available ? '可用' : p.requires_api_key ? '未配密钥' : '不可用'}
-                  </AppText>
-                </View>
-              </Pressable>
-            ))}
-          </Card>
-        );
-      })}
+                  <View style={styles.rowMain}>
+                    <AppText size="md" weight="medium" color={colors.text} numberOfLines={1}>
+                      {p.name}
+                    </AppText>
+                    <AppText size="xs" color={colors.muted} numberOfLines={1}>
+                      {plain.title} · {p.description}
+                    </AppText>
+                  </View>
+                  <View
+                    style={[
+                      styles.pill,
+                      { backgroundColor: p.available ? tint.jadePill : colors.surfaceAlt },
+                    ]}
+                  >
+                    <AppText size="xs" color={p.available ? 'success' : 'muted'}>
+                      {p.available ? '可用' : p.requires_api_key ? '未配密钥' : '不可用'}
+                    </AppText>
+                  </View>
+                </Pressable>
+              );
+            }}
+          />
+        </Card>
+      </FitSlot>
 
-      <Card title="密钥在哪配">
-        <AppText size="sm" color={colors.textSecondary} style={styles.note}>
-          模型密钥在服务端管理台配（/admin，需令牌），不经过手机。
-          App 里只能选"用哪个"，选完即时生效。
+      {/* 密钥说明不长，但属"解释性"内容 —— 收进弹层不占版面 */}
+      <Pressable
+        onPress={() => setKeyInfoOpen(true)}
+        accessibilityRole="button"
+        accessibilityLabel="密钥在哪配"
+        style={styles.link}
+      >
+        <Ionicons name="information-circle-outline" size={15} color={colors.primary} />
+        <AppText size="sm" color="primary" style={styles.linkText}>
+          密钥在哪配
         </AppText>
-        <Button label="返回" onPress={() => router.back()} />
-      </Card>
+      </Pressable>
+      <InfoPopup
+        visible={keyInfoOpen}
+        onClose={() => setKeyInfoOpen(false)}
+        title="密钥在哪配"
+        subtitle="不进手机"
+      >
+        <AppText size="sm" color={colors.text} style={styles.popupBody}>
+          模型密钥在服务端管理台配（/admin，需令牌），不经过手机。App 里只能选"用哪个"，选完即时生效。
+        </AppText>
+      </InfoPopup>
 
       {/* 选模型确认框 */}
       <InfoPopup
@@ -169,10 +198,7 @@ export default function AiModelScreen(): React.JSX.Element {
 }
 
 const styles = StyleSheet.create({
-  root: { backgroundColor: colors.bg },
-  title: { marginBottom: space[1] },
-  lead: { marginBottom: space[3], lineHeight: 20 },
-  capDesc: { marginBottom: space[2] },
+  note: { lineHeight: 18, marginBottom: space[2] },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -185,6 +211,7 @@ const styles = StyleSheet.create({
   rowPressed: { backgroundColor: colors.surfaceAlt },
   rowMain: { flex: 1, gap: 2 },
   pill: { paddingHorizontal: space[2], paddingVertical: 4, borderRadius: radius.pill },
-  note: { lineHeight: 22, marginBottom: space[2] },
+  link: { flexDirection: 'row', alignItems: 'center', marginTop: space[1] },
+  linkText: { marginLeft: space[2] },
   popupBody: { lineHeight: 24, marginBottom: space[2] },
 });

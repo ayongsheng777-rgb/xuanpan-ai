@@ -2,21 +2,26 @@
  * 我的信息 —— 每日运程用的个人信息设置。
  *
  * 只存四样：昵称、性别、出生日期、出生时辰。全部落在**手机本地**
- *（AsyncStorage），不上服务端 —— 出生日期没必要离开设备。
+ * （AsyncStorage），不上服务端 —— 出生日期没必要离开设备。
  *
  * 每日运程只用到「出生日期」定日主；时辰不影响日主，未知可留空。
  * 性别目前仅作展示与将来扩展用，不参与任何计算（避免无依据的性别推断）。
+ *
+ * ## 单屏做法（2026-10-09）
+ *
+ * 表单本身就是一屏内容，不再滚动：标题栏 `PageHeader`（带返回 + 问号）+
+ * 唯一的弹性区 `FitSlot weight={1}` 承载表单卡，底部按钮固定。
  */
 
-import { Stack, useRouter } from 'expo-router';
+import { useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
 import { StyleSheet, TextInput, View } from 'react-native';
 
 import { AppText } from '@/components/AppText';
 import { Banner } from '@/components/Banner';
 import { Button, Card } from '@/components/Card';
-import { helpHeaderRight } from '@/components/HelpButton';
-import { Screen } from '@/components/Screen';
+import { PageHeader } from '@/components/PageHeader';
+import { FitSlot, Screen } from '@/components/Screen';
 import { SegmentedTabs } from '@/components/SegmentedTabs';
 import {
   Gender,
@@ -88,82 +93,84 @@ export default function ProfileScreen(): React.JSX.Element {
   });
 
   return (
-    <Screen scroll>
-      <Stack.Screen options={{ title: '我的信息', headerRight: helpHeaderRight('profile') }} />
+    <Screen>
+      <PageHeader title="我的信息" back helpTopic="profile" tone="light" />
 
-      <Card title="基本信息">
-        <AppText size="xs" color="muted" style={styles.note}>
-          只存手机本地，不上传。每日运程用「出生日期」排出你的日主，再看当天的干支——{'\n'}
-          时辰不影响日主，不知道可以留空。
-        </AppText>
+      {/* 唯一弹性区：表单卡，高度自适应屏幕 */}
+      <FitSlot weight={1}>
+        <Card title="基本信息">
+          <AppText size="xs" color="muted" style={styles.note}>
+            只存手机本地，不上传。每日运程用「出生日期」排出你的日主，再看当天的干支；时辰不影响日主，不知道可以留空。
+          </AppText>
 
-        <AppText size="sm" color="textSecondary" style={styles.label}>
-          昵称（可空，早报里会这样叫你）
-        </AppText>
-        <TextInput
-          value={nickname}
-          onChangeText={setNickname}
-          placeholder="比如：阿勇"
-          placeholderTextColor={colors.muted}
-          maxLength={20}
-          style={styles.input}
-        />
-
-        <AppText size="sm" color="textSecondary" style={styles.label}>
-          性别（可不填，目前只做展示）
-        </AppText>
-        <SegmentedTabs
-          items={GENDER_ITEMS.map((g) => ({ key: g.key, label: g.label }))}
-          value={gender}
-          onChange={(k) => setGender(k as Gender)}
-        />
-
-        <AppText size="sm" color="textSecondary" style={styles.label}>
-          出生日期（公历）*
-        </AppText>
-        <View style={styles.dateRow}>
+          <AppText size="sm" color="textSecondary" style={styles.label}>
+            昵称（可空，早报里会这样叫你）
+          </AppText>
           <TextInput
-            value={year}
-            onChangeText={setYear}
-            keyboardType="number-pad"
-            placeholder="年"
+            value={nickname}
+            onChangeText={setNickname}
+            placeholder="比如：阿勇"
             placeholderTextColor={colors.muted}
-            maxLength={4}
-            style={[styles.input, styles.dateCell]}
+            maxLength={20}
+            style={styles.input}
           />
+
+          <AppText size="sm" color="textSecondary" style={styles.label}>
+            性别（可不填，目前只做展示）
+          </AppText>
+          <SegmentedTabs
+            items={GENDER_ITEMS.map((g) => ({ key: g.key, label: g.label }))}
+            value={gender}
+            onChange={(k) => setGender(k as Gender)}
+          />
+
+          <AppText size="sm" color="textSecondary" style={styles.label}>
+            出生日期（公历）*
+          </AppText>
+          <View style={styles.dateRow}>
+            <TextInput
+              value={year}
+              onChangeText={setYear}
+              keyboardType="number-pad"
+              placeholder="年"
+              placeholderTextColor={colors.muted}
+              maxLength={4}
+              style={[styles.input, styles.dateCell]}
+            />
+            <TextInput
+              value={month}
+              onChangeText={setMonth}
+              keyboardType="number-pad"
+              placeholder="月"
+              placeholderTextColor={colors.muted}
+              maxLength={2}
+              style={[styles.input, styles.dateCell]}
+            />
+            <TextInput
+              value={day}
+              onChangeText={setDay}
+              keyboardType="number-pad"
+              placeholder="日"
+              placeholderTextColor={colors.muted}
+              maxLength={2}
+              style={[styles.input, styles.dateCell]}
+            />
+          </View>
+
+          <AppText size="sm" color="textSecondary" style={styles.label}>
+            出生时辰（可空，填 0–23）
+          </AppText>
           <TextInput
-            value={month}
-            onChangeText={setMonth}
+            value={hour}
+            onChangeText={setHour}
             keyboardType="number-pad"
-            placeholder="月"
+            placeholder="不知道就留空"
             placeholderTextColor={colors.muted}
             maxLength={2}
-            style={[styles.input, styles.dateCell]}
+            style={styles.input}
           />
-          <TextInput
-            value={day}
-            onChangeText={setDay}
-            keyboardType="number-pad"
-            placeholder="日"
-            placeholderTextColor={colors.muted}
-            maxLength={2}
-            style={[styles.input, styles.dateCell]}
-          />
-        </View>
-
-        <AppText size="sm" color="textSecondary" style={styles.label}>
-          出生时辰（可空，填 0–23）
-        </AppText>
-        <TextInput
-          value={hour}
-          onChangeText={setHour}
-          keyboardType="number-pad"
-          placeholder="不知道就留空"
-          placeholderTextColor={colors.muted}
-          maxLength={2}
-          style={styles.input}
-        />
-      </Card>
+        </Card>
+      </FitSlot>
 
       {saver.error ? (
         <Banner tone="error" title="没保存">
@@ -183,19 +190,19 @@ export default function ProfileScreen(): React.JSX.Element {
         style={styles.saveBtn}
       />
       <Button label="去看每日早报" variant="secondary" onPress={() => router.push('/morning')} />
-      <View style={styles.gap} />
       <Button
         label="清除本地信息"
         variant="ghost"
         loading={clearer.loading}
         onPress={() => clearer.run()}
+        style={styles.clearBtn}
       />
     </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  note: { marginBottom: space[3], lineHeight: 20 },
+  note: { marginBottom: space[2], lineHeight: 18 },
   label: { marginTop: space[3], marginBottom: space[1] },
   input: {
     borderWidth: 1,
@@ -209,6 +216,6 @@ const styles = StyleSheet.create({
   },
   dateRow: { flexDirection: 'row', gap: space[2] },
   dateCell: { flex: 1, textAlign: 'center' },
-  saveBtn: { marginTop: space[4], marginBottom: space[2] },
-  gap: { height: space[2] },
+  saveBtn: { marginTop: space[3] },
+  clearBtn: { marginTop: space[2] },
 });

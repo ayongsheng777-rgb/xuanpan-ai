@@ -1,21 +1,33 @@
 /**
- * 历史 —— 会话列表。
+ * 历史 —— 会话列表（2026-10-09 单屏重设计）。
  *
  * 每张卡片显示"这次用了哪些术式"与"有几份报告"，而不是标题一句话。
  * 原因：用户回想"上周那次问事业用的是六爻还是八字"时，
  * 术式标签比标题更能定位；而报告数提示了这条记录有没有解读可以回看。
+ *
+ * ## 单屏做法（用户要求「全部绝对一屏」，列表页也不例外）
+ *
+ * 原来是 `FlatList` 整页滚动。现在改成 `FoldList`：
+ *   页内只放**最近 N 条**（默认 `fit.listPreviewMax`，一屏放得下、看得清），
+ *   其余收进「更多 N 条」浮层 —— 浮层是 `Modal` 覆盖层，不是页面滚动。
+ *
+ * ⚠️ 卡片为此**去掉了"问题正文"那一行**：它是三个信息块里最长的，
+ *    而且与标题高度重复（标题本来就常是问题摘要）。
+ *    完整问题仍在会话详情页里，一条没少 —— 只是不再占首页版面。
  */
 
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useRouter } from 'expo-router';
 import React, { useCallback } from 'react';
-import { FlatList, Pressable, StyleSheet, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 
 import { getApiClient } from '@/api/client';
 import type { SessionSummary } from '@/api/types';
 import { AppText } from '@/components/AppText';
 import { Banner } from '@/components/Banner';
 import { Button, Card, EmptyState } from '@/components/Card';
+import { FoldList } from '@/components/FoldList';
+import { PageHeader } from '@/components/PageHeader';
 import { Screen } from '@/components/Screen';
 import { useAsync } from '@/lib/useAsync';
 import { alpha, colors, radius, space } from '@/theme/tokens';
@@ -47,38 +59,47 @@ export default function HistoryScreen(): React.JSX.Element {
     }, []),
   );
 
-  if (error) {
-    return (
-      <Screen>
-        <Banner tone="error" title="加载失败">
-          {error}
-        </Banner>
-        <Button label="重试" variant="ghost" onPress={reload} />
-      </Screen>
-    );
-  }
+  const items = data ?? [];
 
   return (
-    <Screen padded={false}>
-      <FlatList
-        data={data ?? []}
-        keyExtractor={(item) => item.session_id}
-        contentContainerStyle={styles.list}
-        refreshing={loading}
+    <Screen>
+      <PageHeader
+        title="历史"
+        subtitle={items.length > 0 ? `共 ${items.length} 条记录` : undefined}
+        helpTopic="history"
+        tone="light"
         onRefresh={reload}
-        ListEmptyComponent={
-          loading ? null : (
-            <EmptyState
-              title="还没有任何记录"
-              hint="拍一张罗盘照片，或在命盘 / 占测页录入信息后会出现在这里"
-              action={<Button label="去拍罗盘" onPress={() => router.push('/scan')} />}
-            />
-          )
-        }
-        renderItem={({ item }) => (
-          <SessionCard item={item} onPress={() => router.push(`/session/${item.session_id}`)} />
-        )}
+        refreshing={loading}
       />
+
+      {error ? (
+        <Banner tone="error" title="加载失败">
+          <AppText size="sm">{error}</AppText>
+          <Button label="重试" variant="ghost" onPress={reload} />
+        </Banner>
+      ) : (
+        <FoldList
+          items={items}
+          max={4}
+          keyOf={(it) => it.session_id}
+          moreTitle="全部记录"
+          renderItem={(item) => (
+            <SessionCard
+              item={item}
+              onPress={() => router.push(`/session/${item.session_id}`)}
+            />
+          )}
+          empty={
+            loading ? null : (
+              <EmptyState
+                title="还没有任何记录"
+                hint="拍一张罗盘照片，或在命盘 / 占测页录入信息后会出现在这里"
+                action={<Button label="去拍罗盘" onPress={() => router.push('/scan')} />}
+              />
+            )
+          }
+        />
+      )}
     </Screen>
   );
 }
@@ -100,7 +121,7 @@ function SessionCard({
   const modules = flags.filter(([on]) => on).map(([, label]) => label);
 
   return (
-    <Pressable onPress={onPress} style={({ pressed }) => [styles.cardWrap, pressed && styles.pressed]}>
+    <Pressable onPress={onPress} style={({ pressed }) => pressed && styles.pressed}>
       <Card style={styles.card}>
         <View style={styles.cardHead}>
           <AppText size="md" weight="semibold" color="primary" numberOfLines={1} style={styles.title}>
@@ -137,17 +158,12 @@ function SessionCard({
               </AppText>
             </View>
           ) : null}
+          <View style={styles.timeChip}>
+            <AppText size="xs" color="muted">
+              {formatTime(item.updated_at)}
+            </AppText>
+          </View>
         </View>
-
-        {item.question_text ? (
-          <AppText size="sm" color="textSecondary" numberOfLines={1} style={styles.question}>
-            {item.question_text}
-          </AppText>
-        ) : null}
-
-        <AppText size="xs" color="muted" style={styles.time}>
-          {formatTime(item.updated_at)}
-        </AppText>
       </Card>
     </Pressable>
   );
@@ -169,10 +185,9 @@ export function formatTime(iso: string): string {
 }
 
 const styles = StyleSheet.create({
-  list: { padding: space[4], paddingTop: space[3] },
-  cardWrap: { marginBottom: 0 },
   pressed: { opacity: 0.9 },
-  card: { marginBottom: space[3] },
+  /* 卡片内边距收一档（space[3] 而非默认 space[4]）—— 一屏要放 4 张 */
+  card: { marginBottom: 0, padding: space[3] },
   cardHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   title: { flex: 1, marginRight: space[2] },
   reportBadge: {
@@ -192,6 +207,5 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
   },
   chipQuestion: { backgroundColor: alpha.goldSoft },
-  question: { marginTop: space[2] },
-  time: { marginTop: space[2] },
+  timeChip: { justifyContent: 'center' },
 });
