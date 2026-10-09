@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Body, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException, Request
 
 from ..deps import get_runtime_config, get_store
 from ..runtime_config import ConfigError, RuntimeConfig
@@ -73,17 +73,40 @@ def disclaimer() -> dict[str, str]:
 
 
 @router.get("/ai-providers", summary="AI 解释模型能力清单")
-def ai_providers() -> dict[str, Any]:
+def ai_providers(
+    request: Request,
+    store: Store = Depends(get_store),
+) -> dict[str, Any]:
     """按**能力**而非品牌列出，并标注当前环境是否可用。
 
     `requires_api_key=True` 的条目若 `available=False`，说明未配置 key；
     UI 应展示为"未配置"而不是"不可用"，两者对用户的含义不同。
+
+    2026-10-08 修复：之前直接调模块级的 `list_providers()`，拿到的是
+    进程启动时的 provider 实例，管理台改了密钥后这里显示的还是旧状态。
+    现在走运行时配置重建的 router，与真实 AI 调用看到的一致。
     """
-    from xuanpan_ai import CAPABILITY_MATRIX, list_endpoint_presets, list_providers
+    from xuanpan_ai import CAPABILITY_MATRIX, list_endpoint_presets
+
+    from ..deps import get_ai_router
+
+    # 用生效配置重建的 router，而非启动时的实例
+    router_obj = get_ai_router(request, store)
+    providers = router_obj.available_providers() if router_obj else []
+    # available_providers 只返回可用的；要全量列表（含不可用的）用于 UI 展示
+    # 这里用 describe 拿全量，再用 available 集合标注状态
+    all_providers = []
+    available_ids = {p.get("id") for p in providers}
+    # 从 router 拿全量 provider 描述
+    if router_obj:
+        for p in router_obj._providers:  # noqa: SLF001 - 内部属性，展示用
+            info = p.describe()
+            info["available"] = info.get("id") in available_ids
+            all_providers.append(info)
 
     return {
         "matrix": [dict(x) for x in CAPABILITY_MATRIX],
-        "providers": list_providers(),
+        "providers": all_providers,
         "endpoint_presets": list_endpoint_presets(),
     }
 
