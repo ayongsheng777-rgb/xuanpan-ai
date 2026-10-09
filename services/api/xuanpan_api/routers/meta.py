@@ -182,31 +182,49 @@ def set_ai_model_selection(
     - 只允许改 `llm.model` 与 `llm.capability`（选"用哪个模型"）。
     - **不接受** `llm.api_key`、`llm.base_url` —— 密钥与接入地址只能
       经管理台（/admin，需令牌）或环境变量配置，永不经过 App。
-    - 模型名必须在服务端已知 provider 列表里，防止填个不存在的把 AI 功能搞坏。
+    - capability 必须在配置层规格允许的档位内，否则 `runtime.update` 会拒。
 
     为什么单开一个接口而不复用 admin 的 PATCH /config：
     admin 接口要令牌（防隐私数据泄露），而选模型不涉及隐私；
     把选模型做成免令牌接口，用户在 App 里点两下就能换，不用记令牌。
+
+    2026-10-08 修复：capability 的合法域原先在本函数里另写了一份
+    `{vision, reasoning, fast, fallback, embedding}`，与配置层
+    `llm.capability` 的 choices `(reasoning, fast, local)` **不一致**：
+    App 按 `(p.id, p.capability)` 调用，`template` provider 自报
+    `capability="template"` → 必然 400；而 `vision`/`fallback`/`embedding`
+    虽过了本函数，又会被下游 `runtime.update` 以 ConfigError 拒掉。
+    现改为**以配置层规格为单一真源**，并把 provider 自报档位归一化。
     """
-    from xuanpan_ai import list_providers
+    from ..runtime_config import SPEC_BY_KEY
 
     model = selection.get("model")
     capability = selection.get("capability")
     if not model or not isinstance(model, str):
         raise HTTPException(status_code=400, detail="缺少 model（模型名）")
     if not capability or not isinstance(capability, str):
-        raise HTTPException(status_code=400, detail="缺少 capability（能力：vision/reasoning/fast/fallback）")
+        raise HTTPException(status_code=400, detail="缺少 capability（能力档位）")
 
-    # 校验：模型必须在已知列表里
-    known = {p.get("id") for p in list_providers()}
-    # 也允许直接写模型名（如 "gpt-4o"），只要 capability 合法
-    valid_caps = {"vision", "reasoning", "fast", "fallback", "embedding"}
-    if capability not in valid_caps:
-        raise HTTPException(status_code=400, detail=f"capability 非法，应为 {sorted(valid_caps)} 之一")
+    #: 合法档位取自配置层规格 —— 不要再在这里手抄一份，两份必然会漂移。
+    valid_caps: tuple[str, ...] = SPEC_BY_KEY["llm.capability"].choices
 
-    changes = {"llm.model": model.strip(), "llm.capability": capability}
+    #: provider 自报档位 → 配置层档位。`template` 是「本地零成本」档，
+    #: 配置层用 `local` 表达同一含义（见 providers/template.py 的 capability）。
+    _CAPABILITY_ALIASES = {"template": "local"}
+
+    normalized = _CAPABILITY_ALIASES.get(capability, capability)
+    if normalized not in valid_caps:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"capability 非法，应为 {sorted(valid_caps)} 之一"
+                f"（provider 自报的 {sorted(_CAPABILITY_ALIASES)} 会自动归一化）"
+            ),
+        )
+
+    changes = {"llm.model": model.strip(), "llm.capability": normalized}
     try:
         result = runtime.update(store, changes)
     except ConfigError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return {**result, "model": model.strip(), "capability": capability}
+    return {**result, "model": model.strip(), "capability": normalized}
