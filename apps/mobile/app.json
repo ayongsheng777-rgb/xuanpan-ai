@@ -74,8 +74,9 @@
     "extra": {
       "apiBaseUrl": "http://127.0.0.1:8360",
       "eas": {
-        "projectId": "12fb128e-02e4-47fe-83ef-c796b7973e82"
+        "projectId": "679234e4-fa69-4cd9-bb47-d6f934ab77f3"
       }
-    }
+    },
+    "owner": "anyong777"
   }
 }
