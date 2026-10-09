@@ -51,8 +51,13 @@ _HREF_RE = re.compile(r"""\bhref\s*=\s*(['"`])(/[^'"`]*)\1""")
 #: 测盘页五张来源卡的 href）。
 _HREF_PROP_RE = re.compile(r"""\bhref\s*:\s*(['"`])(/[^'"`]*)\1""")
 
-#: `topic="x"` 与 `helpHeaderRight('x')`
-_TOPIC_PROP_RE = re.compile(r"""\btopic\s*=\s*(['"`])([A-Za-z0-9_-]+)\1""")
+#: `topic="x"` / `helpTopic="x"`（PageHeader 的写法）/ `helpHeaderRight('x')`
+#:
+#: 2026-10-09 单屏改造后，讲解入口从"导航器注入 `headerRight`"改为
+#: "页面里写 `<PageHeader helpTopic="x">`" —— 扫描器必须跟着认这个写法，
+#: 否则断言 2 会**静默变成空跑**（一个 topic 都扫不到，"未登记的 topic"自然为空集）。
+#: 这里刻意同时认三种：老写法留着不影响，新写法必须被覆盖到。
+_TOPIC_PROP_RE = re.compile(r"""\b(?:help)?[Tt]opic\s*=\s*(['"`])([A-Za-z0-9_-]+)\1""")
 _TOPIC_CALL_RE = re.compile(r"""\bhelpHeaderRight\s*\(\s*(['"`])([A-Za-z0-9_-]+)\1""")
 
 
@@ -804,17 +809,181 @@ def test_test_and_analysis_use_block_grid() -> None:
     """测盘 / 分析必须是一屏积木宫格：不滚动、块上有问号弹详情。
 
     挡住的错：改回长列表 + 滚动，详情全堆在页面里拉长版面。
-    要求：
-      1. 不用 <Screen scroll>（一屏放下）；
-      2. 有宫格容器（grid 样式）与积木块（SourceBlock / EntryBlock）；
-      3. 块上有信息按钮，点开 InfoPopup 看详情。
+
+    2026-10-09 调整：宫格块的外观与"问号 + 弹层"已收进共享组件
+    `InstrumentBlock`（原先两页各写一遍，圆角/图标尺寸/按下反馈都不一样）。
+    所以本断言改成**两段**，比原来更强：
+
+      1. 两页必须用共享的 `InstrumentBlock`（而不是各写一套块）；
+      2. `InstrumentBlock` 自己必须带 `CornerFrame`（回纹角花）、
+         `information-circle-outline`（问号）与 `InfoPopup`（详情弹层）——
+         这三样原先分散在两个页面里各查一遍，现在只在一处实现、只在一处验。
     """
-    for rel, block in [
-        ("apps/mobile/app/(tabs)/test.tsx", "SourceBlock"),
-        ("apps/mobile/app/(tabs)/analysis.tsx", "EntryBlock"),
+    for rel in [
+        "apps/mobile/app/(tabs)/test.tsx",
+        "apps/mobile/app/(tabs)/analysis.tsx",
     ]:
         src = (_REPO_ROOT / rel).read_text(encoding="utf-8")
         assert "<Screen scroll" not in src, f"{rel} 又改回滚动长页面了"
-        assert block in src, f"{rel} 缺少积木块组件 {block}"
-        assert "InfoPopup" in src, f"{rel} 的积木块没有接弹出式信息框"
-        assert "information-circle-outline" in src, f"{rel} 的积木块上没有问号按钮"
+        assert "InstrumentBlock" in src, (
+            f"{rel} 没有用共享的道具化宫格块 InstrumentBlock —— 两页会各自漂移"
+        )
+
+    block = (_SRC / "components/InstrumentBlock.tsx").read_text(encoding="utf-8")
+    assert "CornerFrame" in block, "道具化宫格块缺少回纹角花（玄机道具化的关键一笔）"
+    assert "information-circle-outline" in block, "宫格块上没有问号按钮"
+    assert "InfoPopup" in block, "宫格块没有接弹出式信息框"
+
+
+# ==========================================================================
+# 断言 17：全站单屏 —— 页面主结构一律不可滚动（2026-10-09 用户要求）
+# ==========================================================================
+
+
+def test_screen_component_has_no_scroll_switch() -> None:
+    """`Screen` 不得再提供滚动开关。
+
+    2026-10-09 用户要求「每个界面保持全部显示在手机屏幕上，不需滑动浏览」。
+    改造前 `Screen` 有个 `scroll` 开关，结果 16 个页面选了滚动、7 个没选 ——
+    同一个 App 里两种浏览方式并存，用户永远不知道这一页要不要往下拉。
+
+    把它删掉比"留着再写一条守卫"更彻底：**结构上不可能滚**，
+    就不需要靠测试去提醒谁别滚。这条断言防止有人"为了方便"把它加回来。
+    """
+    src = (_SRC / "components/Screen.tsx").read_text(encoding="utf-8")
+    assert "ScrollView" not in src, (
+        "Screen.tsx 里又出现了 ScrollView —— 页面骨架一旦能滚，"
+        "「一屏显示完」这条用户要求就守不住了"
+    )
+    assert not re.search(r"\bscroll\s*\??\s*:", src), (
+        "ScreenProps 里又出现了 scroll 字段：滚动开关被加回来了"
+    )
+
+
+def test_route_pages_have_no_page_level_scroller() -> None:
+    """路由页里不得出现 `ScrollView` / `FlatList` —— 页面本体必须一屏放下。
+
+    挡住的错：某个页面为了省事又套一个滚动容器。这类改动**不会报任何错**：
+    tsc 绿、打包成功、页面也能打开，只是用户又得往下拉 —— 而"不用滑动"
+    正是这一轮改造的全部目的。
+
+    需要滚动的长内容有三条正路（都不在页面本体里）：
+      · `InfoPopup` / `HelpButton` —— 弹层，内部自带滚动；
+      · `FoldList` —— 页内只放前 N 条，其余进「更多」浮层；
+      · `SegmentedTabs` —— 分段切换，同一时刻只占一份空间。
+    """
+    offenders: list[str] = []
+    for p in sorted(_APP.rglob("*.tsx")):
+        src = p.read_text(encoding="utf-8")
+        # 注释里提到这些名字不算（本文件的说明文字里就有）
+        code = "\n".join(
+            line for line in src.splitlines() if not line.strip().startswith(("*", "//", "/*"))
+        )
+        for token in ("<ScrollView", "<FlatList", "<SectionList", "<Screen scroll"):
+            if token in code:
+                offenders.append(f"{p.relative_to(_REPO_ROOT)} → {token}")
+    assert not offenders, (
+        "以下路由页用了页面级滚动容器，会破坏「一屏显示完」：\n  "
+        + "\n  ".join(offenders)
+        + "\n\n改用 FoldList（列表折叠）/ InfoPopup（长说明）/ SegmentedTabs（分段）。"
+    )
+
+
+def test_fold_list_exists_and_really_folds() -> None:
+    """`FoldList` 必须真的"折叠"：截断 + 更多入口 + 弹层里给全量。
+
+    挡住"折叠了个寂寞"：只渲染前 N 条却不给看全部 —— 那用户就永久丢数据了。
+    要求：`slice(`（截断）、`InfoPopup`（全量出口）、`items.map`（浮层里列全）。
+    """
+    p = _SRC / "components/FoldList.tsx"
+    assert p.exists(), "缺少 FoldList —— 列表页只能靠滚动，一屏要求守不住"
+    src = p.read_text(encoding="utf-8")
+    assert "slice(" in src, "FoldList 没有截断（那它就不是折叠，是全量渲染）"
+    assert "InfoPopup" in src, "FoldList 没有全量出口 —— 被折叠的条目用户永远看不到"
+    assert "items.map(" in src, "FoldList 的浮层里没有列出全部条目"
+    assert "更多" in src, "FoldList 缺少「更多」入口文案"
+
+
+def test_history_uses_fold_list_instead_of_flat_list() -> None:
+    """历史页（最典型的列表页）必须走 `FoldList`。
+
+    注释行先剔掉再查 —— 本仓库的注释里会**引用**被废弃的写法（"原来是 FlatList"），
+    不剔就会把说明文字当成代码，判出一条假红。
+    """
+    src = (_APP / "(tabs)/history.tsx").read_text(encoding="utf-8")
+    code = "\n".join(
+        line for line in src.splitlines() if not line.strip().startswith(("*", "//", "/*"))
+    )
+    assert "FoldList" in code, "历史页没有用 FoldList"
+    assert "FlatList" not in code, "历史页还在用 FlatList —— 整页会滚动"
+
+
+# ==========================================================================
+# 断言 18：全站出入口 —— 每个二级页必须有带文字的返回入口（2026-10-09 用户要求）
+# ==========================================================================
+
+#: `<PageHeader … />` 的属性块（跨行，最多 600 字符）
+_PAGE_HEADER_RE = re.compile(r"<PageHeader\b([\s\S]{0,600}?)/>")
+#: 独立的 `back` 属性（`backLabel` 不算 —— `\b` 在 `backLabel` 里不成立）
+_BACK_PROP_RE = re.compile(r"\bback\b(?!\s*Label)")
+
+
+def _non_tab_route_files() -> list[Path]:
+    """二级页（根栈里的页面）—— 底栏那 5 页不算：它们由底栏本身提供出入口。"""
+    return [p for p in _route_files() if "(tabs)" not in p.parts]
+
+
+def test_every_secondary_page_has_a_visible_back_entry() -> None:
+    """每个二级页必须渲染 `PageHeader` 且带 `back`。
+
+    挡住的错（2026-10-08 用户实报 BUG 3）：从测盘进传感器页后"不能返回"——
+    当时只有原生标题栏左上角那个小箭头，用户根本没找到。
+    2026-10-09 进一步把根栈改成 `headerShown: false`（原生箭头彻底没有了），
+    于是"页面自画返回按钮"从"最好有"变成**唯一出路**：漏一个页面，
+    那个页面就真的进得去出不来。
+
+    同时禁止页面自己写 `headerShown`/`Stack.Screen` 标题 —— 那会让标题栏
+    出现两套（原生一套 + PageHeader 一套）。
+    """
+    offenders: list[str] = []
+    for p in _non_tab_route_files():
+        src = p.read_text(encoding="utf-8")
+        headers = _PAGE_HEADER_RE.findall(src)
+        if not headers:
+            offenders.append(f"{p.relative_to(_REPO_ROOT)} → 没有 <PageHeader />")
+            continue
+        if not any(_BACK_PROP_RE.search(props) for props in headers):
+            offenders.append(f"{p.relative_to(_REPO_ROOT)} → <PageHeader /> 没有 back 属性")
+        if "headerShown" in src:
+            offenders.append(
+                f"{p.relative_to(_REPO_ROOT)} → 页面自己设置了 headerShown（标题栏会出现两套）"
+            )
+    assert not offenders, (
+        "以下二级页缺少显眼的返回入口（用户会「进得去出不来」）：\n  "
+        + "\n  ".join(offenders)
+        + "\n\n每页最上方写 <PageHeader title=\"…\" back helpTopic=\"…\" />。"
+    )
+
+
+def test_secondary_page_set_is_non_empty_and_covers_known_pages() -> None:
+    """锚点：二级页清单必须扫到已知页面，否则断言 18 是空跑。"""
+    names = {p.name for p in _non_tab_route_files()}
+    for expect in ("scan.tsx", "sensors.tsx", "almanac.tsx", "[sessionId].tsx"):
+        assert expect in names, (
+            f"二级页清单里没有 {expect}（当前：{sorted(names)}）—— 扫描器可能已失效，"
+            "断言 18 会沦为假绿"
+        )
+
+
+def test_selfcheck_page_header_scanner_rejects_header_without_back() -> None:
+    """用一个**没写 back** 的 PageHeader 证明断言 18 的判据真的会拒绝。"""
+    snippet = '<PageHeader\n  title="测试"\n  helpTopic="test"\n/>'
+    headers = _PAGE_HEADER_RE.findall(snippet)
+    assert len(headers) == 1, f"自检失败：抽取器取到 {len(headers)} 个 PageHeader"
+    assert not _BACK_PROP_RE.search(headers[0]), (
+        "自检失败：没有 back 的 PageHeader 被判成有 back —— 断言 18 因此是假绿"
+    )
+    # 反向：写了 back 的要被认出来，且 backLabel 不能冒充 back
+    ok = '<PageHeader title="x" back backLabel="返回测盘" />'
+    h = _PAGE_HEADER_RE.findall(ok)
+    assert h and _BACK_PROP_RE.search(h[0]), "自检失败：带 back 的 PageHeader 没被认出来"

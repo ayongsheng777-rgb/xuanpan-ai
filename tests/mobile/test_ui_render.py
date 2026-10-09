@@ -110,6 +110,13 @@ def _node() -> str | None:
 
 
 def _chrome() -> str | None:
+    # 显式指定优先 —— 本机（2026-10-09）没有装 Chrome/Chromium，
+    # 用隔离目录里 playwright 下载的 "Chrome for Testing" 跑：
+    #   XP_CHROME="$HOME/.workbuddy-ai/binaries/node/workspace/pw-browsers/
+    #     chromium-1248/chrome-mac-x64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing"
+    override = os.environ.get("XP_CHROME")
+    if override:
+        return override if Path(override).exists() else None
     for p in _CHROME_CANDIDATES:
         if p.exists():
             return str(p)
@@ -283,6 +290,181 @@ def test_page_has_no_horizontal_overflow(rendered: dict[str, dict], name: str) -
         f"{name} 横向溢出 {row['overflowX']}px（内容区 {row['viewport']}，"
         f"文档高 {row['contentH']}px）：右侧内容会被推出屏幕外。\n"
         f"渲染文本：{(row.get('text') or '')[:200]}"
+    )
+
+
+# ==========================================================================
+# 单屏要求：整页不得超出视口高度（2026-10-09 用户要求）
+# ==========================================================================
+
+#: 全部 App 页面（不含管理台与需要真实会话 id 的三页）。
+#: 用**全部**而不是哨兵子集：单屏要求是"每个界面"，漏一个就等于没守。
+_ALL_APP_PAGES = (
+    "01-home",
+    "02-adjust",
+    "03-sensors",
+    "04-scan",
+    "05-almanac",
+    "06-sanshi",
+    "07-chart",
+    "08-divine",
+    "09-history",
+    "10-mine",
+    "12-test",
+    "13-analysis",
+    "14-templates",
+    "15-calibrate",
+)
+
+
+@pytest.fixture(scope="module")
+def rendered_all(preview_base: str, tmp_path_factory: pytest.TempPathFactory) -> dict[str, dict]:
+    """渲染全部 App 页面一次，供单屏断言使用。"""
+    outdir = tmp_path_factory.mktemp("ui-render-all")
+    rows = _render(",".join(_ALL_APP_PAGES), preview_base, outdir)
+    return {r["name"]: r for r in rows}
+
+
+def _viewport_h(row: dict) -> int:
+    """从 `viewport` 字段（如 "390x844"）取视口高度。"""
+    return int(str(row["viewport"]).split("x")[1])
+
+
+@pytest.mark.parametrize("name", _ALL_APP_PAGES)
+def test_page_fits_within_one_screen(rendered_all: dict[str, dict], name: str) -> None:
+    """**整页不得高于视口** —— 用户 2026-10-09 要求「不需滑动浏览」。
+
+    判据：`documentElement.scrollHeight`（探针里的 `contentH`）必须 ≤ 视口高度。
+    这条比"看截图"可靠：截图只覆盖视口，溢出部分根本不在图里 ——
+    看图的人会以为页面本来就长这样，而用户手上要多拉一下才看得到内容。
+
+    ⚠️ 本断言只证明**没有超出视口**，不证明"内容没被裁掉"。
+        `FitSlot` 带 `overflow: hidden`，内容过多时会裁而不溢出。
+        "有没有被裁"由人工看渲染快照确认（`scripts/ui_render/render_pages.mjs`
+       产出的 PNG 就在同一批渲染里）。
+    """
+    row = rendered_all.get(name)
+    assert row is not None, f"渲染器未返回 {name} 的结果"
+    assert row.get("ok"), f"{name} 渲染失败：{row.get('detail')}"
+    limit = _viewport_h(row)
+    assert row["contentH"] <= limit + 2, (
+        f"{name} 整页高 {row['contentH']}px > 视口 {limit}px —— 需要滑动才能看全。\n"
+        f"多出的 {(row['contentH'] - limit)}px 内容：改用 FoldList 折叠 / "
+        f"收进 InfoPopup / 用 SegmentedTabs 分段，不要靠滚动。\n"
+        f"渲染文本：{(row.get('text') or '')[:300]}"
+    )
+
+
+def test_selfcheck_viewport_height_parser() -> None:
+    """自检：`viewport` 解析器不能"永远返回一个大数"，否则上面的断言是假绿。"""
+    assert _viewport_h({"viewport": "390x844"}) == 844
+    assert _viewport_h({"viewport": "1440x900"}) == 900
+    # 反向：真的比 844 高的页面必须被判不合格（用 900 的假数据证明判据是活的）
+    fake_overflow = {"viewport": "390x844", "contentH": 900, "ok": True, "text": ""}
+    assert fake_overflow["contentH"] > _viewport_h(fake_overflow) + 2, (
+        "自检失败：溢出 56px 的页面没有超过容差 —— 断言会沦为假绿"
+    )
+
+
+# --------------------------------------------------------------------------
+# 会话链路三页（确认坐向 → 会话详情 → AI 报告）
+#
+# 它们是动态路由，需要真实会话 id，所以单独一组、缺 id 时跳过。
+# 跑法（本机后端已在 8360 上运行，并已建好一条带盘面的会话）：
+#
+#   XP_SESSION_ID=sess_xxx XP_WEB_DIST=dist-web XP_CHROME="<chromium 路径>" \
+#     python -m pytest tests/mobile/test_ui_render.py
+#
+# 跳过而不是失败：没有 id 时无法渲染，但这不是代码缺陷 ——
+# 与 `test_local_date.py` 在无 node 时跳过同理。
+# --------------------------------------------------------------------------
+
+_SESSION_PAGES = ("17-confirm", "18-session", "19-report")
+
+
+@pytest.fixture(scope="module")
+def rendered_sessions(preview_base: str, tmp_path_factory: pytest.TempPathFactory) -> dict[str, dict]:
+    if not os.environ.get("XP_SESSION_ID"):
+        pytest.skip("未设置 XP_SESSION_ID —— 跳过会话链路三页的单屏检查")
+    outdir = tmp_path_factory.mktemp("ui-render-sessions")
+    rows = _render(",".join(_SESSION_PAGES), preview_base, outdir)
+    return {r["name"]: r for r in rows}
+
+
+@pytest.mark.parametrize("name", _SESSION_PAGES)
+def test_session_pages_fit_within_one_screen(rendered_sessions: dict[str, dict], name: str) -> None:
+    """会话链路三页同样必须一屏放下、且不裁内容。
+
+    主链路是产品最关键的两道机制（RULE-004 的确认闸门、报告页三标签的物理分离），
+    漏检它们等于"最重要的三页没有一屏保证"。
+    """
+    row = rendered_sessions.get(name)
+    assert row is not None, f"渲染器未返回 {name} 的结果"
+    assert row.get("ok"), f"{name} 渲染失败：{row.get('detail')}"
+    limit = _viewport_h(row)
+    assert row["contentH"] <= limit + 2, (
+        f"{name} 整页高 {row['contentH']}px > 视口 {limit}px —— 需要滑动才能看全。\n"
+        f"渲染文本：{(row.get('text') or '')[:300]}"
+    )
+    assert (row.get("clippedCount", 0)) == 0, (
+        f"{name} 有 {row.get('clippedCount')} 个容器把内容裁掉了：{row.get('clipped')}"
+    )
+
+
+@pytest.mark.parametrize("name", _ALL_APP_PAGES)
+def test_page_has_no_inner_scroller(rendered_all: dict[str, dict], name: str) -> None:
+    """页面里不得有**内层**可滚动容器（RN 的 `ScrollView` / `FlatList`）。
+
+    这条是单屏要求里最容易漏掉的一半，也是 2026-10-09 才补上的：
+
+    `test_page_fits_within_one_screen` 看的是 `documentElement.scrollHeight`，
+    而 RN 的 `ScrollView` 是 `overflow: auto` 的普通 div —— 它把内容**关在自己里面**
+    滚动，文档高度恒等于视口。于是"整页不高于视口"**全绿，而用户照样要往下拉**。
+
+    改造前实测（同一条探针，390×844）：16 个页面里有 7 个带内层滚动容器，
+    需要滚动的幅度从 113px（六爻）到 2270px（三式排盘）不等，合计 5917px。
+    只看 `contentH` 会得出"这些页面本来就不用滚"的**错误结论**。
+
+    与静态守卫 `test_route_pages_have_no_page_level_scroller` 的分工：
+      · 静态那条防"源码里又写了 `<ScrollView>`"；
+      · 这条防"源码里没写，但某个共享组件替它套了一层"（例如 `SegmentedTabs`
+        的横向 ScrollView 带默认 `flexGrow: 1` 把内容区压扁那次）。
+    """
+    row = rendered_all.get(name)
+    assert row is not None, f"渲染器未返回 {name} 的结果"
+    count = row.get("innerScrollCount", 0)
+    assert count == 0, (
+        f"{name} 有 {count} 个内层滚动容器，最多要滚 {row.get('innerScrollMax')}px —— "
+        f"用户仍需滑动才能看全。\n  " + "\n  ".join(row.get("innerScroll") or [])
+        + "\n\n（文档高度 ≤ 视口**不足以**证明不用滚：内层容器自己滚时文档高度不变。）"
+    )
+
+
+@pytest.mark.parametrize("name", _ALL_APP_PAGES)
+def test_page_has_no_clipped_content(rendered_all: dict[str, dict], name: str) -> None:
+    """页面里不得有被 `overflow: hidden` **悄悄切掉**内容的容器。
+
+    为什么单屏要求还必须有这一条：一屏改造给分区加了 `overflow: hidden` ——
+    内容过多时它**裁掉**而不是溢出。于是"整页不高于视口"会轻松通过，
+    而用户少看到半张卡；截图也看不出来（被裁的部分根本不在图里，
+    看图的人以为那本来就是底边）。
+
+    2026-10-09 就是靠这条抓到的：`SegmentedTabs` 的横向 ScrollView 带默认
+    `flexGrow: 1`，把 `divine.tsx` 的内容区压到 290px，550px 的登记卡被切掉一半 ——
+    "整页不滚动"的断言当时是**全绿**的。
+
+    排除两类**故意**的裁切（探针里已处理）：`numberOfLines` 的行数省略、
+    以及 < 8px 的亚像素/圆角噪声。
+    """
+    row = rendered_all.get(name)
+    assert row is not None, f"渲染器未返回 {name} 的结果"
+    clipped = row.get("clipped") or []
+    count = row.get("clippedCount", 0)
+    assert count == 0, (
+        f"{name} 有 {count} 个容器把内容裁掉了（用户看不到这部分）：\n  "
+        + "\n  ".join(clipped)
+        + "\n\n（格式：元素:可见高<实际高。常见原因：把内容塞进了固定高度的分区、"
+        "或某个子元素带默认 flexGrow 抢走了垂直空间。）"
     )
 
 
