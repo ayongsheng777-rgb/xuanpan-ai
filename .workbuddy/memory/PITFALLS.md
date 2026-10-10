@@ -270,6 +270,17 @@ RN 的 `ScrollView` 在**垂直 flex 父容器**里会被限制在视口高度�
 
 🔴 **改 `lib/` 里的规则必须配「Node 探针 + Python 锚点测试」并做变异验证**（现有 compassDial / ring24 / sensorQuality / sparkline / qimen / liuren / taiyi / date / apiCandidates）。
 
+🔴 **`@expo/vector-icons` 的字体文件名 ≠ fontFamily，Android 上严格区分大小写**（2026-10-10）。
+源字体在 `node_modules/@expo/vector-icons/build/vendor/react-native-vector-icons/Fonts/Ionicons.ttf`（首字母大写），
+但 `@expo/vector-icons/build/Ionicons.js` 里 `createIconSet(glyphMap, 'ionicons', font)` 把 family 注册为**小写** `ionicons`。
+RN Android 的 `ReactFontManager.createAssetTypeface` 用 `Typeface.createFromAsset(assets, "fonts/<fontFamily>.ttf")` 拼路径找字体，**文件名大小写不匹配 → 找不到 → 字体不加载 → 所有 `<Ionicons>` 渲染为空白方块**。
+症状极具欺骗性：组件没崩、卡片正常、其他 AppText 正常，就是图标空白；用户看到的就是「图标位置全空白方块」。
+修法：用 `expo prebuild` 验证 → 写自定义 plugin `apps/mobile/plugins/withAndroidFonts.js`（接受 `{src, family}` 复制为 `assets/fonts/<family>.ttf`）。
+**`expo-font` 自带 plugin 不支持指定目标文件名**，只能照搬源 basename（仍是 `Ionicons.ttf`）。
+另：自定义 plugin **不能用 `createRunOncePlugin` 包装**，会触发 `assertInternalProjectRoot`（`withStaticPlugin` 在加载 module 时就 assert），报 `Config _internal.projectRoot isn't defined by expo-cli`。直接 `module.exports = function(config, props){...}` 即可。
+**判据**：任何「APK 里图标显示空白」都先解包看 `assets/fonts/` 是否存在 `<fontFamily 小写>.ttf`。
+
+
 🔴 **几何 / 归一化必须防「恒定输入除零」** —— 静止时 `max-min≈0` 当分母得 `NaN` → 曲线**静默消失**（见 `lib/sparkline.ts` 的 `DEFAULT_MIN_SPAN`，它同时防"把 0.3 μT 噪声放大成剧烈波动"的假象）。
 
 🔴 **「无数据」是一等状态** —— 显示「—」+ 可操作提示，**不编造、不转圈等**；且**别画会被误读的替代图形**（无方位数据时画一个静止在 0° 的罗盘，会被读成"方位就是 0°"）。
@@ -281,6 +292,8 @@ RN 的 `ScrollView` 在**垂直 flex 父容器**里会被限制在视口高度�
 🔴 **APK 内联的是「候选地址表」而非单个地址** —— 本机 3 块网卡分属 3 个网段，旧脚本只内联一个，手机不在该网段就**只是"一直转圈"**。现在启动**并发探活**自动选线（`lib/apiCandidates.ts` + `_layout.tsx`），换网段不必重打包；`oc.ayong.qzz.io` 实测**已无法解析**，已降为候选末位。
 
 🟢 **离线看界面已可行**：`scripts/ui_render/`（CDP 精确手机视口 + SPA 回落 + 渲染探针），快照 `docs/ui-render/`，回归 `tests/mobile/test_ui_render.py`（设 `XP_WEB_DIST` 启用）。它渲染的是**同一套 React 组件树**，可替代真机走查里"布局/折行/配色/空态"那部分；键盘遮挡、传感器真实数据、真机字体与安全区仍只能真机。
+
+🟢 **`expo export --platform web` 不会因源码改动触发 web bundle 重写**（2026-10-10）。改完代码后 `dist-web/_expo/static/js/web/entry-*.js` 文件名 hash 看起来没变（命中 cache），但内容可能是旧的。**手动 `rm -rf dist-web && npx expo export --platform web --output-dir dist-web`** 才行。
 
 ---
 
