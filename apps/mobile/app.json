@@ -57,12 +57,31 @@
         }
       ],
       "expo-asset",
-      "expo-font",
+      [
+        "expo-font",
+        {
+          "fonts": [
+            "./node_modules/@expo/vector-icons/build/vendor/react-native-vector-icons/Fonts/Ionicons.ttf"
+          ]
+        }
+      ],
+      [
+        "./plugins/withAndroidFonts.js",
+        {
+          "fonts": [
+            {
+              "src": "./node_modules/@expo/vector-icons/build/vendor/react-native-vector-icons/Fonts/Ionicons.ttf",
+              "family": "ionicons"
+            }
+          ]
+        }
+      ],
       [
         "expo-build-properties",
         {
           "android": {
-            "usesCleartextTraffic": true
+            "usesCleartextTraffic": true,
+            "kotlinVersion": "1.9.25"
           }
         }
       ]
@@ -71,7 +90,11 @@
       "typedRoutes": false
     },
     "extra": {
-      "apiBaseUrl": "http://127.0.0.1:8360"
-    }
+      "apiBaseUrl": "http://127.0.0.1:8360",
+      "eas": {
+        "projectId": "679234e4-fa69-4cd9-bb47-d6f934ab77f3"
+      }
+    },
+    "owner": "anyong777"
   }
 }

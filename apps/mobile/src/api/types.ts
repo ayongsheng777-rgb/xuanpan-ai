@@ -465,9 +465,9 @@ export interface CompassConfirmRequest {
 // 日历域与断卦
 // ==========================================================================
 //
-// 对应后端 `/api/v1/almanac`、`/zeri`、`/duan`。
+// 对应后端 `/api/v1/almanac`、`/daily`、`/zeri`、`/duan`。
 //
-// 这三组**不属于会话体系**：不落库、不进 `FortuneContext`、也没有报告。
+// 这几组**不属于会话体系**：不落库、不进 `FortuneContext`、也没有报告。
 // 因此它们**不复用 `LayerPreview`** —— 那个类型的外层键是模块名，
 // 硬套会让「取 facts.bazi」这类路径在黄历上变成无意义的猜测。
 //
@@ -511,6 +511,54 @@ export interface AlmanacRange {
   start: string;
   end: string;
   days: AlmanacDay[];
+}
+
+/** 每日运程输入。与后端 `DailyFortuneInput` 一一对应。 */
+export interface DailyFortuneInput {
+  /** 出生公历日期 YYYY-MM-DD，只用于定日主 */
+  birth_date: string;
+  /** 出生小时 0–23；未知可省略（服务端按午时排盘，不影响日主） */
+  birth_hour?: number | null;
+  /** 目标日期 YYYY-MM-DD；省略为今天（服务端定） */
+  target_date?: string;
+}
+
+/** 五宫之一。与内核 `DomainScore.to_dict()` 一一对应。 */
+export interface DailyDomain {
+  name: string;
+  stars: number;
+  tag: string;
+  reason: string;
+}
+
+/** 每日运程事实层。与内核 `DailyFortune.to_facts()` 一一对应。 */
+export interface DailyFortuneFacts {
+  date: string;
+  day_ganzhi: string;
+  day_master: string;
+  day_master_element: string;
+  stem_shishen: string;
+  branch_shishen: string;
+  domains: DailyDomain[];
+  lucky: {
+    color: string;
+    color_element: string;
+    numbers: number[];
+    direction: string;
+    hours: string[];
+  };
+  focus_yi: string;
+  focus_ji: string;
+}
+
+/** 每日运程。与后端 `DailyFortune`（facts / tradition 两层）对应。 */
+export interface DailyFortune {
+  facts: DailyFortuneFacts;
+  tradition: {
+    summary: string;
+    note: string;
+    uncertainties: string[];
+  };
 }
 
 export interface ZeriEvent {

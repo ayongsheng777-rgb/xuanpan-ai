@@ -4,7 +4,7 @@
 
 - **会话域**（`sessions` / `scan` / `calc` / `report`）：围绕「一个盘面」展开，
   输入落库、可生成报告。`calc` 是无状态预览，语义上仍属这一组。
-- **查询域**（`almanac` / `zeri` / `duan` / `qimen` / `liuren` / `taiyi`）：
+- **查询域**（`almanac` / `daily` / `zeri` / `duan` / `qimen` / `liuren` / `taiyi`）：
   无状态查询，不落库、不进 `FortuneContext`、也没有报告。`duan` 虽是「解读」，
   但它解读的是**本次请求里传进来的排盘结果**，不依赖会话。
   `qimen` / `liuren` / `taiyi` 即三式（奇门遁甲 / 大六壬 / 太乙神数）——
@@ -28,6 +28,7 @@ from . import (
     admin,
     almanac,
     calc,
+    daily,
     duan,
     liuren,
     meta,
@@ -46,6 +47,7 @@ API_V1.include_router(meta.router)
 API_V1.include_router(scan.router)
 API_V1.include_router(calc.router)
 API_V1.include_router(almanac.router)
+API_V1.include_router(daily.router)
 API_V1.include_router(zeri.router)
 API_V1.include_router(duan.router)
 API_V1.include_router(qimen.router)

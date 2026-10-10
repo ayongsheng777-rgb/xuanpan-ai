@@ -47,6 +47,16 @@ export function SegmentedTabs<T extends string>({
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
+        /**
+         * 🔴 `flexGrow: 0` 不能省。
+         *
+         * RN 的 `ScrollView` 默认带 `flexGrow: 1`（纵向滚动用的），而这里是**横向**滚动条 ——
+         * 放在 `flex: 1` 的父容器里时，它会跟着纵向一起长高，把本该给内容的
+         * 垂直空间**吃掉一半**。2026-10-09 实测：`divine.tsx` 的三段标签
+         * 与内容区各分到 290px，内容卡（550px）被裁掉一半，
+         * 而截图上看只是"卡片下面被切了"，很难归因到这个横条。
+         */
+        style={styles.underlineScroll}
         contentContainerStyle={styles.underlineRow}
       >
         {items.map((it) => (
@@ -168,6 +178,8 @@ const styles = StyleSheet.create({
   },
 
   underlineRow: { flexDirection: 'row', gap: space[5] },
+  /** 横向标签条**不参与纵向伸缩** —— 见上面那段 `flexGrow: 0` 的注释 */
+  underlineScroll: { flexGrow: 0, flexShrink: 0 },
   underlineItem: {
     paddingVertical: space[2],
     borderBottomWidth: 2,

@@ -1,13 +1,15 @@
 /**
  * 传感器测量 `/sensors` —— V2 演示图第 3 屏。
  *
- * 布局：磁北指示 → 深色盘面 → 方位角大字 → 综合质量 → 三张指标卡 →
- *       可操作提示 → 磁场强度曲线 → 原始三轴数据表。
+ * 布局（单屏）：标题栏（带返回）→ 深色盘面（唯一弹性区）→ 分段标签
+ *              （读数 / 质量 / 原始）→ 底部返回入口。
  *
  * 与相邻两页的职责分工（V2 §30「一页一事」，别混起来）：
  *   - `/`（罗盘首页）：仿真模式，盘面只由手指拖动，**不读传感器**；
  *   - `/adjust`：调角度、上锁，盘面可由磁力计驱动，但不做质量判断；
- *   - `/sensors`（本页）：**只做测量与可信度判断**，不可拖、不可选山、不算术数。
+ *   - `/sensors`（本页）：**只做测量与可信度判断**，不可拖、不可选山、不算术数；
+ *     唯一的出口是「采集当前读数」—— 把方位角交给「确认坐向」页，
+ *     坐山/向山仍由用户在确认页点选（RULE-004：传感器给不出"哪一端是坐"）。
  *
  * 🔴 三条必须守住的语义（错了就会给出"看起来正常"的假结论）：
  *
@@ -19,18 +21,31 @@
  * 3. **「磁场质量」≠ 角度精度** —— 那个 0~100 分衡量的是"强度是否在地磁正常区间、
  *    波动是否小"，是工程经验评分（阈值见 `lib/sensorQuality.ts`）。
  *    叫成"精度"会让人以为它在保证角度准确性，而本页做不到那个承诺。
+ *
+ * ## 单屏做法（2026-10-09）
+ *
+ * 盘面是唯一弹性区（`FitSlot weight={1}` + `onLayout` 实测边长）；
+ * 其余内容按用途分进「读数 / 质量 / 原始」三个分段标签，同一时刻只显示一组 ——
+ * 于是最长的「质量」也只有三张卡。罗盘快测（含 AI 白话讲解）收进弹层，
+ * 它自带滚动，不占页面高度。
  */
 
 import { Ionicons } from '@expo/vector-icons';
-import { Stack } from 'expo-router';
-import React, { useId } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { useRouter } from 'expo-router';
+import React, { useCallback, useId, useState } from 'react';
+import { Pressable, StyleSheet, View, type LayoutChangeEvent } from 'react-native';
 import Svg, { Defs, LinearGradient, Line, Path, Stop } from 'react-native-svg';
 
+import { getApiClient } from '@/api/client';
 import { AppText } from '@/components/AppText';
-import { CompassDial, DIAL_DARK } from '@/components/CompassDial';
-import { HelpButton } from '@/components/HelpButton';
-import { Screen } from '@/components/Screen';
+import { Banner } from '@/components/Banner';
+import { Button } from '@/components/Card';
+import { CompassDial, DIAL_LIGHT } from '@/components/CompassDial';
+import { InfoPopup } from '@/components/InfoPopup';
+import { PageHeader } from '@/components/PageHeader';
+import { FitSlot, Screen } from '@/components/Screen';
+import { SegmentedTabs } from '@/components/SegmentedTabs';
+import { Term } from '@/components/Term';
 import { stdevOf, type Grade, type Vector3 } from '@/lib/sensorQuality';
 import {
   DEFAULT_MIN_SPAN,
@@ -39,6 +54,7 @@ import {
   buildSparkline,
 } from '@/lib/sparkline';
 import { useSensorSnapshot } from '@/services/useSensors';
+import { useSubmit } from '@/lib/useAsync';
 import { instrument, radius, space } from '@/theme/tokens';
 
 /** 质量等级的配色 —— 这是**仪器质量**的绿/红，不是术数吉凶，两者不要互相套用 */
@@ -49,14 +65,52 @@ function gradeColor(grade: Grade): string {
   return instrument.danger;
 }
 
+type Section = 'read' | 'quality' | 'raw';
+
+const SECTIONS = [
+  { key: 'read' as const, label: '读数' },
+  { key: 'quality' as const, label: '质量' },
+  { key: 'raw' as const, label: '原始' },
+];
+
 export default function SensorsScreen(): React.JSX.Element {
   // 进入页面即订阅、离开即退订（磁力计高频采样耗电，见 useSensors 注释）
   const sensor = useSensorSnapshot(true);
   const { quality } = sensor;
+  const router = useRouter();
+  const collect = useSubmit(getApiClient().createSession);
+
+  const [section, setSection] = useState<Section>('read');
+  const [qaOpen, setQaOpen] = useState(false);
+  /** 盘面实测边长（px）—— 由 onLayout 给出，未测到前不渲染盘面 */
+  const [dialBox, setDialBox] = useState(0);
 
   const azimuth = sensor.azimuth;
   const magnitude = sensor.magneticMagnitude;
   const hasAzimuth = azimuth !== null;
+
+  /**
+   * 采集当前读数 —— 本页唯一的"出口"。
+   *
+   * 之前本页是个死胡同：测出方位角、看到质量评分，然后就没有然后了，
+   * 读数进不了「确认坐向 → 计算 → 测盘档案」链路（V2 §2.1 第 8 步）。
+   * 现在：建一个会话，把当前方位角以 `degree` 参数带给确认页。
+   * 确认页本来就支持"无识别手动录入"（scan 页识别失败时就是这么进的），
+   * `degree` 会灌进实测角 override，用户再点选坐山即完成 RULE-004 确认。
+   *
+   * 只传角度、不预选坐山：单一方位角无法判断"哪一端是坐"，
+   * 那是建筑朝向的语义，不在传感器数据里 —— 必须留给用户点选。
+   */
+  const onCollect = useCallback(async () => {
+    const az = sensor.azimuth;
+    if (az === null) return;
+    const res = await collect.run({ title: `传感器实测 ${az.toFixed(1)}°` });
+    if (!res) return;
+    router.push({
+      pathname: '/confirm/[sessionId]',
+      params: { sessionId: res.session_id, degree: az.toFixed(2) },
+    });
+  }, [sensor.azimuth, collect, router]);
 
   const maxTilt = sensor.tilt
     ? Math.max(Math.abs(sensor.tilt.pitch), Math.abs(sensor.tilt.roll))
@@ -75,45 +129,41 @@ export default function SensorsScreen(): React.JSX.Element {
   });
   const sigma = sensor.magneticSeries.length >= 2 ? stdevOf(sensor.magneticSeries) : null;
 
-  return (
-    <>
-      <Stack.Screen
-        options={{
-          title: '传感器测量',
-          headerStyle: { backgroundColor: instrument.bg },
-          headerTintColor: instrument.text,
-          headerShadowVisible: false,
-          headerRight: () => <HelpButton topic="sensors" color={instrument.textSecondary} />,
-        }}
-      />
-      <Screen scroll style={styles.root}>
-        {/* ---------- 无数据态：先说清楚，别让用户对着「—」猜 ---------- */}
-        {!sensor.available ? (
-          <View style={[styles.card, styles.warnCard]}>
-            <Ionicons name="alert-circle-outline" size={18} color={instrument.warn} />
-            <AppText size="sm" color={instrument.text} style={styles.warnText}>
-              未收到任何传感器数据。Android 模拟器通常不提供磁力计与加速度计 ——
-              请在真机上测量，不必反复刷新本页。
-            </AppText>
-          </View>
-        ) : null}
+  const onDialLayout = useCallback((e: LayoutChangeEvent) => {
+    const { width, height } = e.nativeEvent.layout;
+    setDialBox(Math.min(width, height));
+  }, []);
 
-        {/* ---------- 磁北指示 + 盘面 ---------- */}
-        <View style={styles.northRow}>
-          <AppText size="xs" color={instrument.textSecondary}>
-            磁北 0°
-          </AppText>
-          <View style={styles.northArrow} />
-        </View>
-        <View style={styles.dialWrap}>
+  return (
+    <Screen style={styles.root}>
+      <PageHeader
+        title="传感器测量"
+        subtitle="只回答「这个方向读得准不准」"
+        back
+        backLabel="返回测盘"
+        helpTopic="sensors"
+      />
+
+      {/* ---------- 无数据态：先说清楚，别让用户对着「—」猜 ---------- */}
+      {!sensor.available ? (
+        <Banner tone="warning" title="未收到任何传感器数据">
+          Android 模拟器通常不提供磁力计与加速度计 —— 请在真机上测量，不必反复刷新本页。
+        </Banner>
+      ) : null}
+
+      {/* ---------- 盘面（唯一弹性区；无方位数据时不渲染） ---------- */}
+      <FitSlot weight={1} center>
+        <View style={styles.dialBox} onLayout={onDialLayout}>
           {hasAzimuth ? (
             // rotation = -方位角：让当前朝向的刻度转到屏幕正上方（磁针不随盘转）
-            <CompassDial
-              size={280}
-              palette={DIAL_DARK}
-              style="zonghe"
-              rotation={-(azimuth ?? 0)}
-            />
+            dialBox > 0 ? (
+              <CompassDial
+                size={dialBox}
+                palette={DIAL_LIGHT}
+                style="zonghe"
+                rotation={-(azimuth ?? 0)}
+              />
+            ) : null
           ) : (
             <View style={styles.dialPlaceholder}>
               <Ionicons name="compass-outline" size={40} color={instrument.muted} />
@@ -124,189 +174,404 @@ export default function SensorsScreen(): React.JSX.Element {
             </View>
           )}
         </View>
+      </FitSlot>
 
-        {/* ---------- 方位角大字 ---------- */}
-        <View style={styles.card}>
-          <AppText size="xs" color={instrument.textSecondary}>
-            方位角（相对磁北）
-          </AppText>
-          <AppText size="display" weight="bold" color={instrument.accent} center style={styles.bigNumber}>
-            {azimuth === null ? '—' : `${azimuth.toFixed(2)}°`}
-          </AppText>
-          <AppText size="xs" color={instrument.muted} center>
-            {hasAzimuth ? '未做磁偏角改正：真北与磁北约差数度，随地区而变' : '等待磁力计数据'}
-          </AppText>
-        </View>
+      {/* ---------- 读数 / 质量 / 原始：分段替代长页面 ---------- */}
+      <SegmentedTabs items={SECTIONS} value={section} onChange={setSection} />
 
-        {/* ---------- 综合质量 ---------- */}
-        <View style={styles.card}>
-          <View style={styles.qualityHead}>
-            <View>
+      {section === 'read' ? (
+        <>
+          {/* 方位角大字 */}
+          <View style={styles.card}>
+            <View style={styles.azimuthHead}>
               <AppText size="xs" color={instrument.textSecondary}>
-                综合质量
+                方位角（相对磁北）
               </AppText>
-              <AppText size="xs" color={instrument.muted} style={styles.weightNote}>
-                磁场 40% · 水平 30% · 稳定 30%
+              <AppText size="display" weight="bold" color={instrument.accent} style={styles.bigNumber}>
+                {azimuth === null ? '—' : `${azimuth.toFixed(2)}°`}
               </AppText>
             </View>
-            {sensor.available ? (
-              <View style={styles.gradeRow}>
-                <AppText
-                  size="xxl"
-                  weight="bold"
-                  color={gradeColor(quality.grade)}
-                  style={styles.gradeValue}
-                >
-                  {quality.overall}%
+            <AppText size="xs" color={instrument.muted}>
+              {hasAzimuth ? '未做磁偏角改正：真北与磁北约差数度，随地区而变' : '等待磁力计数据'}
+            </AppText>
+          </View>
+
+          {/* 采集：把读数送进确认管线 */}
+          <View style={styles.card}>
+            <Button
+              label={hasAzimuth ? `采集当前读数 ${azimuth!.toFixed(1)}°` : '暂无读数可采集'}
+              disabled={!hasAzimuth}
+              loading={collect.loading}
+              onPress={() => void onCollect()}
+            />
+            {collect.error ? (
+              <AppText size="sm" color={instrument.warn} style={styles.collectNote}>
+                建档失败：{collect.error}
+              </AppText>
+            ) : null}
+          </View>
+
+          {/* 罗盘快测：读数直接给术语分析与 AI 白话讲解（弹层内滚动） */}
+          {hasAzimuth ? (
+            <Button
+              label="罗盘快测（术语 + AI 白话讲解）"
+              variant="secondary"
+              icon={<Ionicons name="sparkles" size={18} color={instrument.accent} />}
+              onPress={() => setQaOpen(true)}
+            />
+          ) : null}
+        </>
+      ) : null}
+
+      {section === 'quality' ? (
+        <>
+          {/* 综合质量 */}
+          <View style={styles.card}>
+            <View style={styles.qualityHead}>
+              <View>
+                <AppText size="xs" color={instrument.textSecondary}>
+                  综合质量
                 </AppText>
-                <View style={[styles.gradeChip, { backgroundColor: gradeColor(quality.grade) }]}>
-                  <AppText size="xs" weight="semibold" color={instrument.bg}>
-                    {quality.grade}
-                  </AppText>
-                </View>
+                <AppText size="xs" color={instrument.muted} style={styles.weightNote}>
+                  磁场 40% · 水平 30% · 稳定 30%
+                </AppText>
               </View>
+              {sensor.available ? (
+                <View style={styles.gradeRow}>
+                  <AppText
+                    size="xxl"
+                    weight="bold"
+                    color={gradeColor(quality.grade)}
+                    style={styles.gradeValue}
+                  >
+                    {quality.overall}%
+                  </AppText>
+                  <View style={[styles.gradeChip, { backgroundColor: gradeColor(quality.grade) }]}>
+                    <AppText size="xs" weight="semibold" color={instrument.bg}>
+                      {quality.grade}
+                    </AppText>
+                  </View>
+                </View>
+              ) : (
+                <AppText size="xxl" weight="bold" color={instrument.muted}>
+                  —
+                </AppText>
+              )}
+            </View>
+            {/* 把三个分项摊开 —— 只给一个总分会让用户不知道是哪一项不合格 */}
+            <View style={styles.breakdown}>
+              <BreakdownItem label="磁场" score={quality.magnetic} available={sensor.available} />
+              <BreakdownItem label="水平" score={quality.level} available={sensor.available} />
+              <BreakdownItem label="稳定" score={quality.stability} available={sensor.available} />
+            </View>
+          </View>
+
+          {/* 三张指标卡 */}
+          <View style={styles.metricRow}>
+            <MetricCard
+              label="磁场强度"
+              value={magnitude === null ? '—' : magnitude.toFixed(1)}
+              unit="μT"
+              sub={sigma === null ? '无数据' : `波动 ${sigma.toFixed(2)}`}
+            />
+            <MetricCard
+              label="设备水平"
+              value={maxTilt === null ? '—' : maxTilt.toFixed(1)}
+              unit="°"
+              sub={maxTilt === null ? '无数据' : quality.levelLabel}
+            />
+            <MetricCard
+              label="磁场质量"
+              value={magnitude === null ? '—' : `${quality.magnetic}`}
+              unit="分"
+              sub={magnitude === null ? '无数据' : quality.magneticLabel}
+            />
+          </View>
+
+          {/* 可操作提示（V2 §8.4） */}
+          {quality.hints.length > 0 ? (
+            <View style={[styles.card, styles.hintCard]}>
+              <AppText size="sm" weight="semibold" color={instrument.warn} style={styles.hintTitle}>
+                当前读数不可直接采信
+              </AppText>
+              {quality.hints.map((hint) => (
+                <AppText key={hint} size="sm" color={instrument.text} style={styles.hintItem}>
+                  · {hint}
+                </AppText>
+              ))}
+            </View>
+          ) : null}
+          {sensor.available && quality.hints.length === 0 ? (
+            <View style={[styles.card, styles.okCard]}>
+              <AppText size="sm" weight="semibold" color={instrument.ok}>
+                ✓ 磁场稳定 · 设备水平 · 方向稳定
+              </AppText>
+              <AppText size="xs" color={instrument.textSecondary} style={styles.okNote}>
+                可以开始测量。请保持手机平放，读数会实时刷新。
+              </AppText>
+            </View>
+          ) : null}
+        </>
+      ) : null}
+
+      {section === 'raw' ? (
+        <>
+          {/* 磁场强度曲线 */}
+          <View style={styles.card}>
+            <View style={styles.curveHead}>
+              <AppText size="xs" color={instrument.textSecondary}>
+                磁场强度变化
+              </AppText>
+              <AppText size="xs" color={instrument.muted}>
+                {sensor.magneticSeries.length} 个采样
+              </AppText>
+            </View>
+            {curve ? (
+              <>
+                <Svg
+                  width="100%"
+                  height={DEFAULT_SPARKLINE_HEIGHT}
+                  viewBox={`0 0 ${DEFAULT_SPARKLINE_WIDTH} ${DEFAULT_SPARKLINE_HEIGHT}`}
+                >
+                  {/* 面积渐变 —— 衬在折线之下，给波形一点"体积"。
+                      顶部淡金、底部全透明，越往下越沉，因此不会抢折线本身。 */}
+                  <Defs>
+                    <LinearGradient id={areaGradientId} x1="0" y1="0" x2="0" y2="1">
+                      <Stop offset="0" stopColor={instrument.curveFill} stopOpacity={0.28} />
+                      <Stop offset="1" stopColor={instrument.curveFill} stopOpacity={0} />
+                    </LinearGradient>
+                  </Defs>
+                  {/* 单点时 areaD 为 null（一个点围不出面积），故先判空 */}
+                  {curve.areaD ? <Path d={curve.areaD} fill={`url(#${areaGradientId})`} /> : null}
+                  {/* 量程中线：没有它，一段被跨度保护压平的曲线看不出站在哪个刻度上。
+                      必须画在面积之上，否则会被填充盖住。 */}
+                  <Line
+                    x1={0}
+                    y1={DEFAULT_SPARKLINE_HEIGHT / 2}
+                    x2={DEFAULT_SPARKLINE_WIDTH}
+                    y2={DEFAULT_SPARKLINE_HEIGHT / 2}
+                    stroke={instrument.border}
+                    strokeWidth={1}
+                  />
+                  <Path
+                    d={curve.d}
+                    stroke={instrument.accent}
+                    strokeWidth={2}
+                    fill="none"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </Svg>
+                <AppText size="xs" color={instrument.muted} style={styles.curveNote}>
+                  纵轴 {curve.lo}~{curve.hi} μT · 中线为量程中点。
+                  纵轴保留最小跨度 {DEFAULT_MIN_SPAN} μT，否则静止时 0.3 μT 的噪声会被画成剧烈起伏。
+                </AppText>
+              </>
             ) : (
-              <AppText size="xxl" weight="bold" color={instrument.muted}>
-                —
+              <AppText size="sm" color={instrument.muted} style={styles.curveEmpty}>
+                尚未收到磁场数据
               </AppText>
             )}
           </View>
-          {/* 把三个分项摊开 —— 只给一个总分会让用户不知道是哪一项不合格 */}
-          <View style={styles.breakdown}>
-            <BreakdownItem label="磁场" score={quality.magnetic} available={sensor.available} />
-            <BreakdownItem label="水平" score={quality.level} available={sensor.available} />
-            <BreakdownItem label="稳定" score={quality.stability} available={sensor.available} />
-          </View>
-        </View>
 
-        {/* ---------- 三张指标卡 ---------- */}
-        <View style={styles.metricRow}>
-          <MetricCard
-            label="磁场强度"
-            value={magnitude === null ? '—' : magnitude.toFixed(1)}
-            unit="μT"
-            sub={sigma === null ? '无数据' : `波动 ${sigma.toFixed(2)}`}
-          />
-          <MetricCard
-            label="设备水平"
-            value={maxTilt === null ? '—' : maxTilt.toFixed(1)}
-            unit="°"
-            sub={maxTilt === null ? '无数据' : quality.levelLabel}
-          />
-          <MetricCard
-            label="磁场质量"
-            value={magnitude === null ? '—' : `${quality.magnetic}`}
-            unit="分"
-            sub={magnitude === null ? '无数据' : quality.magneticLabel}
-          />
-        </View>
-
-        {/* ---------- 可操作提示（V2 §8.4） ---------- */}
-        {quality.hints.length > 0 ? (
-          <View style={[styles.card, styles.hintCard]}>
-            <AppText size="sm" weight="semibold" color={instrument.warn} style={styles.hintTitle}>
-              当前读数不可直接采信
+          {/* 原始三轴数据 */}
+          <View style={styles.card}>
+            <AppText size="xs" color={instrument.textSecondary} style={styles.tableTitle}>
+              原始三轴数据
             </AppText>
-            {quality.hints.map((hint) => (
-              <AppText key={hint} size="sm" color={instrument.text} style={styles.hintItem}>
-                · {hint}
-              </AppText>
-            ))}
+            <View style={styles.tableRow}>
+              <View style={styles.cellName} />
+              {['X', 'Y', 'Z'].map((axis) => (
+                <AppText key={axis} size="xs" color={instrument.muted} center style={styles.cell}>
+                  {axis}
+                </AppText>
+              ))}
+            </View>
+            <AxisRow name="磁力计" unit="μT" v={sensor.magnetometer} digits={2} />
+            <AxisRow name="加速度计" unit="m/s²" v={sensor.accelerometer} digits={2} />
+            <AxisRow name="陀螺仪" unit="rad/s" v={sensor.gyroscope} digits={3} />
           </View>
-        ) : null}
-        {sensor.available && quality.hints.length === 0 ? (
-          <View style={[styles.card, styles.okCard]}>
-            <AppText size="sm" weight="semibold" color={instrument.ok}>
-              ✓ 磁场稳定 · 设备水平 · 方向稳定
-            </AppText>
-            <AppText size="xs" color={instrument.textSecondary} style={styles.okNote}>
-              可以开始测量。请保持手机平放，读数会实时刷新。
-            </AppText>
-          </View>
-        ) : null}
 
-        {/* ---------- 磁场强度曲线 ---------- */}
-        <View style={styles.card}>
-          <View style={styles.curveHead}>
-            <AppText size="xs" color={instrument.textSecondary}>
-              磁场强度变化
-            </AppText>
-            <AppText size="xs" color={instrument.muted}>
-              {sensor.magneticSeries.length} 个采样
-            </AppText>
-          </View>
-          {curve ? (
-            <>
-              <Svg
-                width="100%"
-                height={DEFAULT_SPARKLINE_HEIGHT}
-                viewBox={`0 0 ${DEFAULT_SPARKLINE_WIDTH} ${DEFAULT_SPARKLINE_HEIGHT}`}
-              >
-                {/* 面积渐变 —— 衬在折线之下，给波形一点"体积"。
-                    顶部淡金、底部全透明，越往下越沉，因此不会抢折线本身。 */}
-                <Defs>
-                  <LinearGradient id={areaGradientId} x1="0" y1="0" x2="0" y2="1">
-                    <Stop offset="0" stopColor={instrument.curveFill} stopOpacity={0.28} />
-                    <Stop offset="1" stopColor={instrument.curveFill} stopOpacity={0} />
-                  </LinearGradient>
-                </Defs>
-                {/* 单点时 areaD 为 null（一个点围不出面积），故先判空 */}
-                {curve.areaD ? <Path d={curve.areaD} fill={`url(#${areaGradientId})`} /> : null}
-                {/* 量程中线：没有它，一段被跨度保护压平的曲线看不出站在哪个刻度上。
-                    必须画在面积之上，否则会被填充盖住。 */}
-                <Line
-                  x1={0}
-                  y1={DEFAULT_SPARKLINE_HEIGHT / 2}
-                  x2={DEFAULT_SPARKLINE_WIDTH}
-                  y2={DEFAULT_SPARKLINE_HEIGHT / 2}
-                  stroke={instrument.border}
-                  strokeWidth={1}
-                />
-                <Path
-                  d={curve.d}
-                  stroke={instrument.accent}
-                  strokeWidth={2}
-                  fill="none"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </Svg>
-              <AppText size="xs" color={instrument.muted} style={styles.curveNote}>
-                纵轴 {curve.lo}~{curve.hi} μT · 虚线为量程中点。
-                纵轴保留最小跨度 {DEFAULT_MIN_SPAN} μT，否则静止时 0.3 μT 的噪声会被画成剧烈起伏。
-              </AppText>
-            </>
-          ) : (
-            <AppText size="sm" color={instrument.muted} style={styles.curveEmpty}>
-              尚未收到磁场数据
-            </AppText>
-          )}
-        </View>
-
-        {/* ---------- 原始三轴数据 ---------- */}
-        <View style={styles.card}>
-          <AppText size="xs" color={instrument.textSecondary} style={styles.tableTitle}>
-            原始三轴数据
+          <AppText size="xs" color={instrument.muted} center style={styles.note}>
+            读数全部来自手机传感器、在设备本地计算，不上传，也不产生任何术数计算结果。
           </AppText>
-          <View style={styles.tableRow}>
-            <View style={styles.cellName} />
-            {['X', 'Y', 'Z'].map((axis) => (
-              <AppText key={axis} size="xs" color={instrument.muted} center style={styles.cell}>
-                {axis}
-              </AppText>
-            ))}
-          </View>
-          <AxisRow name="磁力计" unit="μT" v={sensor.magnetometer} digits={2} />
-          <AxisRow name="加速度计" unit="m/s²" v={sensor.accelerometer} digits={2} />
-          <AxisRow name="陀螺仪" unit="rad/s" v={sensor.gyroscope} digits={3} />
-        </View>
+        </>
+      ) : null}
 
-        <AppText size="xs" color={instrument.muted} center style={styles.note}>
-          读数全部来自手机传感器、在设备本地计算，不上传，也不产生任何术数计算结果。
-          需要坐向结论请用「扫描真实罗盘」，本页只回答「这个方向读得准不准」。
+      {/* ---------- 页内返回入口（BUG 3：不依赖标题栏小箭头） ---------- */}
+      <Pressable
+        onPress={() => router.back()}
+        accessibilityRole="button"
+        accessibilityLabel="返回测盘"
+        style={({ pressed }) => [styles.exitRow, pressed && styles.exitPressed]}
+      >
+        <Ionicons name="chevron-back" size={16} color={instrument.textSecondary} />
+        <AppText size="sm" color={instrument.textSecondary}>
+          返回测盘
         </AppText>
-      </Screen>
-    </>
+      </Pressable>
+
+      <InfoPopup
+        visible={qaOpen}
+        onClose={() => setQaOpen(false)}
+        title="罗盘快测"
+        subtitle="拿当前读数直接算一次"
+      >
+        <QuickAnalyze azimuth={azimuth} />
+      </InfoPopup>
+    </Screen>
+  );
+}
+
+/**
+ * 罗盘快测 —— 2026-10-08 用户要求（BUG 5）：
+ * "实时数据采集直接给分析专业术语结果与AI白话讲解"。
+ *
+ * 点一下，拿当前方位角调一次确定性计算，立刻给出：
+ *   1. 专业术语结果（坐山/向山/二十四山，术语都可点出白话）；
+ *   2. "AI 白话讲解"按钮 —— 建会话、问 AI，用大白话讲一遍。
+ *
+ * 诚实边界（RULE-004）：快测**不代替**"采集 → 确认坐向 → 报告"正式链路。
+ * 传感器只给得出方向，给不出"哪一端是坐"，所以快测结论明确标"仅供参考"，
+ * 正式结论必须走采集流程由用户点选确认。卡片上写清楚，不让人误会。
+ */
+function QuickAnalyze({ azimuth }: { azimuth: number | null }): React.JSX.Element {
+  const analyze = useSubmit(getApiClient().calcCompass);
+  const aiAsk = useSubmit(async (degree: number, sitting: string, facing: string) => {
+    const client = getApiClient();
+    const session = await client.createSession({ title: `罗盘快测 ${degree.toFixed(1)}°` });
+    await client.patchInputs(session.session_id, {
+      compass: { degree, source: 'manual', confirmed_by_user: false },
+    });
+    const res = await client.ask(session.session_id, {
+      question_text:
+        `请用大白话讲解这次罗盘快测：方位角 ${degree.toFixed(1)}°，` +
+        `坐${sitting}向${facing}。要求：先给一句人话结论；每个术语第一次出现都带一句解释；` +
+        `最后提醒这是快测参考，正式结论需经坐向确认。`,
+      question_category: 'compass_quick',
+    });
+    return res.report.interpretation;
+  });
+
+  const [facts, setFacts] = useState<Record<string, unknown> | null>(null);
+  const [aiPlain, setAiPlain] = useState<{
+    plain_sections?: { title: string; body: string }[];
+    sections: { title: string; body: string }[];
+  } | null>(null);
+
+  const run = useCallback(async () => {
+    if (azimuth === null) return;
+    setFacts(null);
+    setAiPlain(null);
+    aiAsk.reset();
+    const r = await analyze.run({
+      degree: azimuth,
+      source: 'manual',
+      confirmed_by_user: false,
+    });
+    if (r) setFacts((r.facts?.['compass'] ?? r.facts) as Record<string, unknown>);
+  }, [azimuth, analyze, aiAsk]);
+
+  const runAi = useCallback(async () => {
+    if (azimuth === null) return;
+    const st = String(facts?.['sitting'] ?? '');
+    const fc = String(facts?.['facing'] ?? '');
+    if (!st) return;
+    const interp = await aiAsk.run(azimuth, st, fc);
+    if (interp) setAiPlain(interp);
+  }, [azimuth, facts, aiAsk]);
+
+  const sitting = String(facts?.['sitting'] ?? '');
+  const facing = String(facts?.['facing'] ?? '');
+
+  return (
+    <View>
+      <AppText size="xs" color={instrument.textSecondary} style={styles.qaNote}>
+        拿当前读数直接算一次，立刻告诉你这个方向在术语里叫什么。术语点一下就有大白话。
+      </AppText>
+      <Button
+        label={azimuth === null ? '暂无读数' : `智能分析 ${azimuth.toFixed(1)}°`}
+        disabled={azimuth === null}
+        loading={analyze.loading}
+        onPress={() => void run()}
+        style={styles.qaBtn}
+      />
+      {analyze.error ? (
+        <AppText size="sm" color={instrument.danger} style={styles.qaNote}>
+          分析失败：{analyze.error}
+        </AppText>
+      ) : null}
+
+      {facts && sitting ? (
+        <View style={styles.qaResult}>
+          <AppText size="sm" color={instrument.text} style={styles.qaLine}>
+            <Term name="方位角" /> {Number(facts['exact_degree'] ?? azimuth).toFixed(1)}°，落在
+            <Term name="二十四山" /> 的「{sitting}」格
+          </AppText>
+          <AppText size="sm" color={instrument.text} style={styles.qaLine}>
+            <Term name="坐山" /> {sitting} · <Term name="向山" /> {facing}
+          </AppText>
+          <AppText size="xs" color={instrument.textSecondary} style={styles.qaNote}>
+            快测仅供参考：传感器定得出方向，定不出"哪一端是坐"。正式结论请走「采集当前读数」由你点选确认。
+          </AppText>
+          <Button
+            label="AI 白话讲解"
+            variant="secondary"
+            loading={aiAsk.loading}
+            onPress={() => void runAi()}
+            style={styles.qaBtn}
+          />
+          {aiAsk.error ? (
+            <AppText size="sm" color={instrument.danger} style={styles.qaNote}>
+              AI 讲解失败：{aiAsk.error}
+            </AppText>
+          ) : null}
+          {aiPlain ? <AiPlainText interpretation={aiPlain} /> : null}
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+/** AI 返回的白话版优先显示；没有白话版就显示专业版并如实说明。 */
+function AiPlainText({
+  interpretation,
+}: {
+  interpretation: { plain_sections?: { title: string; body: string }[]; sections: { title: string; body: string }[] };
+}): React.JSX.Element {
+  const plains = interpretation.plain_sections ?? [];
+  if (plains.length > 0) {
+    return (
+      <View style={styles.aiBox}>
+        {plains.map((s, i) => (
+          <View key={i} style={styles.aiSection}>
+            <AppText size="sm" weight="semibold" color={instrument.text}>
+              {s.title}
+            </AppText>
+            <AppText size="sm" color={instrument.text} style={styles.aiBody}>
+              {s.body}
+            </AppText>
+          </View>
+        ))}
+      </View>
+    );
+  }
+  return (
+    <View style={styles.aiBox}>
+      <AppText size="xs" color={instrument.textSecondary} style={styles.qaNote}>
+        这次 AI 只给了专业版，没有白话版，如实说明，不拿专业版冒充。
+      </AppText>
+      {interpretation.sections.map((s, i) => (
+        <View key={i} style={styles.aiSection}>
+          <AppText size="sm" weight="semibold" color={instrument.text}>
+            {s.title}
+          </AppText>
+          <AppText size="sm" color={instrument.text} style={styles.aiBody}>
+            {s.body}
+          </AppText>
+        </View>
+      ))}
+    </View>
   );
 }
 
@@ -409,41 +674,55 @@ function AxisRow({
 
 const styles = StyleSheet.create({
   root: { backgroundColor: instrument.bg },
+  /* ---------- 页内返回入口 ---------- */
+  exitRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'center',
+    gap: space[1],
+    paddingVertical: space[1],
+    paddingHorizontal: space[3],
+  },
+  exitPressed: { opacity: 0.6 },
+  /* ---------- 罗盘快测 ---------- */
+  qaNote: { marginTop: space[2], lineHeight: 18 },
+  qaBtn: { marginTop: space[3] },
+  qaResult: { marginTop: space[3], gap: space[2] },
+  qaLine: { lineHeight: 24 },
+  aiBox: {
+    marginTop: space[2],
+    padding: space[3],
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: instrument.border,
+    backgroundColor: instrument.surfaceAlt,
+    gap: space[2],
+  },
+  aiSection: { gap: 4 },
+  aiBody: { lineHeight: 24 },
   card: {
-    marginTop: space[4],
     backgroundColor: instrument.surface,
     borderRadius: radius.lg,
     borderWidth: 1,
     borderColor: instrument.border,
     padding: space[3],
   },
-  warnCard: { flexDirection: 'row', alignItems: 'flex-start', borderColor: instrument.warn },
-  warnText: { flex: 1, marginLeft: space[2] },
-  northRow: { alignItems: 'center', marginTop: space[4], gap: 2 },
-  northArrow: {
-    width: 0,
-    height: 0,
-    borderLeftWidth: 5,
-    borderRightWidth: 5,
-    borderBottomWidth: 8,
-    borderLeftColor: 'transparent',
-    borderRightColor: 'transparent',
-    borderBottomColor: instrument.needle,
-  },
-  dialWrap: { alignItems: 'center', marginTop: space[1] },
+  azimuthHead: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between' },
+  bigNumber: { fontVariant: ['tabular-nums'] },
+  collectNote: { lineHeight: 18, marginTop: space[2] },
+  dialBox: { flex: 1, alignSelf: 'stretch', alignItems: 'center', justifyContent: 'center' },
   dialPlaceholder: {
-    width: 280,
-    height: 280,
+    flex: 1,
+    alignSelf: 'stretch',
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: 140,
+    borderRadius: radius.lg,
     borderWidth: 1,
     borderStyle: 'dashed',
     borderColor: instrument.border,
     backgroundColor: instrument.surface,
   },
   placeholderText: { marginTop: space[3] },
-  bigNumber: { marginTop: space[1], fontVariant: ['tabular-nums'] },
   qualityHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   weightNote: { marginTop: 2 },
   gradeRow: { flexDirection: 'row', alignItems: 'center', gap: space[2] },
@@ -462,7 +741,7 @@ const styles = StyleSheet.create({
   },
   breakdownItem: { flex: 1, alignItems: 'center' },
   breakdownScore: { marginTop: 2, fontVariant: ['tabular-nums'] },
-  metricRow: { flexDirection: 'row', gap: space[2], marginTop: space[4] },
+  metricRow: { flexDirection: 'row', gap: space[2] },
   metricCard: {
     flex: 1,
     backgroundColor: instrument.surface,
@@ -486,5 +765,5 @@ const styles = StyleSheet.create({
   tableRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: space[1] },
   cellName: { flex: 1.6 },
   cell: { flex: 1, fontVariant: ['tabular-nums'] },
-  note: { marginTop: space[4] },
+  note: { marginTop: space[2] },
 });

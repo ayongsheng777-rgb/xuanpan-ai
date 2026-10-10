@@ -1,5 +1,5 @@
 /**
- * 测盘 —— 参考图第 7 屏「请选择数据来源」。
+ * 测盘 —— 单屏道具阵（2026-10-09 重设计）。
  *
  * 这一页存在的意义是**把五条来源摆在一起**，而不是让用户在首页猜。
  * 五条来源的产物是同一样东西（一份坐向数据），但可信度与代价差别很大：
@@ -15,6 +15,13 @@
  *
  * 🔴 本页不显示任何"当前方位/磁场"读数。那是传感器页的职责（一页一事）——
  * 在这里显示一个读数为 0° 的静态罗盘，会被读成"方位就是 0°"。
+ *
+ * ## 单屏做法
+ *
+ * 五块按「2×2 + 1 居中」排（玄学科技风规范的原话），三行**等高平分**剩余高度：
+ * 行用 `flex: 1` 而不是固定高度，屏幕高时块自己长高，不留大片空白；
+ * 屏幕矮时也不会溢出（块内文字固定两行、图标固定 44）。
+ * 详细说明（desc/caveat）收进每块右上角的问号弹层，页面只留"选哪个"的决策信息。
  */
 
 import { Ionicons } from '@expo/vector-icons';
@@ -23,10 +30,10 @@ import React from 'react';
 import { StyleSheet, View } from 'react-native';
 
 import { AppText } from '@/components/AppText';
-import { PressablePanel } from '@/components/Card';
-import { HelpButton } from '@/components/HelpButton';
-import { Screen } from '@/components/Screen';
-import { instrument, radius, space } from '@/theme/tokens';
+import { InstrumentBlock } from '@/components/InstrumentBlock';
+import { PageHeader } from '@/components/PageHeader';
+import { FitSlot, Screen } from '@/components/Screen';
+import { instrument, space } from '@/theme/tokens';
 
 type SourceKey = 'camera' | 'library' | 'sensor' | 'manual' | 'template';
 
@@ -90,99 +97,59 @@ const SOURCES: readonly Source[] = [
 export default function TestScreen(): React.JSX.Element {
   const router = useRouter();
 
-  return (
-    <Screen scroll bottomInsetExtra={space[8]} style={styles.root}>
-      {/* 标题栏由页面自己画 —— tab 的浅色标题栏压在这个深色页面上会割裂。
-          故 _layout.tsx 把本 tab 的 header 关掉（与首页同一处理）。 */}
-      <View style={styles.headerRow}>
-        <AppText size="xl" weight="bold" color={instrument.text} track="tight">
-          测盘
-        </AppText>
-        <HelpButton topic="test" color={instrument.textSecondary} />
-      </View>
+  /** 前四块按 2×2 排，第五块单独一行居中 —— 见文件头注释 */
+  const firstFour = SOURCES.slice(0, 4);
+  const last = SOURCES[4]!;
 
-      <AppText size="md" weight="medium" color={instrument.text} style={styles.sectionLead}>
-        请选择数据来源
-      </AppText>
-      <AppText size="xs" color={instrument.textSecondary} style={styles.lead}>
-        五条来源最终都汇入同一条确认管线 —— 无论从哪来，坐向都必须经你确认
-        才会进入计算。
-      </AppText>
-
-      {SOURCES.map((s) => (
-        <SourceCard key={s.key} source={s} onPress={() => router.push(s.href as never)} />
-      ))}
-
-      <View style={styles.foot}>
-        <AppText size="xs" color={instrument.muted} style={styles.footLine}>
-          所有数值由确定性代码计算，AI 只负责解释，不参与计算、也不得修改结果。
-        </AppText>
-        <AppText size="xs" color={instrument.muted} style={styles.footLine}>
-          罗盘照片会上传到服务端完成识别（默认不保留原图）；传感器读数在设备本地计算，不上传。
-        </AppText>
-      </View>
-    </Screen>
+  const renderBlock = (s: Source) => (
+    <InstrumentBlock
+      key={s.key}
+      title={s.title}
+      desc={s.desc}
+      bound={s.caveat}
+      width="auto"
+      minHeight={0}
+      fill
+      icon={<Ionicons name={s.icon} size={26} color={instrument.accent} />}
+      onPress={() => router.push(s.href as never)}
+    />
   );
-}
 
-function SourceCard({ source, onPress }: { source: Source; onPress: () => void }): React.JSX.Element {
   return (
-    <PressablePanel
-      onPress={onPress}
-      accessibilityLabel={`${source.title}：${source.desc}`}
-      style={styles.cardWrap}
-      contentStyle={styles.card}
-    >
-      <View style={styles.iconWrap}>
-        <Ionicons name={source.icon} size={22} color={instrument.accent} />
-      </View>
-      <View style={styles.body}>
-        <AppText size="md" weight="semibold" color={instrument.text}>
-          {source.title}
-        </AppText>
-        <AppText size="xs" color={instrument.textSecondary} style={styles.desc}>
-          {source.desc}
-        </AppText>
-        {source.caveat ? (
-          <AppText size="xs" color={instrument.muted} style={styles.caveat}>
-            {source.caveat}
-          </AppText>
-        ) : null}
-      </View>
-      <Ionicons name="chevron-forward" size={18} color={instrument.muted} />
-    </PressablePanel>
+    <Screen style={styles.root}>
+      <PageHeader title="测盘" subtitle="请选择数据来源" helpTopic="test" />
+
+      {/* 道具阵：2×2 + 1 居中，三行等高平分剩余高度 */}
+      <FitSlot weight={1}>
+        <View style={styles.grid}>
+          <View style={styles.row}>
+            <View style={styles.cell}>{renderBlock(firstFour[0]!)}</View>
+            <View style={styles.cell}>{renderBlock(firstFour[1]!)}</View>
+          </View>
+          <View style={styles.row}>
+            <View style={styles.cell}>{renderBlock(firstFour[2]!)}</View>
+            <View style={styles.cell}>{renderBlock(firstFour[3]!)}</View>
+          </View>
+          {/* 第五块居中，宽度与上面四块一致（48% ≈ 半宽减间隙） */}
+          <View style={styles.rowCenter}>
+            <View style={styles.cellHalf}>{renderBlock(last)}</View>
+          </View>
+        </View>
+      </FitSlot>
+
+      <AppText size="xs" color={instrument.muted} numberOfLines={2} style={styles.foot}>
+        五条来源最终都汇入同一条确认管线 —— 坐向必须经你确认才会进入计算。
+      </AppText>
+    </Screen>
   );
 }
 
 const styles = StyleSheet.create({
   root: { backgroundColor: instrument.bg },
-  headerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  sectionLead: { marginTop: space[4] },
-  lead: { marginTop: space[2], marginBottom: space[3] },
-  /* 外框只管定位；底/边/圆角/内边距由 `PressablePanel` 给 —— 见 Card.tsx「三个表面原语」 */
-  cardWrap: { marginTop: space[2] },
-  card: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: space[3],
-    marginBottom: 0,
-  },
-  iconWrap: {
-    width: 40,
-    height: 40,
-    /* 内嵌图形用 radius.sm，比外层容器的 lg 紧一档 */
-    borderRadius: radius.sm,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: instrument.surfaceAlt,
-  },
-  body: { flex: 1 },
-  desc: { marginTop: 2, lineHeight: 17 },
-  caveat: { marginTop: space[1], lineHeight: 16 },
-  foot: { marginTop: space[5], gap: space[1] },
-  footLine: { lineHeight: 17 },
+  grid: { flex: 1, gap: space[2] },
+  row: { flexDirection: 'row', flex: 1, gap: space[2] },
+  rowCenter: { flexDirection: 'row', flex: 1, justifyContent: 'center' },
+  cell: { flex: 1 },
+  cellHalf: { width: '48%' },
+  foot: { lineHeight: 16 },
 });

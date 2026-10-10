@@ -14,10 +14,18 @@
  *   3. **删除要二次确认，且用内联确认而不是弹窗。**
  *      `Alert.alert` 在 web/部分安卓定制系统上不可靠，且模板是用户手工积累的，
  *      误删一个用了很久的预设没有撤销路径。
+ *
+ * ## 单屏做法（2026-10-09）
+ *
+ * 标题栏由 `PageHeader` 统一画（带文字的返回 + 讲解 + 刷新 + 新建开关），
+ * 页首说明压进副标题；模板列表交给 `FoldList` —— 页内只显示最近 3 条，
+ * 其余进「更多」浮层（浮层是覆盖层，不是页面滚动）。
+ * 单条模板较高（名称 + 盘式 + 时间 + 操作 + 可能的未知盘式提示），
+ * 故 `max` 取 3 而非默认 4。
  */
 
 import { Ionicons } from '@expo/vector-icons';
-import { Stack, useRouter } from 'expo-router';
+import { useRouter } from 'expo-router';
 import React, { useCallback, useState } from 'react';
 import { Pressable, StyleSheet, TextInput, View } from 'react-native';
 
@@ -26,7 +34,8 @@ import type { CompassTemplate } from '@/api/types';
 import { AppText } from '@/components/AppText';
 import { Banner } from '@/components/Banner';
 import { Button } from '@/components/Card';
-import { HelpButton } from '@/components/HelpButton';
+import { FoldList } from '@/components/FoldList';
+import { PageHeader } from '@/components/PageHeader';
 import { Screen } from '@/components/Screen';
 import { DIAL_STYLES, DIAL_STYLE_ORDER, coerceDialStyle, type DialStyleId } from '@/lib/dialStyle';
 import { useAsync, useSubmit } from '@/lib/useAsync';
@@ -112,42 +121,28 @@ export default function TemplatesScreen(): React.JSX.Element {
   );
 
   return (
-    <Screen scroll bottomInsetExtra={space[8]} style={styles.root}>
-      {/* 标题栏自绘（headerShown:false）：深色域页面顶上压一条浅色标题栏会割裂，
-          与 index / test 同一处理。 */}
-      <Stack.Screen options={{ headerShown: false }} />
-
-      <View style={styles.head}>
-        <AppText size="xl" weight="bold" color={instrument.text} track="tight">
-          我的罗盘
-        </AppText>
-        <View style={styles.headActions}>
-          <HelpButton topic="templates" color={instrument.textSecondary} />
+    <Screen style={styles.root}>
+      <PageHeader
+        title="我的罗盘"
+        subtitle="保存盘式与默认坐向，测盘时一键带出"
+        back
+        helpTopic="templates"
+        onRefresh={reload}
+        refreshing={loading && items.length > 0}
+        action={
           <Pressable
             onPress={() => setCreating((v) => !v)}
             accessibilityRole="button"
             accessibilityLabel={creating ? '收起新建面板' : '新建模板'}
             style={styles.addBtn}
           >
-            <Ionicons
-              name={creating ? 'close' : 'add'}
-              size={22}
-              color={instrument.accent}
-            />
+            <Ionicons name={creating ? 'close' : 'add'} size={22} color={instrument.accent} />
           </Pressable>
-        </View>
-      </View>
-
-      <AppText size="xs" color={instrument.textSecondary} style={styles.lead}>
-        保存常用的盘式与默认坐向，测盘时一键带出。模板不产生任何术数结论，
-        只记住「用哪面盘、从哪个基准开始」。
-      </AppText>
+        }
+      />
 
       {creating ? (
         <View style={styles.createPanel}>
-          <AppText size="sm" weight="medium" color={instrument.text}>
-            新建模板
-          </AppText>
           <TextInput
             value={newName}
             onChangeText={setNewName}
@@ -157,9 +152,6 @@ export default function TemplatesScreen(): React.JSX.Element {
             style={styles.input}
             accessibilityLabel="模板名称"
           />
-          <AppText size="xs" color={instrument.textSecondary} style={styles.pickLabel}>
-            盘式
-          </AppText>
           <View style={styles.styleRow}>
             {DIAL_STYLE_ORDER.map((sid) => {
               const on = sid === newStyle;
@@ -201,65 +193,69 @@ export default function TemplatesScreen(): React.JSX.Element {
       ) : null}
 
       {error ? (
-        <Banner tone="error" title="无法读取模板" style={styles.banner}>
+        <Banner tone="error" title="无法读取模板">
           <AppText size="sm">{error}</AppText>
           <Button label="重试" variant="ghost" style={styles.panelBtn} onPress={reload} />
         </Banner>
       ) : null}
 
       {toggleFavorite.error ? (
-        <Banner tone="warning" title="未能修改常用标记" style={styles.banner}>
+        <Banner tone="warning" title="未能修改常用标记">
           {toggleFavorite.error}
         </Banner>
       ) : null}
       {remove.error ? (
-        <Banner tone="error" title="删除失败" style={styles.banner}>
+        <Banner tone="error" title="删除失败">
           {remove.error}
         </Banner>
       ) : null}
       {applyTemplate.error ? (
-        <Banner tone="warning" title="无法使用该模板" style={styles.banner}>
+        <Banner tone="warning" title="无法使用该模板">
           {applyTemplate.error}
         </Banner>
       ) : null}
 
-      {loading && items.length === 0 ? (
-        <AppText size="sm" color={instrument.textSecondary} center style={styles.loading}>
-          正在读取模板…
-        </AppText>
-      ) : null}
+      {/* ---------- 模板列表：页内前 3 条 + 「更多」浮层 ---------- */}
+      <FoldList
+        items={items}
+        max={3}
+        keyOf={(tpl) => tpl.template_id}
+        moreTitle="全部模板"
+        tone="instrument"
+        gap={space[2]}
+        empty={
+          error ? null : loading ? (
+            <AppText size="sm" color={instrument.textSecondary} center style={styles.loading}>
+              正在读取模板…
+            </AppText>
+          ) : (
+            <View style={styles.empty}>
+              <Ionicons name="albums-outline" size={28} color={instrument.muted} />
+              <AppText size="md" weight="medium" color={instrument.text} center style={styles.emptyTitle}>
+                还没有模板
+              </AppText>
+              <AppText size="xs" color={instrument.textSecondary} center style={styles.emptyHint}>
+                点右上角「+」把当前常用的盘式存下来，下次测盘就能一键带出。
+              </AppText>
+            </View>
+          )
+        }
+        renderItem={(tpl) => (
+          <TemplateRow
+            tpl={tpl}
+            pendingDelete={pendingDelete === tpl.template_id}
+            busy={toggleFavorite.loading || remove.loading || applyTemplate.loading}
+            onUse={() => void onUse(tpl)}
+            onToggleFavorite={() => void toggleFavorite.run(tpl)}
+            onAskDelete={() => setPendingDelete(tpl.template_id)}
+            onCancelDelete={() => setPendingDelete(null)}
+            onConfirmDelete={() => void remove.run(tpl.template_id)}
+          />
+        )}
+      />
 
-      {!loading && !error && items.length === 0 && !creating ? (
-        /* 深色域自绘空态：Card 的 EmptyState 用的是浅色 token（textSecondary
-           #6B6154），压在 instrument.bg #0A1626 上对比度不足 —— 空的页面
-           加上看不见的说明，等于告诉用户"这里坏了"。 */
-        <View style={styles.empty}>
-          <Ionicons name="albums-outline" size={28} color={instrument.muted} />
-          <AppText size="md" weight="medium" color={instrument.text} center style={styles.emptyTitle}>
-            还没有模板
-          </AppText>
-          <AppText size="xs" color={instrument.textSecondary} center style={styles.emptyHint}>
-            点右上角「+」把当前常用的盘式存下来，下次测盘就能一键带出。
-          </AppText>
-        </View>
-      ) : null}
-
-      {items.map((tpl) => (
-        <TemplateRow
-          key={tpl.template_id}
-          tpl={tpl}
-          pendingDelete={pendingDelete === tpl.template_id}
-          busy={toggleFavorite.loading || remove.loading || applyTemplate.loading}
-          onUse={() => void onUse(tpl)}
-          onToggleFavorite={() => void toggleFavorite.run(tpl)}
-          onAskDelete={() => setPendingDelete(tpl.template_id)}
-          onCancelDelete={() => setPendingDelete(null)}
-          onConfirmDelete={() => void remove.run(tpl.template_id)}
-        />
-      ))}
-
-      <AppText size="xs" color={instrument.muted} center style={styles.footnote}>
-        模板只保存盘式与坐向参数，不含任何测量数据；删除模板不会影响历史记录。
+      <AppText size="xs" color={instrument.muted} center numberOfLines={1} style={styles.footnote}>
+        模板只保存盘式与坐向参数，不含任何测量数据；删除模板不影响历史记录。
       </AppText>
     </Screen>
   );
@@ -403,12 +399,6 @@ function IconAction({
 
 const styles = StyleSheet.create({
   root: { backgroundColor: instrument.bg },
-  head: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  headActions: { flexDirection: 'row', alignItems: 'center', gap: space[1] },
   empty: { alignItems: 'center', gap: space[2], paddingVertical: space[8] },
   emptyTitle: { marginTop: space[1] },
   emptyHint: { lineHeight: 17 },
@@ -417,11 +407,8 @@ const styles = StyleSheet.create({
     borderRadius: radius.pill,
     backgroundColor: instrument.surface,
   },
-  lead: { marginTop: space[2], lineHeight: 18 },
-  banner: { marginTop: space[3] },
   loading: { marginTop: space[8] },
   createPanel: {
-    marginTop: space[3],
     padding: space[3],
     borderRadius: radius.lg,
     borderWidth: 1,
@@ -429,7 +416,6 @@ const styles = StyleSheet.create({
     backgroundColor: instrument.surface,
   },
   input: {
-    marginTop: space[2],
     borderWidth: 1,
     borderColor: instrument.border,
     borderRadius: radius.md,
@@ -438,7 +424,6 @@ const styles = StyleSheet.create({
     color: instrument.text,
     backgroundColor: instrument.surfaceAlt,
   },
-  pickLabel: { marginTop: space[3] },
   styleRow: { flexDirection: 'row', gap: space[2], marginTop: space[2] },
   styleChip: {
     flex: 1,
@@ -454,7 +439,6 @@ const styles = StyleSheet.create({
   panelBanner: { marginTop: space[3] },
   panelBtn: { marginTop: space[3] },
   row: {
-    marginTop: space[3],
     borderRadius: radius.lg,
     borderWidth: 1,
     borderColor: instrument.border,
@@ -497,5 +481,5 @@ const styles = StyleSheet.create({
     gap: space[2],
     marginTop: space[2],
   },
-  footnote: { marginTop: space[5], lineHeight: 18 },
+  footnote: { marginTop: space[2] },
 });

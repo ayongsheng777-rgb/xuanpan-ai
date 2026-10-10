@@ -12,6 +12,13 @@
  * 全宽出血、参考圈 + 四角对位标记、控制条压在取景画面上，而不是把相机
  * 塞进一张卡片里（卡片自己的边框会与参考圈争夺"哪条线才是对齐基准"）。
  * 相册作为第二入口也放在控制条上，与快门共用同一条识别管线。
+ *
+ * ## 单屏做法（2026-10-09）
+ *
+ * 取景 / 相册入口是**唯一弹性区**（`FitSlot weight={1}`）：屏幕高时取景更长，
+ * 矮屏也不会溢出。原先排在页面里的「拍摄要点」四条与各段长说明（几何识别的
+ * 信息缺失、校准的用途、失败回退）统一收进标题栏问号旁的「说明」弹层 ——
+ * 页面只留"拍 / 选 / 看结果"这三件事。
  */
 
 import { Ionicons } from '@expo/vector-icons';
@@ -19,20 +26,31 @@ import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as ImagePicker from 'expo-image-picker';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useCallback, useRef, useState } from 'react';
-import { Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 
 import { getApiClient, resolveBaseUrl } from '@/api/client';
 import type { ScanResult } from '@/api/types';
 import { AppText } from '@/components/AppText';
 import { Banner } from '@/components/Banner';
 import { Button, Card } from '@/components/Card';
-import { Screen } from '@/components/Screen';
+import { InfoPopup } from '@/components/InfoPopup';
+import { PageHeader } from '@/components/PageHeader';
+import { FitSlot, Screen } from '@/components/Screen';
 import { SegmentedTabs } from '@/components/SegmentedTabs';
 import { StepList, failureStepOf, stepsUpTo, type Step } from '@/components/StepList';
 import { useSubmit } from '@/lib/useAsync';
-import { alpha, brand, colors, layout, radius, space } from '@/theme/tokens';
+import { alpha, brand, colors, instrument, layout, radius, space } from '@/theme/tokens';
 
 type Entry = 'camera' | 'library';
+
+/** 「拍摄要点」四条 —— 收进弹层，不占版面 */
+const SHOOT_TIPS = [
+  '让罗盘完整进入画面，尽量占满取景区',
+  '正面俯拍，避免大角度斜拍（透视校正有上限）',
+  '避开直射光与反光，盘面文字清晰可辨',
+  '确保鱼丝线（贯通盘面的细线）可见',
+] as const;
+
 export default function ScanScreen(): React.JSX.Element {
   const router = useRouter();
   const params = useLocalSearchParams<{ entry?: string }>();
@@ -40,6 +58,8 @@ export default function ScanScreen(): React.JSX.Element {
   const [entry, setEntry] = useState<Entry>(params.entry === 'library' ? 'library' : 'camera');
   const [permission, requestPermission] = useCameraPermissions();
   const cameraRef = useRef<CameraView | null>(null);
+  /** 「拍摄要点与说明」弹层 —— 长说明都收在这里，页面不因文字拉长 */
+  const [tipsOpen, setTipsOpen] = useState(false);
 
   const [steps, setSteps] = useState<Step[] | null>(null);
   const [result, setResult] = useState<ScanResult | null>(null);
@@ -106,7 +126,26 @@ export default function ScanScreen(): React.JSX.Element {
   }, [runScan]);
 
   return (
-    <Screen scroll bottomInsetExtra={space[8]}>
+    <Screen style={styles.root}>
+      <PageHeader
+        title="罗盘识向"
+        subtitle={entry === 'camera' ? '拍摄真实罗盘' : '从相册导入'}
+        back
+        backLabel="返回测盘"
+        helpTopic="scan"
+        action={
+          <Pressable
+            onPress={() => setTipsOpen(true)}
+            accessibilityRole="button"
+            accessibilityLabel="拍摄要点与说明"
+            hitSlop={10}
+            style={styles.headAction}
+          >
+            <Ionicons name="information-circle-outline" size={20} color={instrument.accent} />
+          </Pressable>
+        }
+      />
+
       <SegmentedTabs
         items={[
           { key: 'camera', label: '拍摄识别' },
@@ -115,27 +154,29 @@ export default function ScanScreen(): React.JSX.Element {
         value={entry}
         onChange={(k) => setEntry(k as Entry)}
       />
-      <View style={styles.spacer} />
-
-      {entry === 'camera' ? (
-        <CameraEntry
-          permissionGranted={permission?.granted ?? false}
-          permissionCanAsk={permission?.canAskAgain ?? true}
-          onRequest={() => void requestPermission()}
-          cameraRef={cameraRef}
-          onShoot={takePicture}
-          onPick={pickFromLibrary}
-          shooting={scan.loading}
-        />
-      ) : (
-        <LibraryEntry onPick={pickFromLibrary} picking={scan.loading} />
-      )}
 
       {scan.error ? (
         <Banner tone={scan.fixable ? 'warning' : 'error'} title={scan.fixable ? '照片需要更换' : '识别失败'}>
           {scan.error}
         </Banner>
       ) : null}
+
+      {/* ---------- 取景 / 相册入口：本页唯一弹性区 ---------- */}
+      <FitSlot weight={1} minHeight={180} style={styles.bleedSlot}>
+        {entry === 'camera' ? (
+          <CameraEntry
+            permissionGranted={permission?.granted ?? false}
+            permissionCanAsk={permission?.canAskAgain ?? true}
+            onRequest={() => void requestPermission()}
+            cameraRef={cameraRef}
+            onShoot={takePicture}
+            onPick={pickFromLibrary}
+            shooting={scan.loading}
+          />
+        ) : (
+          <LibraryEntry onPick={pickFromLibrary} picking={scan.loading} />
+        )}
+      </FitSlot>
 
       {steps ? (
         <Card title="识别过程">
@@ -187,23 +228,37 @@ export default function ScanScreen(): React.JSX.Element {
         )
       ) : null}
 
-      <Card title="拍摄要点">
-        {[
-          '让罗盘完整进入画面，尽量占满取景区',
-          '正面俯拍，避免大角度斜拍（透视校正有上限）',
-          '避开直射光与反光，盘面文字清晰可辨',
-          '确保鱼丝线（贯通盘面的细线）可见',
-        ].map((t) => (
-          <AppText key={t} size="sm" style={styles.tip}>
+      <InfoPopup
+        visible={tipsOpen}
+        onClose={() => setTipsOpen(false)}
+        title="拍摄要点与说明"
+        subtitle="识别前先看一眼"
+      >
+        <AppText size="sm" weight="semibold" color={colors.text} style={styles.popupBody}>
+          拍摄要点
+        </AppText>
+        {SHOOT_TIPS.map((t) => (
+          <AppText key={t} size="sm" color={colors.text} style={styles.popupBody}>
             · {t}
           </AppText>
         ))}
-      </Card>
-
-      <AppText size="xs" color="muted" center style={styles.note}>
-        照片会上传到 {resolveBaseUrl()} 完成识别；默认不保留原图。
-        {'\n'}识别结果须经你确认后才进入计算。
-      </AppText>
+        <AppText size="sm" color={colors.textSecondary} style={styles.popupBody}>
+          几何识别无法判断鱼丝线哪一端为坐山 —— 这是盘面本身的信息缺失，不是算法不足，
+          所以必须由你确认。
+        </AppText>
+        <AppText size="sm" color={colors.textSecondary} style={styles.popupBody}>
+          斜拍会让测出的角度整体偏掉几度。「先校准与还原」让你把照片里的实物罗盘在界面上
+          摆正，再取读数 —— 照片只作参照，不参与计算。
+        </AppText>
+        <AppText size="sm" color={colors.textSecondary} style={styles.popupBody}>
+          识别失败不影响使用：可以直接手动选择坐山 ——「确认坐向」页提供二十四山环形选择器，
+          无需依赖照片。
+        </AppText>
+        <AppText size="xs" color={colors.muted} style={styles.popupBody}>
+          照片会上传到 {resolveBaseUrl()} 完成识别；默认不保留原图。
+          识别结果须经你确认后才进入计算。
+        </AppText>
+      </InfoPopup>
     </Screen>
   );
 }
@@ -229,17 +284,6 @@ function CameraEntry({
   onPick: () => void;
   shooting: boolean;
 }): React.JSX.Element {
-  const { height } = useWindowDimensions();
-
-  /**
-   * 取景高度：视口高约 62%，夹在 260~560 之间。
-   *
-   * 上限的理由：参考圈是**圆**的，取景区再高也不会更好对位，
-   * 只会把控制条顶出屏幕。下限的理由：矮屏上取景区不能矮于参考圈本身，
-   * 否则圈被裁掉一半 —— 而"让罗盘外圈与参考圈贴合"正是这一屏的全部意义。
-   */
-  const viewfinderH = Math.min(560, Math.max(260, Math.round(height * 0.62)));
-
   if (!permissionGranted) {
     return (
       <Card title="需要相机权限">
@@ -260,8 +304,9 @@ function CameraEntry({
   return (
     /* 沉浸式取景 —— 全宽出血、不套 Card 外壳。
        理由：取景框套在卡片里时，卡片自己的边框会与参考圈争夺"哪条线才是对齐基准"，
-       而这个动作的全部意义就是对齐。 */
-    <View style={[styles.viewfinder, { height: viewfinderH }]}>
+       而这个动作的全部意义就是对齐。
+       高度交给外层 FitSlot（flex:1）—— 屏幕高时取景更长，矮屏自动收窄。 */
+    <View style={styles.viewfinder}>
       <CameraView ref={cameraRef} style={StyleSheet.absoluteFill} facing="back" />
 
       {/* 参考圈 + 四角对位标记。相机在本产品里是「测量仪器」，不是扫码框。 */}
@@ -355,10 +400,6 @@ function DetectedCard({
       <AppText size="sm" color="textSecondary">
         检测到 {names.length} 个对宫候选：{names.join(' / ') || '—'}
       </AppText>
-      <AppText size="xs" color="muted" style={styles.detectedNote}>
-        几何识别无法判断鱼丝线哪一端为坐山 —— 这是盘面本身的信息缺失，
-        不是算法不足，所以必须由你确认。
-      </AppText>
       <Button
         label="前往确认坐向"
         icon={<Ionicons name="arrow-forward" size={18} color={colors.onPrimary} />}
@@ -366,18 +407,12 @@ function DetectedCard({
         style={styles.confirmBtn}
       />
       {onCalibrate ? (
-        <>
-          <Button
-            label="先校准与还原（对着照片对位）"
-            variant="secondary"
-            style={styles.calibrateBtn}
-            onPress={onCalibrate}
-          />
-          <AppText size="xs" color="muted" style={styles.calibrateHint}>
-            斜拍会让测出的角度整体偏掉几度。这一步让你把照片里的实物罗盘
-            在界面上摆正，再取读数 —— 照片只作参照，不参与计算。
-          </AppText>
-        </>
+        <Button
+          label="先校准与还原（对着照片对位）"
+          variant="secondary"
+          style={styles.calibrateBtn}
+          onPress={onCalibrate}
+        />
       ) : null}
     </Card>
   );
@@ -415,10 +450,6 @@ function NotDetectedCard({
         </View>
       ) : null}
 
-      <AppText size="sm" color="textSecondary" style={styles.fallbackHint}>
-        识别失败不影响使用：可以直接手动选择坐山 ——
-        「确认坐向」页提供二十四山环形选择器，无需依赖照片。
-      </AppText>
       <Button
         label="手动选择坐向"
         variant="secondary"
@@ -430,12 +461,15 @@ function NotDetectedCard({
 }
 
 const styles = StyleSheet.create({
-  spacer: { height: space[3] },
-  /* 取景器：横向负 margin 抵消 Screen 的页面留白 —— 取景区必须贴到屏幕两侧，
-     否则"沉浸"只是把卡片换成另一块矩形。 */
+  root: { backgroundColor: instrument.bg },
+  headAction: { padding: space[1] },
+  /* 取景器横向负 margin 抵消 Screen 的页面留白 —— 取景区必须贴到屏幕两侧，
+     否则"沉浸"只是把卡片换成另一块矩形。故弹性槽允许内容外溢。 */
+  bleedSlot: { overflow: 'visible' },
   viewfinder: {
+    flex: 1,
     marginHorizontal: -layout.gutter,
-    marginBottom: space[3],
+    marginBottom: space[2],
     overflow: 'hidden',
     /* 刻意用纯黑而非暖黑 token —— 取景器是"关掉的屏幕"，
        任何暖调都会让用户以为画面已经在预览了。 */
@@ -503,14 +537,10 @@ const styles = StyleSheet.create({
   },
   libHint: { marginBottom: space[3], lineHeight: 20 },
   permBtn: { marginTop: space[3] },
-  detectedNote: { marginTop: space[2], lineHeight: 18 },
   confirmBtn: { marginTop: space[3] },
   calibrateBtn: { marginTop: space[2] },
-  calibrateHint: { marginTop: space[2], lineHeight: 17 },
   reason: { marginBottom: space[1] },
   warnBlock: { marginTop: space[2], gap: 2 },
   warn: { lineHeight: 18 },
-  fallbackHint: { marginTop: space[3], lineHeight: 20 },
-  tip: { lineHeight: 20 },
-  note: { marginTop: space[4], lineHeight: 18 },
+  popupBody: { lineHeight: 22 },
 });

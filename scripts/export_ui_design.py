@@ -84,7 +84,10 @@ VOLUMES: tuple[Volume, ...] = (
         blurb=(
             "全 App 唯一的色值 / 间距 / 字号 / 圆角 / 阴影真源。"
             "五色由演示图逐像素中位数取样实测得出，不是随手挑的色板；"
-            "`instrument` 是罗盘域专用的深色仪器色域，与暖色中性阶双轨并存。"
+            "`instrument` 是罗盘域专用的**浅金仪器色域**（2026-10-08 用户决策"
+            "「明亮为主、金色做背景」），与暖色中性阶双轨并存。"
+            "2026-10-09 新增两组：`hud`（玄机装饰层 —— 回纹角花 / HUD 刻度 / 星宿连线，"
+            "只加结构与质感、不引入新色相）与 `fit`（单屏配比与列表折叠上限）。"
             "组件内禁止出现硬编码色值（对应 RULE-005「规则不散落」）。"
         ),
         files=("src/theme/tokens.ts",),
@@ -93,17 +96,28 @@ VOLUMES: tuple[Volume, ...] = (
         slug="01-components-base",
         title="基础组件",
         blurb=(
-            "与术数领域无关的通用 UI 原件：排版、容器、按钮、标签、横幅、分段切换、讲解入口。"
+            "与术数领域无关的通用 UI 原件：排版、容器、按钮、标签、横幅、分段切换、讲解入口，"
+            "以及「点一下弹白话」的两件套（`Term` 行内术语 + `InfoPopup` 底部半屏卡片）。"
             "这些组件决定了全 App 的视觉基调，也是判断「设计系统是否被真正执行」的第一手材料。"
+            "2026-10-09 单屏改造新增四件：`PageHeader`（统一标题栏 + 带文字的返回入口）、"
+            "`Screen` 的 `FitSlot`/`FitSlots`（单屏弹性分区，页面骨架已不可滚动）、"
+            "`FoldList`（列表折叠为前 N 条 + 更多浮层）、"
+            "`Hud` 与 `InstrumentBlock`（玄机 HUD 装饰与道具化宫格块）。"
         ),
         files=(
             "src/components/AppText.tsx",
             "src/components/Screen.tsx",
+            "src/components/PageHeader.tsx",
             "src/components/Card.tsx",
             "src/components/Chip.tsx",
             "src/components/Banner.tsx",
             "src/components/SegmentedTabs.tsx",
             "src/components/HelpButton.tsx",
+            "src/components/InfoPopup.tsx",
+            "src/components/FoldList.tsx",
+            "src/components/Hud.tsx",
+            "src/components/InstrumentBlock.tsx",
+            "src/components/Term.tsx",
             "src/components/usePressScale.ts",
         ),
     ),
@@ -113,7 +127,8 @@ VOLUMES: tuple[Volume, ...] = (
         blurb=(
             "承载术数语义的组件。读数与几何的呈现方式直接关系到「用户会不会误读」，"
             "例如：罗盘盘式的图层与配色角色、坐向修正的环形选择器、"
-            "识别步骤列表（只由真实返回驱动）、断卦结论的中性色规则。"
+            "识别步骤列表（只由真实返回驱动）、断卦结论的中性色规则，"
+            "以及签库选择器（`QianSetPicker`：演示库挂角标，避免被当成正式签库）。"
         ),
         files=(
             "src/components/CompassDial.tsx",
@@ -121,6 +136,7 @@ VOLUMES: tuple[Volume, ...] = (
             "src/components/StepList.tsx",
             "src/components/DuanCard.tsx",
             "src/components/FactList.tsx",
+            "src/components/QianSetPicker.tsx",
         ),
     ),
     Volume(
@@ -147,7 +163,8 @@ VOLUMES: tuple[Volume, ...] = (
         title="命盘 / 占测 / 三式页面",
         blurb=(
             "术数计算结果的呈现层：八字命盘、六爻与灵签、三式（奇门 / 六壬 / 太乙）、"
-            "黄历择日、罗盘牌库。这些页面的共性是「信息密度高、字段多」，"
+            "黄历择日、罗盘牌库，以及灵签机（摇签筒 / 老虎机签号）与每日早报"
+            "（黄历宜忌 + 个人运程 + 打卡）。这些页面的共性是「信息密度高、字段多」，"
             "因此空态、缺项（`null` → 「未定」）与长文案折行是主要设计难点。"
         ),
         files=(
@@ -156,13 +173,17 @@ VOLUMES: tuple[Volume, ...] = (
             "app/sanshi.tsx",
             "app/almanac.tsx",
             "app/templates.tsx",
+            "app/qianji.tsx",
+            "app/morning.tsx",
         ),
     ),
     Volume(
         slug="04-pages-divination",
         title="导航与系统页",
         blurb=(
-            "底栏骨架（决定信息架构）、测盘、分析、历史、我的，以及罗盘校准。"
+            "底栏骨架（决定信息架构）、测盘、分析、历史、我的，以及罗盘校准；"
+            "另含从「我的」进入的用户信息设置页（昵称 / 性别 / 出生日期与时辰，本地存储）"
+            "与 AI 模型中心（按能力而非品牌组织，只选「用哪个模型」，密钥永不进 App）。"
             "底栏当前是「罗盘 ｜ 测盘 ｜ 分析 ｜ 历史 ｜ 我的」——"
             "命盘与占测已并入「分析」内页，理由见 `(tabs)/_layout.tsx` 顶部注释。"
         ),
@@ -173,17 +194,23 @@ VOLUMES: tuple[Volume, ...] = (
             "app/(tabs)/history.tsx",
             "app/(tabs)/mine.tsx",
             "app/calibrate.tsx",
+            "app/profile.tsx",
+            "app/ai-model.tsx",
         ),
     ),
     Volume(
         slug="06-content-copy",
         title="界面讲解文案",
         blurb=(
-            "各页「帮助」入口展开的操作说明与运作原理讲解。"
+            "各页「帮助」入口展开的操作说明与运作原理讲解，外加术语白话词典"
+            "（`plainTerms.ts`：每个专业术语一句话大白话，供 `Term` 组件点击弹出）。"
             "它是产品「把黑箱讲清楚」这一主张的落地物，"
             "也是判断文案与界面是否一致（有没有把已删除的按钮写进说明）的唯一依据。"
         ),
-        files=("src/content/help.ts",),
+        files=(
+            "src/content/help.ts",
+            "src/content/plainTerms.ts",
+        ),
     ),
     Volume(
         slug="07-ui-logic",
@@ -191,7 +218,8 @@ VOLUMES: tuple[Volume, ...] = (
         blurb=(
             "不是纯视觉，但直接决定界面看起来什么样：环形与盘面的几何计算、"
             "盘面配色角色、迷你曲线、传感器质量判据、异步状态机、"
-            "以及三式的九宫与十二宫布局。这些模块被刻意做成不依赖 React Native 的纯函数，"
+            "以及三式的九宫与十二宫布局；另含用户信息的本地存取（`profile.ts`，"
+            "决定每日运程按谁的生辰算）。这些模块被刻意做成不依赖 React Native 的纯函数，"
             "才能在无设备的条件下被真跑验证。"
         ),
         files=(
@@ -206,6 +234,7 @@ VOLUMES: tuple[Volume, ...] = (
             "src/lib/useAsync.ts",
             "src/lib/date.ts",
             "src/lib/apiCandidates.ts",
+            "src/lib/profile.ts",
             "src/services/useSensors.ts",
         ),
     ),
@@ -216,10 +245,12 @@ VOLUMES: tuple[Volume, ...] = (
             "界面上的每个数字都来自后端，`types.ts` 与后端 schema 一一对应。"
             "看这一卷能回答「这个格子里的值是谁算的、字段名叫什么、缺数据时是什么形态」——"
             "也是判断前端有没有自己算术数的依据（结论：没有，唯一例外是二十四山的顺序与山心角）。"
+            "另含 `baseUrlStore.ts`：后端地址的人工覆盖值（存手机本地，优先于启动自动探活）。"
         ),
         files=(
             "src/api/types.ts",
             "src/api/client.ts",
+            "src/api/baseUrlStore.ts",
             "src/types/env.d.ts",
         ),
     ),

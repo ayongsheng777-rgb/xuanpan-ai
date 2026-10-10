@@ -259,6 +259,16 @@ def responses(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Any]:
             "/api/v1/almanac/range?start=2026-09-17&end=2026-09-19"
         ).json()
 
+        # 每日运程：日期写死（同黄历的理由 —— 断言的是字段齐全，不是结论）
+        daily = client.post(
+            "/api/v1/daily/fortune",
+            json={"birth_date": "1981-05-21", "target_date": "2026-10-07"},
+        ).json()
+        out["DailyFortune"] = daily
+        out["DailyFortuneFacts"] = daily["facts"]
+        assert daily["facts"]["domains"], "每日运程无五宫数据 —— 无法校验 DailyDomain"
+        out["DailyDomain"] = daily["facts"]["domains"][0]
+
         zeri_events = client.get("/api/v1/zeri/events").json()
         out["ZeriEventsResponse"] = zeri_events
         out["ZeriEvent"] = zeri_events["events"][0]
@@ -398,6 +408,10 @@ _CHECKED: tuple[str, ...] = (
     "ZeriEventsResponse", "ZeriEvent", "ZeriSchool",
     "ZeriResultResponse", "ZeriResultFacts", "ZeriResultTradition", "ZeriDay",
     "DuanResponse",
+    # 每日运程 —— 与日历域同一类风险：手写类型、此前从未被前端核对过。
+    # `DailyFortuneFacts.lucky` 是内联对象（解析器只取顶层字段名），
+    # 五宫取首个 domain 校验 `DailyDomain` 的四个字段。
+    "DailyFortune", "DailyFortuneFacts", "DailyDomain",
     # 三式 · 奇门 —— 与日历域同一类风险：手写类型、此前从未被前端核对过。
     # 其中 `QimenPalace` 取自**中五宫**（该宫 door/god 为 null），
     # 正是最容易把"字段值为 null"误当成"字段不存在"的地方。

@@ -102,9 +102,93 @@ class TestMeta:
         body = client.get("/api/v1/meta/capabilities").json()
         assert isinstance(body["fenjin_table_available"], bool)
 
-    def test_qian_sets_marks_demo(self, client: TestClient) -> None:
+    def test_qian_sets_carry_demo_flag(self, client: TestClient) -> None:
+        """每个签库都必须带布尔 `demo` 字段，且当前不应再存在演示库。
+
+        原断言是「必须存在一个演示库」—— 演示库（demo_guanyin）已于 2026-10-08
+        按用户要求移除（见 `packages/fortune-core/fortune_core/qian.py` 顶部注释），
+        该断言随之过时：库删掉后它在任何干净检出上都必然失败。
+        改为当前真实约束：字段契约仍在（前端靠它给演示库挂角标，字段没了会静默不挂），
+        且不应再出现被标记为演示的库。
+        """
         sets = client.get("/api/v1/meta/qian-sets").json()["sets"]
-        assert any(s.get("demo") for s in sets), "演示签库须自带 demo 标记"
+        assert sets, "签库列表不应为空"
+        assert all(isinstance(s.get("demo"), bool) for s in sets), (
+            f"每个签库都须带布尔 demo 字段：{sets}"
+        )
+        assert not any(s["demo"] for s in sets), "演示库已于 2026-10-08 移除，不应再出现"
+
+    def test_ai_model_selection_accepts_every_listed_provider(
+        self, client: TestClient
+    ) -> None:
+        """App 里点得到，就必须选得中 —— 挡住「按能力分组列出、点下去 400」。
+
+        实测过的错（2026-10-08）：该接口自写了一份 capability 白名单
+        `{vision, reasoning, fast, fallback, embedding}`，与配置层
+        `llm.capability` 的 choices `(reasoning, fast, local)` 不一致。
+        App 的调用是 `(p.id, p.capability)`，而 `template` provider 自报
+        `capability="template"` → 「本地规则模板」点了必然报错；
+        `vision`/`fallback`/`embedding` 则过了本接口又被下游 ConfigError 拒掉。
+        这里遍历 `/meta/ai-providers` 的每一项，按 App 的真实方式打一遍。
+        """
+        providers = client.get("/api/v1/meta/ai-providers").json()["providers"]
+        assert providers, "provider 列表为空，检查已空转"
+        for p in providers:
+            resp = client.post(
+                "/api/v1/meta/ai-model-selection",
+                json={"model": p["id"], "capability": p["capability"]},
+            )
+            assert resp.status_code == 200, (
+                f"App 点「{p['name']}」会失败：model={p['id']} "
+                f"capability={p['capability']} -> {resp.status_code} {resp.text}"
+            )
+
+    def test_ai_model_selection_normalizes_template_to_local(
+        self, client: TestClient
+    ) -> None:
+        """provider 自报的 `template` 档要归一化成配置层的 `local`。
+
+        两套词汇之间必须有一处做转换，否则「本地规则模板」永远选不上；
+        归一化写在哪一边都行，但**只能有一处**，否则又会出现第二个真源。
+        """
+        resp = client.post(
+            "/api/v1/meta/ai-model-selection",
+            json={"model": "template", "capability": "template"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["capability"] == "local"
+
+    def test_ai_model_selection_rejects_unknown_capability(
+        self, client: TestClient
+    ) -> None:
+        """非法 capability 必须 400，且错误里要给出合法取值（别让用户猜）。"""
+        resp = client.post(
+            "/api/v1/meta/ai-model-selection",
+            json={"model": "template", "capability": "bogus"},
+        )
+        assert resp.status_code == 400
+        detail = resp.json()["detail"]
+        assert "reasoning" in detail and "local" in detail, detail
+
+    def test_ai_model_selection_never_lands_secrets(self, client: TestClient) -> None:
+        """安全边界：接口只认 model/capability，密钥与接入地址一律不落地。
+
+        密钥只能经管理台（/admin，需令牌）或环境变量配置，永不经过 App ——
+        即便请求体里夹带了它们，也不能出现在响应里，更不能被写进配置。
+        """
+        resp = client.post(
+            "/api/v1/meta/ai-model-selection",
+            json={
+                "model": "gpt-4o",
+                "capability": "reasoning",
+                "api_key": "sk-should-never-land",
+                "base_url": "https://evil.example.com/v1",
+            },
+        )
+        assert resp.status_code == 200
+        assert "sk-should-never-land" not in resp.text
+        assert "evil.example.com" not in resp.text
+        assert not ({"api_key", "base_url"} & set(resp.json())), "响应回传了配置项"
 
 
 # ==========================================================================

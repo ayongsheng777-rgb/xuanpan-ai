@@ -268,12 +268,57 @@ async function renderOne(cdp, name, path, w, h, mode, click = '') {
       await settle(2500);
     }
 
-    const diagExpr = `(()=>{const d=document.documentElement,b=document.body;return JSON.stringify({
+    // `clipped`：被 `overflow:hidden` 悄悄切掉内容的容器。
+    //
+    // 为什么必须单独探这一项：2026-10-09 的「一屏不滚动」改造给页面分区加了
+    // `overflow: hidden` —— 内容过多时它**裁掉**而不是溢出。于是
+    // "文档高度 ≤ 视口高度"（不滚动）会轻松通过，而用户少看到半张卡。
+    // 截图也看不出来：被裁的部分根本不在图里，看图的人以为那本来就是底边。
+    //
+    // 排除两类**故意**的裁切：
+    //   · `-webkit-line-clamp`（RN web 的 numberOfLines）：文本省略号是设计意图；
+    //   · 高度 < 8px 的差：亚像素取整与圆角/描边造成的噪声。
+    const diagExpr = `(()=>{const d=document.documentElement,b=document.body;
+      const clipped=[];
+      for(const el of document.querySelectorAll('*')){
+        const ch=el.clientHeight, sh=el.scrollHeight;
+        if(!ch||sh-ch<=8) continue;
+        const cs=getComputedStyle(el);
+        if(cs.overflowY!=='hidden'&&cs.overflowY!=='clip') continue;
+        if(cs.webkitLineClamp&&cs.webkitLineClamp!=='none') continue;
+        const cls=(el.getAttribute('class')||'').split(' ').slice(0,2).join('.');
+        clipped.push(el.tagName.toLowerCase()+(cls?'.'+cls:'')+':'+ch+'<'+sh);
+      }
+      // innerScroll：**页面内部**的可滚动容器（RN 的 ScrollView/FlatList）。
+      //
+      // 为什么必须单独探这一项：documentElement.scrollHeight 只在"内容把文档撑高"
+      // 时才变大。而 RN 的 ScrollView 是 overflow:auto 的普通 div —— 它把内容
+      // **关在自己里面**滚动，文档高度恒等于视口。于是"整页不高于视口"会全绿，
+      // 而用户照样要往下拉。2026-10-09 实测：改造前的 16 个页面全是这种形态，
+      // 文档高度 844 却页页要滚。只看 contentH 会得出"本来就不用滚"的错误结论。
+      //
+      // 注意：本段是**模板字符串内的浏览器端代码**，所以下面一行不能出现反引号
+      // （反引号会提前结束外层模板串，报 SyntaxError: Unexpected identifier）。
+      const innerScroll=[];
+      for(const el of document.querySelectorAll('*')){
+        const ch=el.clientHeight, sh=el.scrollHeight;
+        if(!ch||sh-ch<=8) continue;
+        const cs=getComputedStyle(el);
+        if(cs.overflowY!=='auto'&&cs.overflowY!=='scroll') continue;
+        const cls=(el.getAttribute('class')||'').split(' ').slice(0,2).join('.');
+        innerScroll.push(el.tagName.toLowerCase()+(cls?'.'+cls:'')+':'+ch+'<'+sh);
+      }
+      return JSON.stringify({
       innerW:window.innerWidth,innerH:window.innerHeight,
       scrollW:Math.max(d.scrollWidth,b?b.scrollWidth:0),
       scrollH:Math.max(d.scrollHeight,b?b.scrollHeight:0),
       textLen:b?b.innerText.length:-1,
       errors:(window.__xpErrors||[]).slice(0,4),
+      clipped:clipped.slice(0,6),
+      clippedCount:clipped.length,
+      innerScroll:innerScroll.slice(0,6),
+      innerScrollCount:innerScroll.length,
+      innerScrollMax:innerScroll.reduce((m,s)=>Math.max(m,parseInt(s.split(':')[1].split('<')[1]||'0',10)-parseInt(s.split(':')[1].split('<')[0]||'0',10)),0),
       text:(b?b.innerText:'').replace(/\\s+/g,' ').slice(0,700)});})()`;
     const dr = await cdp.send(
       'Runtime.evaluate',
@@ -300,6 +345,11 @@ async function renderOne(cdp, name, path, w, h, mode, click = '') {
       contentH: diag.scrollH,
       textLen: diag.textLen,
       errors: diag.errors,
+      clipped: diag.clipped ?? [],
+      clippedCount: diag.clippedCount ?? 0,
+      innerScroll: diag.innerScroll ?? [],
+      innerScrollCount: diag.innerScrollCount ?? 0,
+      innerScrollMax: diag.innerScrollMax ?? 0,
       text: diag.text,
     };
   } finally {

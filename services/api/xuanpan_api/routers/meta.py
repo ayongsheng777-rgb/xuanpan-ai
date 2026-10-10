@@ -8,7 +8,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Body, Depends, HTTPException, Request
+
+from ..deps import get_runtime_config, get_store
+from ..runtime_config import ConfigError, RuntimeConfig
+from ..storage import Store
 
 router = APIRouter(prefix="/meta", tags=["meta"])
 
@@ -69,17 +73,56 @@ def disclaimer() -> dict[str, str]:
 
 
 @router.get("/ai-providers", summary="AI 解释模型能力清单")
-def ai_providers() -> dict[str, Any]:
+def ai_providers(
+    request: Request,
+    store: Store = Depends(get_store),
+) -> dict[str, Any]:
     """按**能力**而非品牌列出，并标注当前环境是否可用。
 
     `requires_api_key=True` 的条目若 `available=False`，说明未配置 key；
     UI 应展示为"未配置"而不是"不可用"，两者对用户的含义不同。
+
+    2026-10-08 修复：之前直接调模块级的 `list_providers()`，拿到的是
+    进程启动时的 provider 实例，管理台改了密钥后这里显示的还是旧状态。
+    现在走运行时配置重建的 router，与真实 AI 调用看到的一致。
+
+    **字段基准仍是 `CAPABILITY_MATRIX`，运行时只决定 `available`**：
+    UI 契约（`ProviderInfo`）要 `id` / `cost` / `description`，这三项只有
+    静态矩阵里有 —— provider 实例的 `describe()` 不提供。若整条响应改用
+    `describe()`，前端类型契约会缺字段、且 `id` 缺失会让前端按 id 取用直接崩。
     """
-    from xuanpan_ai import CAPABILITY_MATRIX, list_endpoint_presets, list_providers
+    from xuanpan_ai import CAPABILITY_MATRIX, list_endpoint_presets
+
+    from ..deps import get_ai_router
+
+    router_obj = get_ai_router(request, store)
+    if router_obj is None:
+        # 兜底：未装配运行时配置时退回静态探测（与旧行为一致）
+        from xuanpan_ai import list_providers
+
+        providers = list_providers()
+    else:
+        # 运行时可用集合。provider 实例的 `registry_id` 与矩阵 id 同源
+        # （`get_provider` 按注册表键写入），故可据此对齐。
+        available_ids: set[str] = set()
+        for p in getattr(router_obj, "_providers", None) or []:
+            registry_id = getattr(p, "registry_id", None)
+            if not registry_id:
+                continue
+            try:
+                if p.is_available():
+                    available_ids.add(registry_id)
+            except Exception:  # noqa: BLE001 - 环境探测失败按不可用处理
+                pass
+
+        providers = [
+            {**dict(entry), "available": entry["id"] in available_ids}
+            for entry in CAPABILITY_MATRIX
+        ]
 
     return {
         "matrix": [dict(x) for x in CAPABILITY_MATRIX],
-        "providers": list_providers(),
+        "providers": providers,
         "endpoint_presets": list_endpoint_presets(),
     }
 
@@ -125,3 +168,63 @@ def capabilities() -> dict[str, Any]:
 
 
 __all__ = ["router"]
+
+
+@router.post("/ai-model-selection", summary="App 选择 AI 模型（不碰密钥）")
+def set_ai_model_selection(
+    selection: dict[str, Any] = Body(..., description="要选的模型：{model: 模型名, capability: 能力}"),
+    runtime: RuntimeConfig = Depends(get_runtime_config),
+    store: Store = Depends(get_store),
+) -> dict[str, Any]:
+    """App 端切换 AI 模型选择。
+
+    安全边界（2026-10-08 用户要求 App 内可配模型）：
+    - 只允许改 `llm.model` 与 `llm.capability`（选"用哪个模型"）。
+    - **不接受** `llm.api_key`、`llm.base_url` —— 密钥与接入地址只能
+      经管理台（/admin，需令牌）或环境变量配置，永不经过 App。
+    - capability 必须在配置层规格允许的档位内，否则 `runtime.update` 会拒。
+
+    为什么单开一个接口而不复用 admin 的 PATCH /config：
+    admin 接口要令牌（防隐私数据泄露），而选模型不涉及隐私；
+    把选模型做成免令牌接口，用户在 App 里点两下就能换，不用记令牌。
+
+    2026-10-08 修复：capability 的合法域原先在本函数里另写了一份
+    `{vision, reasoning, fast, fallback, embedding}`，与配置层
+    `llm.capability` 的 choices `(reasoning, fast, local)` **不一致**：
+    App 按 `(p.id, p.capability)` 调用，`template` provider 自报
+    `capability="template"` → 必然 400；而 `vision`/`fallback`/`embedding`
+    虽过了本函数，又会被下游 `runtime.update` 以 ConfigError 拒掉。
+    现改为**以配置层规格为单一真源**，并把 provider 自报档位归一化。
+    """
+    from ..runtime_config import SPEC_BY_KEY
+
+    model = selection.get("model")
+    capability = selection.get("capability")
+    if not model or not isinstance(model, str):
+        raise HTTPException(status_code=400, detail="缺少 model（模型名）")
+    if not capability or not isinstance(capability, str):
+        raise HTTPException(status_code=400, detail="缺少 capability（能力档位）")
+
+    #: 合法档位取自配置层规格 —— 不要再在这里手抄一份，两份必然会漂移。
+    valid_caps: tuple[str, ...] = SPEC_BY_KEY["llm.capability"].choices
+
+    #: provider 自报档位 → 配置层档位。`template` 是「本地零成本」档，
+    #: 配置层用 `local` 表达同一含义（见 providers/template.py 的 capability）。
+    _CAPABILITY_ALIASES = {"template": "local"}
+
+    normalized = _CAPABILITY_ALIASES.get(capability, capability)
+    if normalized not in valid_caps:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"capability 非法，应为 {sorted(valid_caps)} 之一"
+                f"（provider 自报的 {sorted(_CAPABILITY_ALIASES)} 会自动归一化）"
+            ),
+        )
+
+    changes = {"llm.model": model.strip(), "llm.capability": normalized}
+    try:
+        result = runtime.update(store, changes)
+    except ConfigError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {**result, "model": model.strip(), "capability": normalized}

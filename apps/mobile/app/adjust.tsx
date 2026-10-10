@@ -1,7 +1,7 @@
 /**
  * 手动调节罗盘 `/adjust` —— 参考图第 2 屏。
  *
- * 布局：大罗盘 → 角度调节（步进 + 当前角度）→ 锁定开关 → 底部模式栏。
+ * 布局：大罗盘 → 角度调节（步进 + 当前角度）→ 盘面/锁定（分段）→ 底部模式栏。
  *
  * 两个模式的语义（**都真实生效，不放占位按钮**）：
  *   - 仿真模式：用户手动拖盘 / 步进调节方位角（默认）。
@@ -20,17 +20,25 @@
  *   `template`（id，仅用于说明）、`name`、`style`（盘式）、`sitting`/`degree`（初始坐向/角度）。
  *   🔴 这四个参数**必须真的被读取**：模板的全部意义就是带出盘式与基准，
  *   参数不落地等于该功能不存在，而界面看起来完全正常。
+ *
+ * ## 单屏做法（2026-10-09）
+ *
+ * 盘面是唯一弹性区（`FitSlot weight={1}` + `onLayout` 实测边长，按剩余高度自适应）；
+ * 角度调节常驻（本页主操作）；「盘面（盘式切换）+ 模板带出」与「两个锁」互斥，
+ * 收进分段标签 —— 同一时刻只显示一组，于是页面不再需要滚动。
  */
 
 import { Ionicons } from '@expo/vector-icons';
-import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
+import { useLocalSearchParams } from 'expo-router';
 import React, { useCallback, useMemo, useState } from 'react';
-import { Pressable, StyleSheet, Switch, View } from 'react-native';
+import { Pressable, StyleSheet, Switch, View, type LayoutChangeEvent } from 'react-native';
 
 import { AppText } from '@/components/AppText';
-import { CompassDial, DIAL_DARK } from '@/components/CompassDial';
-import { HelpButton } from '@/components/HelpButton';
-import { Screen } from '@/components/Screen';
+import { Banner } from '@/components/Banner';
+import { CompassDial, DIAL_LIGHT } from '@/components/CompassDial';
+import { PageHeader } from '@/components/PageHeader';
+import { FitSlot, Screen } from '@/components/Screen';
+import { SegmentedTabs } from '@/components/SegmentedTabs';
 import { azimuthAtTop, initialRotationFor, normalizeSigned } from '@/lib/compassDial';
 import { DIAL_STYLES, coerceDialStyle } from '@/lib/dialStyle';
 import { indexOfName } from '@/lib/ring24';
@@ -41,9 +49,9 @@ import { instrument, radius, space } from '@/theme/tokens';
 const ANGLE_STEPS = [-1, -0.1, 0.1, 1] as const;
 
 type Mode = 'simulation' | 'sensor';
+type Panel = 'dial' | 'lock';
 
 export default function AdjustCompassScreen(): React.JSX.Element {
-  const router = useRouter();
   /**
    * 模板库带出的参数。
    *
@@ -86,6 +94,7 @@ export default function AdjustCompassScreen(): React.JSX.Element {
   }, [params.degree, params.sitting]);
 
   const [mode, setMode] = useState<Mode>('simulation');
+  const [panel, setPanel] = useState<Panel>('dial');
   /**
    * 仿真模式的**方位角**（不是盘面旋转量）。
    *
@@ -97,6 +106,8 @@ export default function AdjustCompassScreen(): React.JSX.Element {
   const [manualAzimuth, setManualAzimuth] = useState(templateManual ?? 0);
   const [lockPool, setLockPool] = useState(false);
   const [lockNorth, setLockNorth] = useState(false);
+  /** 盘面实测边长（px）—— 由 onLayout 给出，未测到前不渲染盘面 */
+  const [dialBox, setDialBox] = useState(0);
 
   /** 模板是否真的带出了东西 —— 决定要不要显示那张"已按模板带出"的说明 */
   const fromTemplate = params.template !== undefined || templateManual !== null;
@@ -124,57 +135,119 @@ export default function AdjustCompassScreen(): React.JSX.Element {
     [locked],
   );
 
-  return (
-    <>
-      <Stack.Screen
-        options={{
-          title: '手动调节',
-          headerStyle: { backgroundColor: instrument.bg },
-          headerTintColor: instrument.text,
-          headerShadowVisible: false,
-          headerRight: () => (
-            <View style={styles.headerActions}>
-              <HelpButton topic="adjust" color={instrument.textSecondary} />
-              <Pressable onPress={() => router.back()} hitSlop={10}>
-                <AppText size="md" weight="semibold" color={instrument.accent}>
-                  完成
-                </AppText>
-              </Pressable>
-            </View>
-          ),
-        }}
-      />
-      <Screen scroll style={styles.root}>
-        {/* ---------- 大罗盘 ---------- */}
-        <View style={styles.northRow}>
-          <AppText size="xs" color={instrument.textSecondary}>
-            北 0°
-          </AppText>
-          <View style={styles.northArrow} />
-        </View>
-        <View style={styles.dialWrap}>
-          <CompassDial
-            size={320}
-            palette={DIAL_DARK}
-            style={dialStyle}
-            rotation={rotation}
-            interactive={!locked}
-            onRotate={(r) => setManualAzimuth(-r)}
-          />
-        </View>
+  const onDialLayout = useCallback((e: LayoutChangeEvent) => {
+    const { width, height } = e.nativeEvent.layout;
+    setDialBox(Math.min(width, height));
+  }, []);
 
-        {/* ---------- 模板带出说明 ----------
-            必须有这张卡：参数生效与否在盘面上"看不出来是模板带来的"，
-            用户点完模板会以为没反应。 */}
-        {fromTemplate ? (
+  return (
+    <Screen style={styles.root}>
+      <PageHeader title="手动调节" subtitle="调节的是视角，不产生术数结论" back helpTopic="adjust" />
+
+      {/* ---------- 北向指示（屏幕正上方恒为真北） ---------- */}
+      <View style={styles.northRow}>
+        <AppText size="xs" color={instrument.textSecondary}>
+          北 0°
+        </AppText>
+        <View style={styles.northArrow} />
+      </View>
+
+      {/* ---------- 大罗盘（唯一弹性区） ---------- */}
+      <FitSlot weight={1} center>
+        <View style={styles.dialBox} onLayout={onDialLayout}>
+          {dialBox > 0 ? (
+            <CompassDial
+              size={dialBox}
+              palette={DIAL_LIGHT}
+              style={dialStyle}
+              rotation={rotation}
+              interactive={!locked}
+              onRotate={(r) => setManualAzimuth(-r)}
+            />
+          ) : null}
+        </View>
+      </FitSlot>
+
+      {mode === 'sensor' && sensor.azimuth === null ? (
+        <Banner tone="warning" title="传感器暂无数据">
+          已退回手动调节。模拟器通常没有磁力计，请在真机上使用真实磁针。
+        </Banner>
+      ) : null}
+
+      {/* ---------- 角度调节（本页主操作，常驻） ---------- */}
+      <View style={styles.card}>
+        <View style={styles.angleHead}>
+          <AppText size="xs" color={instrument.textSecondary}>
+            角度调节
+          </AppText>
+          <AppText size="xxl" weight="bold" color={instrument.text} style={styles.angle}>
+            {azimuth.toFixed(2)}°
+          </AppText>
+        </View>
+        <View style={styles.stepRow}>
+          {ANGLE_STEPS.map((d) => (
+            <Pressable
+              key={d}
+              disabled={locked}
+              onPress={() => nudge(d)}
+              accessibilityRole="button"
+              accessibilityLabel={`${d > 0 ? '加' : '减'}${Math.abs(d)}度`}
+              style={({ pressed }) => [
+                styles.stepBtn,
+                locked && styles.stepBtnDisabled,
+                pressed && !locked && styles.stepBtnPressed,
+              ]}
+            >
+              <AppText size="sm" weight="semibold" color={instrument.text}>
+                {d > 0 ? `+${d}°` : `−${Math.abs(d)}°`}
+              </AppText>
+            </Pressable>
+          ))}
+        </View>
+      </View>
+
+      {/* ---------- 盘面 / 锁定：分段替代纵向堆叠 ---------- */}
+      <SegmentedTabs
+        items={[
+          { key: 'dial', label: '盘面' },
+          { key: 'lock', label: '锁定' },
+        ]}
+        value={panel}
+        onChange={(k) => setPanel(k as Panel)}
+      />
+
+      {panel === 'dial' ? (
+        <>
+          {/* ---------- 模板带出说明 ----------
+              必须有这张卡：参数生效与否在盘面上"看不出来是模板带来的"，
+              用户点完模板会以为没反应。 */}
+          {fromTemplate ? (
+            <View style={styles.card}>
+              <AppText size="sm" weight="medium" color={instrument.text}>
+                已按模板带出
+              </AppText>
+              <AppText size="xs" color={instrument.textSecondary} style={styles.templateLine}>
+                {params.name ? `模板：${params.name}　` : ''}
+                盘式：{DIAL_STYLES[dialStyle].name}
+                {params.sitting ? `　坐${params.sitting}` : ''}
+              </AppText>
+              <AppText size="xs" color={instrument.muted} style={styles.templateNote}>
+                模板只带出「用哪面盘、从哪个基准开始」，不代替本次实测。
+              </AppText>
+            </View>
+          ) : null}
+
+          {/* ---------- 盘面（盘式切换） ----------
+              🔴 之前这组选择器藏在上面的"模板带出"卡片里 —— 从「测盘 → 手动输入」
+              直接进本页的用户根本看不到它，盘面想换也换不了，而界面一切正常。
+              盘式只决定画哪些层、每层多宽（见 CompassDial 约定 4），
+              切换不改变当前方位、锁定状态与模板带出的基准。 */}
           <View style={styles.card}>
             <AppText size="sm" weight="medium" color={instrument.text}>
-              已按模板带出
+              盘面
             </AppText>
-            <AppText size="xs" color={instrument.textSecondary} style={styles.templateLine}>
-              {params.name ? `模板：${params.name}　` : ''}
-              盘式：{DIAL_STYLES[dialStyle].name}
-              {params.sitting ? `　坐${params.sitting}` : ''}
+            <AppText size="xs" color={instrument.textSecondary} style={styles.templateNote}>
+              切换只改变显示的层数与密度，不改变当前方位与锁定状态。
             </AppText>
             <View style={styles.styleRow}>
               {(['simple', 'sanhe', 'zonghe'] as const).map((sid) => {
@@ -184,6 +257,7 @@ export default function AdjustCompassScreen(): React.JSX.Element {
                     key={sid}
                     onPress={() => setDialStyle(sid)}
                     accessibilityRole="button"
+                    accessibilityLabel={`切换盘面为${DIAL_STYLES[sid].name}`}
                     accessibilityState={{ selected: on }}
                     style={[styles.styleChip, on && styles.styleChipOn]}
                   >
@@ -201,43 +275,9 @@ export default function AdjustCompassScreen(): React.JSX.Element {
                 );
               })}
             </View>
-            <AppText size="xs" color={instrument.muted} style={styles.templateNote}>
-              模板只带出「用哪面盘、从哪个基准开始」，不代替本次实测。
-            </AppText>
           </View>
-        ) : null}
-
-        {/* ---------- 角度调节 ---------- */}
-        <View style={styles.card}>
-          <AppText size="xs" color={instrument.textSecondary}>
-            角度调节
-          </AppText>
-          <AppText size="display" weight="bold" color={instrument.text} center style={styles.angle}>
-            {azimuth.toFixed(2)}°
-          </AppText>
-          <View style={styles.stepRow}>
-            {ANGLE_STEPS.map((d) => (
-              <Pressable
-                key={d}
-                disabled={locked}
-                onPress={() => nudge(d)}
-                accessibilityRole="button"
-                accessibilityLabel={`${d > 0 ? '加' : '减'}${Math.abs(d)}度`}
-                style={({ pressed }) => [
-                  styles.stepBtn,
-                  locked && styles.stepBtnDisabled,
-                  pressed && !locked && styles.stepBtnPressed,
-                ]}
-              >
-                <AppText size="sm" weight="semibold" color={instrument.text}>
-                  {d > 0 ? `+${d}°` : `−${Math.abs(d)}°`}
-                </AppText>
-              </Pressable>
-            ))}
-          </View>
-        </View>
-
-        {/* ---------- 锁定 ---------- */}
+        </>
+      ) : (
         <View style={styles.card}>
           <LockRow
             label="锁定天池"
@@ -256,36 +296,24 @@ export default function AdjustCompassScreen(): React.JSX.Element {
             }}
           />
         </View>
+      )}
 
-        {mode === 'sensor' && sensor.azimuth === null ? (
-          <View style={styles.card}>
-            <AppText size="sm" color={instrument.warn}>
-              传感器暂无数据 —— 已退回手动调节。模拟器通常没有磁力计，请在真机上使用真实磁针。
-            </AppText>
-          </View>
-        ) : null}
-
-        {/* ---------- 底部模式栏 ---------- */}
-        <View style={styles.modeBar}>
-          <ModeItem
-            label="仿真模式"
-            icon="color-wand-outline"
-            active={mode === 'simulation'}
-            onPress={() => setMode('simulation')}
-          />
-          <ModeItem
-            label="真实磁针"
-            icon="navigate-outline"
-            active={mode === 'sensor'}
-            onPress={() => setMode('sensor')}
-          />
-        </View>
-
-        <AppText size="xs" color={instrument.muted} center style={styles.note}>
-          盘面正上方恒为真北（磁针不随盘转）。调节的是视角，不产生任何术数计算结果
-        </AppText>
-      </Screen>
-    </>
+      {/* ---------- 底部模式栏 ---------- */}
+      <View style={styles.modeBar}>
+        <ModeItem
+          label="仿真模式"
+          icon="color-wand-outline"
+          active={mode === 'simulation'}
+          onPress={() => setMode('simulation')}
+        />
+        <ModeItem
+          label="真实磁针"
+          icon="navigate-outline"
+          active={mode === 'sensor'}
+          onPress={() => setMode('sensor')}
+        />
+      </View>
+    </Screen>
   );
 }
 
@@ -359,7 +387,6 @@ function ModeItem({
 
 const styles = StyleSheet.create({
   root: { backgroundColor: instrument.bg },
-  headerActions: { flexDirection: 'row', alignItems: 'center', gap: space[2] },
   northRow: { alignItems: 'center', gap: 2 },
   northArrow: {
     width: 0,
@@ -371,16 +398,16 @@ const styles = StyleSheet.create({
     borderRightColor: 'transparent',
     borderBottomColor: instrument.needle,
   },
-  dialWrap: { alignItems: 'center', marginTop: space[1] },
+  dialBox: { flex: 1, alignSelf: 'stretch', alignItems: 'center', justifyContent: 'center' },
   card: {
-    marginTop: space[4],
     backgroundColor: instrument.surface,
     borderRadius: radius.lg,
     borderWidth: 1,
     borderColor: instrument.border,
     padding: space[3],
   },
-  angle: { marginTop: space[1], fontVariant: ['tabular-nums'] },
+  angleHead: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between' },
+  angle: { fontVariant: ['tabular-nums'] },
   templateLine: { marginTop: space[1], lineHeight: 17 },
   templateNote: { marginTop: space[2], lineHeight: 16 },
   styleRow: { flexDirection: 'row', gap: space[2], marginTop: space[3] },
@@ -395,7 +422,7 @@ const styles = StyleSheet.create({
     gap: 2,
   },
   styleChipOn: { backgroundColor: instrument.accent, borderColor: instrument.accent },
-  stepRow: { flexDirection: 'row', gap: space[2], marginTop: space[3] },
+  stepRow: { flexDirection: 'row', gap: space[2], marginTop: space[2] },
   stepBtn: {
     flex: 1,
     alignItems: 'center',
@@ -411,11 +438,11 @@ const styles = StyleSheet.create({
   lockText: { flex: 1, paddingRight: space[3] },
   lockHint: { marginTop: 2 },
   divider: { height: 1, backgroundColor: instrument.border, marginVertical: space[3] },
-  modeBar: { flexDirection: 'row', gap: space[3], marginTop: space[4] },
+  modeBar: { flexDirection: 'row', gap: space[3] },
   modeItem: {
     flex: 1,
     alignItems: 'center',
-    paddingVertical: space[3],
+    paddingVertical: space[2],
     borderRadius: radius.lg,
     backgroundColor: instrument.surface,
     borderWidth: 1,
@@ -424,5 +451,4 @@ const styles = StyleSheet.create({
   modeItemActive: { backgroundColor: instrument.accent, borderColor: instrument.accent },
   modeItemPressed: { opacity: 0.8 },
   modeLabel: { marginTop: space[1] },
-  note: { marginTop: space[4] },
 });

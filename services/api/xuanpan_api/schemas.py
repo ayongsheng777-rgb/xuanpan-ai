@@ -133,7 +133,7 @@ class QianInput(ApiModel):
     """抽签。seed 为整数，同一 seed 永远得到同一签（可复现）。"""
 
     seed: int
-    set_id: str = "demo_guanyin"
+    set_id: str = "guanyin"
 
 
 class NamingInput(ApiModel):
@@ -265,6 +265,27 @@ class AlmanacRange(ApiModel):
     start: str
     end: str
     days: list[AlmanacDay]
+
+
+class DailyFortuneInput(ApiModel):
+    """每日运程输入。
+
+    出生信息只取「出生公历日期」定日主 —— 时辰不影响日主：
+    `birth_hour` 未知可省略（服务端按午时排盘，结果不变，tradition 层留痕）。
+    `date` 省略即「今天」，由服务端定，避免客户端时区口径差异。
+    """
+
+    birth_date: date = Field(description="出生公历日期（YYYY-MM-DD），只用于定日主")
+    birth_hour: int | None = Field(default=None, ge=0, le=23, description="出生小时，未知可省略")
+    # 字段名避开 `date`：pydantic 解析注解时同名字段会遮蔽 datetime.date 类型
+    target_date: date | None = Field(default=None, description="目标日期，省略为今天")
+
+
+class DailyFortune(ApiModel):
+    """每日运程（两层：facts / tradition，与黄历同一渲染约定）。"""
+
+    facts: dict[str, Any]
+    tradition: dict[str, Any]
 
 
 class ZeriEvent(ApiModel):

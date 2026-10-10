@@ -115,7 +115,7 @@ def _to_coins(raw: Any) -> list[tuple[bool, bool, bool]] | None:
 
 def build_qian(data: dict[str, Any]):  # type: ignore[no-untyped-def]
     try:
-        return draw_qian(int(data["seed"]), set_id=str(data.get("set_id") or "demo_guanyin"))
+        return draw_qian(int(data["seed"]), set_id=str(data.get("set_id") or "guanyin"))
     except (KeyError, TypeError, ValueError, FortuneError) as exc:
         raise ContextBuildError(f"抽签失败：{exc}") from exc
 

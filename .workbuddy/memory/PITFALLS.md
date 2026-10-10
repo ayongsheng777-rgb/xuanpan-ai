@@ -108,6 +108,49 @@ safe-delete 是**按同一个 turn 内累计删除数**判的（>50 即拦），
 
 🔴 **`expo export --clear` 会被 `[safe-delete]` 拦** —— 重新导出产物时；报 `checkBulkDeleteGuard`（大批量删除保护），与吞 pytest 汇总行同一机制。改成输出到**新目录**、不加 `--clear`。
 
+### EAS 云构建（2026-10-09 实测）
+
+🔴 **token 与 projectId 必须同账号，否则报 `Entity Not Authorized`** —— 跑 `eas build` 时。
+症状看起来像 token 失效或权限不足，其实是**两个不同的 Expo 账号**：
+本项目 `app.json` 的旧 projectId `12fb128e-...` 属 **anyong555**，
+而手上的 token 属 **anyong777**（`ayongsheng777@gmail.com`）。
+判据：`eas whoami` 拿到用户名后，用 GraphQL 查该账号下的 app 列表比对 slug：
+```bash
+curl -s -X POST https://api.expo.dev/graphql -H "Authorization: Bearer $EXPO_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"query":"query{ account{ byName(accountName:\"<用户名>\"){ apps(limit:20, offset:0){ id slug } } } }"}'
+```
+（注意 `apps` 必须同时给 `limit` **和** `offset`，只给 `limit` 会校验失败。）
+
+🔴 **`eas init` 会先尝试读旧 projectId，读不到就直接中止** —— 迁移账号时。
+加 `--force` **没用**（它同样先读）。必须先**手工删掉 app.json 里的 `extra.eas.projectId`**，
+再跑 `eas init --account <新账号> --non-interactive`。
+
+🔴 **`eas init` 会把解析后的 `extra.apiBaseUrls` 与 `extra.router` 序列化进 app.json** ——
+迁移后必查。这两项本该由 `app.config.js` 在构建期算出，写死进 app.json 会留下一个
+"看着像真配置"的 `127.0.0.1:8360`，后来人很容易信以为真。手工清掉。
+
+🔴 **换 EAS 账号 = 换 Android 签名密钥** —— 迁移前必须告知用户。
+`android.package` 可以完全不变，但新项目下 EAS 会生成新 keystore →
+**已装旧包的手机必须先卸载**，无法覆盖升级（`INSTALL_FAILED_UPDATE_INCOMPATIBLE`）。
+
+🔵 **核验 APK 里的配置，读 `assets/app.config` 最直接** ——
+它是构建期配置的快照（JSON），`extra.apiBaseUrl` / `apiBaseUrls` / `owner` / `projectId`
+一眼可见，比翻 Hermes 字节码可靠得多。
+
+🔵 **`eas build` 输出会被 `| tail -N` 缓冲，中途完全看不到进度** ——
+想监控就用 GraphQL 查 build 状态（`status` / `artifacts.buildUrl`），别干等：
+```bash
+curl -s -X POST https://api.expo.dev/graphql -H "Authorization: Bearer $EXPO_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"query":"query{ app{ byId(appId:\"<id>\"){ builds(limit:1, offset:0){ id status artifacts{buildUrl} error{message} } } } }"}'
+```
+注意 `Build` 类型上**没有 `finishedAt`**（用 `updatedAt`）。
+
+🔵 **`eas credentials` 不支持 `--non-interactive`** —— 想在 CI 里查签名凭据时；
+改用 GraphQL 的 `app.androidAppCredentials`（注意该字段**不接受** `limit`/`offset`，
+且其下**没有** `androidKeystore` 子字段，能查到的只有 `applicationIdentifier`）。
+
 ---
 
 ## 4. 无头浏览器 / 截图 / CDP
@@ -117,11 +160,47 @@ safe-delete 是**按同一个 turn 内累计删除数**判的（>50 即拦），
 🟢 **Chromium 在本机起不来**（实测第三次遭遇：`Chrome exited early ... DevToolsActivePort`；`agent-browser` 与其 `--no-sandbox` 均无效）→ **管理台/网页的渲染验证只能做静态检查**。别把静态检查说成"已验证渲染"，要在交付里写明为已知不足。离线渲染探针 `scripts/ui_render/` 走的是 CDP，同样受此限。
 > ⚠️ 但 `docs/ui-render/` 的 19 页快照**确实拍出来过** —— 说明该结论**与具体调用方式有关**，不是无条件成立；下次做浏览器渲染先实测一次，别直接引用"起不来"而放弃。
 
+✅ **2026-10-09 结论修正：真实渲染在本机可用，"起不来"是**系统 Chrome 缺失**导致的误判。**
+本机**没有** `/Applications/Google Chrome.app`，而 `_CHROME_CANDIDATES` 只找系统 Chrome ——
+所以一直是"找不到浏览器 → skip"，被读成了"浏览器起不来"。
+装 Playwright 的 Chromium 即可（不要 `npx playwright install`，直接下到隔离工作区）：
+```bash
+cd ~/.workbuddy-ai/binaries/node/workspace && npm i playwright
+NODE_PATH=~/.workbuddy-ai/binaries/node/workspace/node_modules \
+  ~/.workbuddy-ai/binaries/node/versions/22.22.2-6/bin/node \
+  ~/.workbuddy-ai/binaries/node/workspace/node_modules/playwright/cli.js install chromium
+# 二进制落在 ~/.workbuddy-ai/binaries/node/workspace/pw-browsers/chromium-1248/chrome-mac-x64/
+#   Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing
+```
+然后 `XP_CHROME=<上面的路径>` 即可跑真渲染（`tests/mobile/test_ui_render.py` 读这个环境变量）。
+**沙箱内可以跑，不需要 `--no-sandbox`，也不需要沙箱外执行**（与本节第 1 条不矛盾：
+那条说的是"受限 shell 下静默 exit 0"，用 `subprocess.run` + 绝对路径不受影响）。
+`chromium-1248` 是版本号，换机/升级后会变，别写死 —— 用 `find` 定位。
+
 🔴 **`chrome --headless --screenshot --window-size=390,844` 在本机不生效** —— 做"手机尺寸截图"时；实测页面 `innerWidth=500`，截出的 390px 图是把 500px 布局**裁掉右边**，看着像横向溢出、实为假象。要用 CDP 的 `Emulation.setDeviceMetricsOverride`。
 
 🔴 **同一轮批量截图不要每页重启 Chrome** —— 批量任务；实例间互相干扰，实测**第二页起永久挂起**（20 分钟只出一页、无任何报错）。改为启动一次 Chrome + 每页独立 target。
 
 🔴 **CDP/WebSocket 脚本结束必须 `process.exit()`** —— 写 Node 浏览器自动化时；不关 WebSocket 会让事件循环一直存活 → 进程永不退出 → 调用方（pytest/shell）跟着挂死（实测卡过 14 分钟）。杀 Chrome 要用 `spawnSync('taskkill',['/F','/T','/PID',pid])`，`spawn` 异步派发不够。
+
+### 探针本身会骗人（2026-10-09 实测，判断"页面有没有滚动"时）
+
+🔴 **`documentElement.scrollHeight` 检测不到 RN 的 `ScrollView`** —— 判断页面有没有滚动时。
+RN 的 `ScrollView` 在**垂直 flex 父容器**里会被限制在视口高度内，于是文档高**恒等于**视口高。
+用它测出来的结论是"全部合格"，而实际有 8 个页面在滚。
+**必须另加内层探针**：遍历所有元素，找 `getComputedStyle(el).overflowY` ∈ {`auto`,`scroll`}
+且 `el.scrollHeight - el.clientHeight > 8` 的容器。
+▶ 元教训：**"整体高度没超"不等于"没有滚动"** —— 滚动可以发生在任意一个中间容器里。
+判断这类性质要扫**容器**，不能只看文档根。
+
+🔴 **`numberOfLines` 在 RN-web 上编译成 `-webkit-line-clamp`，是合法截断，必须从裁切探针排除** ——
+写"内容被裁掉"检测时。否则每个用了 `numberOfLines` 的文本都会命中
+（它们**本来就该**被截断），探针变成满屏假阳性，最后没人看。
+判据：`overflow:hidden` 且 `scrollHeight - clientHeight > 8`，**且** `webkitLineClamp === 'none'`。
+
+🔵 **探针必须先在"已知坏的"版本上验一次** —— 否则你不知道它是真在测，还是恒返回"合格"。
+本轮做法：改前用 `git worktree` 把 HEAD 检出来，**用同一套探针**测旧代码，
+拿到 5917px / 8 页的基线，再测新代码拿到 0。**没有这条基线，那个 0 分文不值。**
 
 ---
 
@@ -154,6 +233,23 @@ safe-delete 是**按同一个 turn 内累计删除数**判的（>50 即拦），
 
 ## 6. 前端"改完看似没事、实际错"
 
+🔴 **RN 的 `ScrollView` 默认带 `flexGrow: 1`，横向滚动条会跟着纵向长高、吃掉一半垂直空间** ——
+把横向 `ScrollView`（标签条、图片条）放进 `flex: 1` 的父容器时。
+`flexGrow: 1` 本来是给**纵向**滚动准备的，横向用不到但**照样生效**。
+2026-10-09 实测：`SegmentedTabs` 的下划线样式因此让 `divine.tsx` 的三段标签
+与内容区各分到 290px，550px 的输入卡被裁掉一半。
+**症状极具欺骗性**：截图上看只是"卡片下面被切了"，完全不像标签条的问题。
+修法：给横向条加 `flexGrow: 0, flexShrink: 0`。
+▶ 这条是**渲染探针的 `clipped` 检测**揪出来的 —— 纯看截图基本不可能归因。
+**凡是在 `flex` 容器里放横向 `ScrollView`，都要显式写 `flexGrow: 0`。**
+
+🔴 **只按屏宽算尺寸的组件，在"高度不够"时会静默裁掉底部** —— 做自适应盘面/图片时。
+`confirm/[sessionId].tsx` 原先用 `Math.min(width - 96, 260)` 算盘面直径，
+390 宽下得 260px，加上调节器约 456px 的周边内容 = 716px，
+而分区只有 644px → 底部 72px 被裁，**没有任何报错**。
+修法：尺寸同时受屏宽与**实测可用高度**约束（`onLayout` 拿 `slotH`，再减去周边固定高度）。
+▶ **判据：任何"按 `useWindowDimensions()` 算出来的尺寸"，都要问一句"高度够吗"。**
+
 🔴 **「内核做完了」≠「用户用得上」** —— 判定交付度必查**三条链路**：内核 → HTTP/MCP → App 界面。评估时先 grep App 有没有引用。
 
 🔴 **日期换算只有一处实现** `apps/mobile/src/lib/date.ts` —— **任何页面不许写 `toISOString().slice(0,10)`**（东八区凌晨退一天，且只在前 1/3 时段出现）。守卫 `tests/mobile/test_local_date.py`。
@@ -174,6 +270,17 @@ safe-delete 是**按同一个 turn 内累计删除数**判的（>50 即拦），
 
 🔴 **改 `lib/` 里的规则必须配「Node 探针 + Python 锚点测试」并做变异验证**（现有 compassDial / ring24 / sensorQuality / sparkline / qimen / liuren / taiyi / date / apiCandidates）。
 
+🔴 **`@expo/vector-icons` 的字体文件名 ≠ fontFamily，Android 上严格区分大小写**（2026-10-10）。
+源字体在 `node_modules/@expo/vector-icons/build/vendor/react-native-vector-icons/Fonts/Ionicons.ttf`（首字母大写），
+但 `@expo/vector-icons/build/Ionicons.js` 里 `createIconSet(glyphMap, 'ionicons', font)` 把 family 注册为**小写** `ionicons`。
+RN Android 的 `ReactFontManager.createAssetTypeface` 用 `Typeface.createFromAsset(assets, "fonts/<fontFamily>.ttf")` 拼路径找字体，**文件名大小写不匹配 → 找不到 → 字体不加载 → 所有 `<Ionicons>` 渲染为空白方块**。
+症状极具欺骗性：组件没崩、卡片正常、其他 AppText 正常，就是图标空白；用户看到的就是「图标位置全空白方块」。
+修法：用 `expo prebuild` 验证 → 写自定义 plugin `apps/mobile/plugins/withAndroidFonts.js`（接受 `{src, family}` 复制为 `assets/fonts/<family>.ttf`）。
+**`expo-font` 自带 plugin 不支持指定目标文件名**，只能照搬源 basename（仍是 `Ionicons.ttf`）。
+另：自定义 plugin **不能用 `createRunOncePlugin` 包装**，会触发 `assertInternalProjectRoot`（`withStaticPlugin` 在加载 module 时就 assert），报 `Config _internal.projectRoot isn't defined by expo-cli`。直接 `module.exports = function(config, props){...}` 即可。
+**判据**：任何「APK 里图标显示空白」都先解包看 `assets/fonts/` 是否存在 `<fontFamily 小写>.ttf`。
+
+
 🔴 **几何 / 归一化必须防「恒定输入除零」** —— 静止时 `max-min≈0` 当分母得 `NaN` → 曲线**静默消失**（见 `lib/sparkline.ts` 的 `DEFAULT_MIN_SPAN`，它同时防"把 0.3 μT 噪声放大成剧烈波动"的假象）。
 
 🔴 **「无数据」是一等状态** —— 显示「—」+ 可操作提示，**不编造、不转圈等**；且**别画会被误读的替代图形**（无方位数据时画一个静止在 0° 的罗盘，会被读成"方位就是 0°"）。
@@ -185,6 +292,8 @@ safe-delete 是**按同一个 turn 内累计删除数**判的（>50 即拦），
 🔴 **APK 内联的是「候选地址表」而非单个地址** —— 本机 3 块网卡分属 3 个网段，旧脚本只内联一个，手机不在该网段就**只是"一直转圈"**。现在启动**并发探活**自动选线（`lib/apiCandidates.ts` + `_layout.tsx`），换网段不必重打包；`oc.ayong.qzz.io` 实测**已无法解析**，已降为候选末位。
 
 🟢 **离线看界面已可行**：`scripts/ui_render/`（CDP 精确手机视口 + SPA 回落 + 渲染探针），快照 `docs/ui-render/`，回归 `tests/mobile/test_ui_render.py`（设 `XP_WEB_DIST` 启用）。它渲染的是**同一套 React 组件树**，可替代真机走查里"布局/折行/配色/空态"那部分；键盘遮挡、传感器真实数据、真机字体与安全区仍只能真机。
+
+🟢 **`expo export --platform web` 不会因源码改动触发 web bundle 重写**（2026-10-10）。改完代码后 `dist-web/_expo/static/js/web/entry-*.js` 文件名 hash 看起来没变（命中 cache），但内容可能是旧的。**手动 `rm -rf dist-web && npx expo export --platform web --output-dir dist-web`** 才行。
 
 ---
 

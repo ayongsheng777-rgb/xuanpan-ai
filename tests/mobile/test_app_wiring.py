@@ -29,6 +29,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 
@@ -50,8 +51,13 @@ _HREF_RE = re.compile(r"""\bhref\s*=\s*(['"`])(/[^'"`]*)\1""")
 #: 测盘页五张来源卡的 href）。
 _HREF_PROP_RE = re.compile(r"""\bhref\s*:\s*(['"`])(/[^'"`]*)\1""")
 
-#: `topic="x"` 与 `helpHeaderRight('x')`
-_TOPIC_PROP_RE = re.compile(r"""\btopic\s*=\s*(['"`])([A-Za-z0-9_-]+)\1""")
+#: `topic="x"` / `helpTopic="x"`（PageHeader 的写法）/ `helpHeaderRight('x')`
+#:
+#: 2026-10-09 单屏改造后，讲解入口从"导航器注入 `headerRight`"改为
+#: "页面里写 `<PageHeader helpTopic="x">`" —— 扫描器必须跟着认这个写法，
+#: 否则断言 2 会**静默变成空跑**（一个 topic 都扫不到，"未登记的 topic"自然为空集）。
+#: 这里刻意同时认三种：老写法留着不影响，新写法必须被覆盖到。
+_TOPIC_PROP_RE = re.compile(r"""\b(?:help)?[Tt]opic\s*=\s*(['"`])([A-Za-z0-9_-]+)\1""")
 _TOPIC_CALL_RE = re.compile(r"""\bhelpHeaderRight\s*\(\s*(['"`])([A-Za-z0-9_-]+)\1""")
 
 
@@ -470,3 +476,514 @@ def test_selfcheck_help_scanner_rejects_unknown_topic() -> None:
     assert "no-such-topic-xyz" not in registered, (
         "自检失败：未登记的 topic 竟被认为已登记 —— 断言 2 因此是假绿"
     )
+
+
+# ==========================================================================
+# 断言 6：`/sensors` 必须有"采集"出口 —— 读数要能进确认管线
+# ==========================================================================
+
+
+def test_sensors_page_has_collection_exit_into_confirm_pipeline() -> None:
+    """传感器测量页不能是死胡同。
+
+    挡住的错：`/sensors` 能测出方位角、能看质量评分，但没有任何按钮
+    把读数送进「确认坐向 → 计算 → 测盘档案」链路（V2 §2.1 第 8 步）——
+    用户测完只能干瞪眼，"采集数据功能没接上"，而界面一切正常。
+
+    接线要求（与 scan 页识别失败走手动录入同一条管线）：
+      1. 建一个会话（确认页的入口是 `/confirm/[sessionId]`）；
+      2. 把当前方位角以 `degree` 参数带过去（确认页会灌进实测角）；
+      3. 无读数时按钮必须禁用 —— 不能把一个"—"采进去。
+    """
+    src = (_APP / "sensors.tsx").read_text(encoding="utf-8")
+
+    assert "createSession" in src, (
+        "sensors.tsx 没有建会话：采集的读数没有档案可落，链路还是断的"
+    )
+    assert "pathname: '/confirm/[sessionId]'" in src, (
+        "sensors.tsx 没有把读数推向确认坐向页：采集出口缺失"
+    )
+    assert re.search(r"\bdegree:\s*az\.toFixed\(2\)", src), (
+        "sensors.tsx 推确认页时没有带 degree 参数：确认页收不到实测角"
+    )
+    assert re.search(r"disabled=\{!hasAzimuth\}", src), (
+        "采集按钮没有在无读数时禁用：用户可能采一个空读数进去"
+    )
+
+
+# ==========================================================================
+# 断言 7：`/adjust` 的盘面（盘式）选择器必须常驻，不能只在模板进入时可见
+# ==========================================================================
+
+
+def test_adjust_style_picker_is_not_gated_by_template() -> None:
+    """盘面更换入口不能藏在"模板带出"卡片里。
+
+    挡住的错：盘式选择器写在 `{fromTemplate ? ... : null}` 分支里 ——
+    从「测盘 → 手动输入」直接进来的用户根本看不到它，盘面想换也换不了，
+    而界面一切正常（"盘面更换操作有 bug"）。
+    """
+    src = (_APP / "adjust.tsx").read_text(encoding="utf-8")
+
+    # 抠出 {fromTemplate ? ( ... ) : null} 整块：括号配平
+    start = src.find("{fromTemplate ? (")
+    assert start >= 0, "adjust.tsx 里找不到 fromTemplate 分支（测试锚点失效）"
+    i = src.find("(", start)
+    depth = 0
+    end = -1
+    for j in range(i, len(src)):
+        if src[j] == "(":
+            depth += 1
+        elif src[j] == ")":
+            depth -= 1
+            if depth == 0:
+                end = j
+                break
+    assert end > 0, "fromTemplate 分支括号配平失败（测试写法失效）"
+    region = src[start:end]
+
+    assert "setDialStyle" not in region, (
+        "盘式选择器仍在 fromTemplate 分支里：直接进入 /adjust 的用户换不了盘面"
+    )
+    # 守卫本身要是活的：选择器必须还在页面上（只是挪到了分支外面）
+    assert "setDialStyle" in src, "页面上找不到盘式选择器了（修过头了）"
+
+
+# ==========================================================================
+# 断言 8：`useSensors` 不得用定时器"踢"渲染 —— 传感器事件本身已驱动更新
+# ==========================================================================
+
+
+def test_use_sensors_has_no_render_ticker() -> None:
+    """useSensors 里不许有 setInterval 驱动的重渲染。
+
+    挡住的错：曾有一个每 200ms 的 ticker，美其名曰"驱动序列刷新"，
+    实际上它既不在 useMemo 依赖里（根本驱动不了重算），
+    又在无传感器设备上空转 5 次渲染/秒 —— 纯耗电，且注释与实现不符。
+    传感器事件本身 10Hz 触发 setState，渲染自有来源。
+    """
+    src = (_SRC / "services/useSensors.ts").read_text(encoding="utf-8")
+    assert "setInterval" not in src, (
+        "useSensors.ts 里出现了 setInterval：渲染应由传感器事件驱动，"
+        "不要加定时器空转"
+    )
+
+
+# ==========================================================================
+# 断言 9：首页罗盘必须是实时磁针，不能是纯仿真
+# ==========================================================================
+
+
+def test_home_compass_is_sensor_driven() -> None:
+    """首页罗盘必须读真传感器，不能只拿手拖角度当"当前方位"。
+
+    挡住的错：首页罗盘用 useState 存用户拖出来的角度当"当前方位"，
+    全程不读传感器 —— 阿勇 2026-10-07 明确要求"不要模拟，都要真实数据"。
+    要求：
+      1. rotation 由 sensor.azimuth 推出（有数据时）；
+      2. 磁针驱动时盘面不可手拖 —— 否则会造出"读数与手机朝向不一致"的假状态；
+      3. 读数旁不再挂"仿真"字样（无数据回退手拖时必须明示）。
+    """
+    src = (_APP / "(tabs)" / "index.tsx").read_text(encoding="utf-8")
+
+    assert "sensor.azimuth" in src, "首页 rotation 没有接传感器方位角"
+    assert re.search(r"interactive=\{!sensorDriven\}", src), (
+        "首页盘面在磁针驱动时仍可手拖：会造出读数与手机朝向不一致的假状态"
+    )
+    assert "当前方位（仿真）" not in src, '首页读数旁还挂着"仿真"字样'
+    assert "useSensorSnapshot(true)" in src, "首页没有订阅传感器"
+
+
+# ==========================================================================
+# 断言 10：Android 构建的 Kotlin 版本必须钉住 1.9.25
+# ==========================================================================
+
+
+def test_android_kotlin_version_pinned_for_compose() -> None:
+    """expo-build-properties 必须把 android.kotlinVersion 钉在 1.9.25。
+
+    挡住的错：2026-10-08 EAS 云构建失败 —— Compose Compiler 1.5.15 要求
+    Kotlin 1.9.25，而默认的 1.9.24 不兼容，导致
+    :expo-modules-core:compileReleaseKotlin 编译失败，整个 APK 构建失败。
+    这个错在 tsc / expo export / 本地单测里都不会出现，只有云构建能暴露，
+    所以用静态守卫钉住配置，防止有人手滑删掉这行。
+    """
+    app_json = json.loads(
+        (_REPO_ROOT / "apps/mobile" / "app.json").read_text(encoding="utf-8")
+    )
+    plugins = app_json["expo"]["plugins"]
+    ebp = next(
+        (p for p in plugins if isinstance(p, list) and p[0] == "expo-build-properties"),
+        None,
+    )
+    assert ebp is not None, "app.json 里找不到 expo-build-properties 插件配置"
+    kv = ebp[1].get("android", {}).get("kotlinVersion")
+    assert kv == "1.9.25", (
+        f"android.kotlinVersion 必须是 1.9.25（Compose Compiler 1.5.15 要求），"
+        f"当前是 {kv!r} —— 删掉它会导致 EAS 云构建在 compileReleaseKotlin 失败"
+    )
+
+
+# ==========================================================================
+# 断言 11：后端地址的人工覆盖必须持久化（BUG 1，2026-10-08 用户实报）
+# ==========================================================================
+
+
+def test_api_baseurl_override_is_persisted() -> None:
+    """setApiBaseUrl 必须写盘，不能只换内存单例。
+
+    挡住的错：「我的 → 网络线路」里改的地址，App 重启就丢。
+    要求：
+      1. client.ts 的 setApiBaseUrl 把地址写进 baseUrlStore（持久化）；
+      2. 根布局启动时走 initBaseUrl（先读人工覆盖，没有才自动探活）；
+      3. 「我的」页提供「恢复默认」入口（清掉覆盖值）。
+    行为级校验另见 test_api_baseurl_persist.py（真跑 baseUrlStore.ts）。
+    """
+    client = (_REPO_ROOT / "apps/mobile/src/api/client.ts").read_text(encoding="utf-8")
+    assert "saveApiBaseUrlOverride" in client, (
+        "client.ts 的 setApiBaseUrl 没有调用持久化 —— 重启又会丢地址"
+    )
+    assert "export async function initBaseUrl" in client, (
+        "client.ts 缺少 initBaseUrl —— 启动时没人读回人工覆盖值"
+    )
+
+    layout = (_REPO_ROOT / "apps/mobile/app/_layout.tsx").read_text(encoding="utf-8")
+    assert "initBaseUrl" in layout, "根布局没有调用 initBaseUrl"
+
+    mine = (_REPO_ROOT / "apps/mobile/app/(tabs)/mine.tsx").read_text(encoding="utf-8")
+    assert "恢复默认" in mine, "「我的 → 网络线路」缺少「恢复默认」入口"
+    assert "下次打开 App 仍然用这个地址" in mine, (
+        "应用成功后没有告诉用户地址会被记住 —— 用户会以为还是没存住"
+    )
+
+
+# ==========================================================================
+# 断言 12：灵签机大按钮不得按 phase 条件卸载（BUG 2a，2026-10-08 用户实报）
+# ==========================================================================
+
+
+def test_qianji_button_stays_mounted_during_shake() -> None:
+    """摇签按钮必须常驻 —— 按住后 phase 变成 shaking 时不能把 Pressable 卸载。
+
+    挡住的错：原来 `{phase === 'idle' ? <Pressable …/> : <View …/>}`，
+    手指按住 → onPressIn 把 phase 置为 shaking → Pressable 被卸载 →
+    松手时 onPressOut 永远收不到 → 签筒卡在"摇签中…"。
+    这是 RN 的经典坑：按压过程中卸载 Pressable，release 事件直接丢失。
+    """
+    src = (_REPO_ROOT / "apps/mobile/app/qianji.tsx").read_text(encoding="utf-8")
+    # 不允许出现"phase==='idle' 才渲染 Pressable"的条件卸载写法
+    assert not re.search(
+        r"phase\s*===\s*['\"]idle['\"]\s*\?\s*\(\s*<Pressable", src
+    ), "摇签 Pressable 又被写成了按 phase 条件渲染 —— 松手事件会丢失"
+    # 按压回调必须还在
+    assert "onPressIn={onPressIn}" in src and "onPressOut={onPressOut}" in src
+    # 看门狗兜底必须在：任何原因导致 onPressOut 丢失都不许永久卡住
+    assert "shakeWatchdog" in src, "缺少摇签看门狗 —— onPressOut 丢失时会永久卡住"
+
+
+# ==========================================================================
+# 断言 13：传感器页必须有显眼的页内返回按钮（BUG 3，2026-10-08 用户实报）
+# ==========================================================================
+
+
+def test_sensors_page_has_visible_back_button() -> None:
+    """从测盘进传感器页后，用户必须有一眼能看到的返回入口。
+
+    挡住的错：原来只依赖原生标题栏左上角的小返回箭头，用户反馈"不能返回"。
+    要求：页内有一个带文字的返回按钮，调用 router.back()。
+    """
+    src = (_REPO_ROOT / "apps/mobile/app/sensors.tsx").read_text(encoding="utf-8")
+    assert "返回测盘" in src, "传感器页缺少页内返回按钮"
+    assert "router.back()" in src, "返回按钮没有调用 router.back()"
+
+
+# ==========================================================================
+# 断言 14：金色明亮主题（BUG 7，2026-10-08 用户决策：明亮为主、金色做背景）
+# ==========================================================================
+
+
+def _parse_token_block(src: str, name: str) -> dict[str, str]:
+    """从 tokens.ts 源码里抠出 `export const <name> = { … }` 的键值（色值）。"""
+    m = re.search(rf"export const {name} = \{{(.*?)\}} as const;", src, re.S)
+    assert m, f"tokens.ts 里找不到 {name}"
+    return dict(re.findall(r"(\w+):\s*'(#[0-9A-Fa-f]{6})'", m.group(1)))
+
+
+def _luminance(hex6: str) -> float:
+    """相对亮度（0=黑，1=白），只用于"够不够亮"的粗判。"""
+    r, g, b = (int(hex6[i : i + 2], 16) / 255 for i in (1, 3, 5))
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b
+
+
+def test_instrument_theme_is_light_and_golden() -> None:
+    """instrument 必须是明亮金色域 —— 用户明确不要深色仪器风了。
+
+    挡住的错：有人把 instrument.bg 又改回深色（如 #0A1626），
+    罗盘域页面瞬间回到"黑底"，与用户决策相悖。
+    要求：bg 够亮（亮度 > 0.75），且带金调（R 与 B 通道拉开差距）。
+    """
+    src = (_REPO_ROOT / "apps/mobile/src/theme/tokens.ts").read_text(encoding="utf-8")
+    inst = _parse_token_block(src, "instrument")
+    bg = inst["bg"]
+    assert _luminance(bg) > 0.75, f"instrument.bg {bg} 太暗 —— 用户要明亮主题"
+    r, g, b = (int(bg[i : i + 2], 16) for i in (1, 3, 5))
+    assert r - b > 30, f"instrument.bg {bg} 没有金调（R-B 差 {r-b}）"
+    # 文字必须深，保证浅底可读
+    assert _luminance(inst["text"]) < 0.3, f"instrument.text {inst['text']} 太浅，浅底看不清"
+
+
+def test_compass_pages_use_light_dial() -> None:
+    """罗盘页必须用浅色盘面 —— 深色盘配浅底会割裂。"""
+    for rel in [
+        "apps/mobile/app/(tabs)/index.tsx",
+        "apps/mobile/app/adjust.tsx",
+        "apps/mobile/app/sensors.tsx",
+        "apps/mobile/app/calibrate.tsx",
+    ]:
+        src = (_REPO_ROOT / rel).read_text(encoding="utf-8")
+        assert "DIAL_DARK" not in src, f"{rel} 还在用深色盘面 DIAL_DARK"
+        assert "DIAL_LIGHT" in src, f"{rel} 没有用浅色盘面 DIAL_LIGHT"
+
+
+def test_submenu_icons_are_solid_and_large() -> None:
+    """子菜单图标必须实心、够大（BUG 4：用户反馈图标"为空"看不清）。
+
+    要求：analysis.tsx 的术式入口用实心图标（非 -outline），尺寸 ≥ 26。
+
+    尺寸按**数值**判定，不钉死具体像素：一屏紧凑（2026-10-08 用户反馈
+    「必须真一屏，不滚动」）与「够大看得清」会来回拉锯，钉死数字会让每次
+    调尺寸都变成假红（本轮 30→24 即如此）—— 要守的是下限，不是某个值。
+    """
+    src = (_REPO_ROOT / "apps/mobile/app/(tabs)/analysis.tsx").read_text(encoding="utf-8")
+    for name in ["planet", "sparkles", "game-controller", "calendar", "grid"]:
+        assert f"icon: '{name}'" in src, f"analysis.tsx 的 {name} 又被换回描边图标"
+    match = re.search(r"<Ionicons\s+name=\{icon\}\s+size=\{(\d+)\}", src)
+    assert match, "找不到子菜单图标（应为 <Ionicons name={icon} size={N} />），检查已空转"
+    size = int(match.group(1))
+    assert size >= 26, f"子菜单图标尺寸不足：{size}px（下限 26，BUG 4 会复发）"
+
+
+# ==========================================================================
+# 断言 15：白话讲解基础设施（BUG 5，2026-10-08 用户要求）
+# ==========================================================================
+
+
+def test_plain_terms_dictionary_covers_core_terms() -> None:
+    """术语白话词典必须覆盖核心术语 —— 每个术语一句话大白话。"""
+    src = (_REPO_ROOT / "apps/mobile/src/content/plainTerms.ts").read_text(encoding="utf-8")
+    for term in ["坐山", "向山", "二十四山", "磁北", "五行", "八卦", "大运", "日主", "用神"]:
+        assert f"{term}:" in src or f"'{term}'" in src or f'"{term}"' in src, (
+            f"白话词典缺术语「{term}」"
+        )
+
+
+def test_sensors_page_has_quick_analyze() -> None:
+    """传感器页必须有罗盘快测 —— 实时读数直接给专业术语分析与 AI 白话讲解。
+
+    挡住的错：快测入口被删掉，用户又回到"只有一个数字、看不懂"的状态。
+    要求：有智能分析按钮、术语可点出白话、有 AI 白话讲解按钮、
+    且明确标注快测仅供参考（RULE-004：不代替坐向确认）。
+    """
+    src = (_REPO_ROOT / "apps/mobile/app/sensors.tsx").read_text(encoding="utf-8")
+    assert "QuickAnalyze" in src, "传感器页缺少罗盘快测组件"
+    assert "智能分析" in src, "快测缺少智能分析按钮"
+    assert "AI 白话讲解" in src, "快测缺少 AI 白话讲解按钮"
+    assert "快测仅供参考" in src, "快测没有标注'仅供参考' —— 会让人误当正式结论"
+    assert "<Term " in src, "快测的术语没有接白话讲解（Term 组件）"
+
+
+def test_info_popup_exists() -> None:
+    """通用弹出信息框必须存在（BUG 6 也要用它）。"""
+    p = _REPO_ROOT / "apps/mobile/src/components/InfoPopup.tsx"
+    assert p.exists(), "缺少 InfoPopup 通用弹出框组件"
+    src = p.read_text(encoding="utf-8")
+    assert "Modal" in src and "onClose" in src
+
+
+# ==========================================================================
+# 断言 16：一屏布局 —— 测盘/分析用积木宫格，不滚动（BUG 6，2026-10-08 用户要求）
+# ==========================================================================
+
+
+def test_test_and_analysis_use_block_grid() -> None:
+    """测盘 / 分析必须是一屏积木宫格：不滚动、块上有问号弹详情。
+
+    挡住的错：改回长列表 + 滚动，详情全堆在页面里拉长版面。
+
+    2026-10-09 调整：宫格块的外观与"问号 + 弹层"已收进共享组件
+    `InstrumentBlock`（原先两页各写一遍，圆角/图标尺寸/按下反馈都不一样）。
+    所以本断言改成**两段**，比原来更强：
+
+      1. 两页必须用共享的 `InstrumentBlock`（而不是各写一套块）；
+      2. `InstrumentBlock` 自己必须带 `CornerFrame`（回纹角花）、
+         `information-circle-outline`（问号）与 `InfoPopup`（详情弹层）——
+         这三样原先分散在两个页面里各查一遍，现在只在一处实现、只在一处验。
+    """
+    for rel in [
+        "apps/mobile/app/(tabs)/test.tsx",
+        "apps/mobile/app/(tabs)/analysis.tsx",
+    ]:
+        src = (_REPO_ROOT / rel).read_text(encoding="utf-8")
+        assert "<Screen scroll" not in src, f"{rel} 又改回滚动长页面了"
+        assert "InstrumentBlock" in src, (
+            f"{rel} 没有用共享的道具化宫格块 InstrumentBlock —— 两页会各自漂移"
+        )
+
+    block = (_SRC / "components/InstrumentBlock.tsx").read_text(encoding="utf-8")
+    assert "CornerFrame" in block, "道具化宫格块缺少回纹角花（玄机道具化的关键一笔）"
+    assert "information-circle-outline" in block, "宫格块上没有问号按钮"
+    assert "InfoPopup" in block, "宫格块没有接弹出式信息框"
+
+
+# ==========================================================================
+# 断言 17：全站单屏 —— 页面主结构一律不可滚动（2026-10-09 用户要求）
+# ==========================================================================
+
+
+def test_screen_component_has_no_scroll_switch() -> None:
+    """`Screen` 不得再提供滚动开关。
+
+    2026-10-09 用户要求「每个界面保持全部显示在手机屏幕上，不需滑动浏览」。
+    改造前 `Screen` 有个 `scroll` 开关，结果 16 个页面选了滚动、7 个没选 ——
+    同一个 App 里两种浏览方式并存，用户永远不知道这一页要不要往下拉。
+
+    把它删掉比"留着再写一条守卫"更彻底：**结构上不可能滚**，
+    就不需要靠测试去提醒谁别滚。这条断言防止有人"为了方便"把它加回来。
+    """
+    src = (_SRC / "components/Screen.tsx").read_text(encoding="utf-8")
+    assert "ScrollView" not in src, (
+        "Screen.tsx 里又出现了 ScrollView —— 页面骨架一旦能滚，"
+        "「一屏显示完」这条用户要求就守不住了"
+    )
+    assert not re.search(r"\bscroll\s*\??\s*:", src), (
+        "ScreenProps 里又出现了 scroll 字段：滚动开关被加回来了"
+    )
+
+
+def test_route_pages_have_no_page_level_scroller() -> None:
+    """路由页里不得出现 `ScrollView` / `FlatList` —— 页面本体必须一屏放下。
+
+    挡住的错：某个页面为了省事又套一个滚动容器。这类改动**不会报任何错**：
+    tsc 绿、打包成功、页面也能打开，只是用户又得往下拉 —— 而"不用滑动"
+    正是这一轮改造的全部目的。
+
+    需要滚动的长内容有三条正路（都不在页面本体里）：
+      · `InfoPopup` / `HelpButton` —— 弹层，内部自带滚动；
+      · `FoldList` —— 页内只放前 N 条，其余进「更多」浮层；
+      · `SegmentedTabs` —— 分段切换，同一时刻只占一份空间。
+    """
+    offenders: list[str] = []
+    for p in sorted(_APP.rglob("*.tsx")):
+        src = p.read_text(encoding="utf-8")
+        # 注释里提到这些名字不算（本文件的说明文字里就有）
+        code = "\n".join(
+            line for line in src.splitlines() if not line.strip().startswith(("*", "//", "/*"))
+        )
+        for token in ("<ScrollView", "<FlatList", "<SectionList", "<Screen scroll"):
+            if token in code:
+                offenders.append(f"{p.relative_to(_REPO_ROOT)} → {token}")
+    assert not offenders, (
+        "以下路由页用了页面级滚动容器，会破坏「一屏显示完」：\n  "
+        + "\n  ".join(offenders)
+        + "\n\n改用 FoldList（列表折叠）/ InfoPopup（长说明）/ SegmentedTabs（分段）。"
+    )
+
+
+def test_fold_list_exists_and_really_folds() -> None:
+    """`FoldList` 必须真的"折叠"：截断 + 更多入口 + 弹层里给全量。
+
+    挡住"折叠了个寂寞"：只渲染前 N 条却不给看全部 —— 那用户就永久丢数据了。
+    要求：`slice(`（截断）、`InfoPopup`（全量出口）、`items.map`（浮层里列全）。
+    """
+    p = _SRC / "components/FoldList.tsx"
+    assert p.exists(), "缺少 FoldList —— 列表页只能靠滚动，一屏要求守不住"
+    src = p.read_text(encoding="utf-8")
+    assert "slice(" in src, "FoldList 没有截断（那它就不是折叠，是全量渲染）"
+    assert "InfoPopup" in src, "FoldList 没有全量出口 —— 被折叠的条目用户永远看不到"
+    assert "items.map(" in src, "FoldList 的浮层里没有列出全部条目"
+    assert "更多" in src, "FoldList 缺少「更多」入口文案"
+
+
+def test_history_uses_fold_list_instead_of_flat_list() -> None:
+    """历史页（最典型的列表页）必须走 `FoldList`。
+
+    注释行先剔掉再查 —— 本仓库的注释里会**引用**被废弃的写法（"原来是 FlatList"），
+    不剔就会把说明文字当成代码，判出一条假红。
+    """
+    src = (_APP / "(tabs)/history.tsx").read_text(encoding="utf-8")
+    code = "\n".join(
+        line for line in src.splitlines() if not line.strip().startswith(("*", "//", "/*"))
+    )
+    assert "FoldList" in code, "历史页没有用 FoldList"
+    assert "FlatList" not in code, "历史页还在用 FlatList —— 整页会滚动"
+
+
+# ==========================================================================
+# 断言 18：全站出入口 —— 每个二级页必须有带文字的返回入口（2026-10-09 用户要求）
+# ==========================================================================
+
+#: `<PageHeader … />` 的属性块（跨行，最多 600 字符）
+_PAGE_HEADER_RE = re.compile(r"<PageHeader\b([\s\S]{0,600}?)/>")
+#: 独立的 `back` 属性（`backLabel` 不算 —— `\b` 在 `backLabel` 里不成立）
+_BACK_PROP_RE = re.compile(r"\bback\b(?!\s*Label)")
+
+
+def _non_tab_route_files() -> list[Path]:
+    """二级页（根栈里的页面）—— 底栏那 5 页不算：它们由底栏本身提供出入口。"""
+    return [p for p in _route_files() if "(tabs)" not in p.parts]
+
+
+def test_every_secondary_page_has_a_visible_back_entry() -> None:
+    """每个二级页必须渲染 `PageHeader` 且带 `back`。
+
+    挡住的错（2026-10-08 用户实报 BUG 3）：从测盘进传感器页后"不能返回"——
+    当时只有原生标题栏左上角那个小箭头，用户根本没找到。
+    2026-10-09 进一步把根栈改成 `headerShown: false`（原生箭头彻底没有了），
+    于是"页面自画返回按钮"从"最好有"变成**唯一出路**：漏一个页面，
+    那个页面就真的进得去出不来。
+
+    同时禁止页面自己写 `headerShown`/`Stack.Screen` 标题 —— 那会让标题栏
+    出现两套（原生一套 + PageHeader 一套）。
+    """
+    offenders: list[str] = []
+    for p in _non_tab_route_files():
+        src = p.read_text(encoding="utf-8")
+        headers = _PAGE_HEADER_RE.findall(src)
+        if not headers:
+            offenders.append(f"{p.relative_to(_REPO_ROOT)} → 没有 <PageHeader />")
+            continue
+        if not any(_BACK_PROP_RE.search(props) for props in headers):
+            offenders.append(f"{p.relative_to(_REPO_ROOT)} → <PageHeader /> 没有 back 属性")
+        if "headerShown" in src:
+            offenders.append(
+                f"{p.relative_to(_REPO_ROOT)} → 页面自己设置了 headerShown（标题栏会出现两套）"
+            )
+    assert not offenders, (
+        "以下二级页缺少显眼的返回入口（用户会「进得去出不来」）：\n  "
+        + "\n  ".join(offenders)
+        + "\n\n每页最上方写 <PageHeader title=\"…\" back helpTopic=\"…\" />。"
+    )
+
+
+def test_secondary_page_set_is_non_empty_and_covers_known_pages() -> None:
+    """锚点：二级页清单必须扫到已知页面，否则断言 18 是空跑。"""
+    names = {p.name for p in _non_tab_route_files()}
+    for expect in ("scan.tsx", "sensors.tsx", "almanac.tsx", "[sessionId].tsx"):
+        assert expect in names, (
+            f"二级页清单里没有 {expect}（当前：{sorted(names)}）—— 扫描器可能已失效，"
+            "断言 18 会沦为假绿"
+        )
+
+
+def test_selfcheck_page_header_scanner_rejects_header_without_back() -> None:
+    """用一个**没写 back** 的 PageHeader 证明断言 18 的判据真的会拒绝。"""
+    snippet = '<PageHeader\n  title="测试"\n  helpTopic="test"\n/>'
+    headers = _PAGE_HEADER_RE.findall(snippet)
+    assert len(headers) == 1, f"自检失败：抽取器取到 {len(headers)} 个 PageHeader"
+    assert not _BACK_PROP_RE.search(headers[0]), (
+        "自检失败：没有 back 的 PageHeader 被判成有 back —— 断言 18 因此是假绿"
+    )
+    # 反向：写了 back 的要被认出来，且 backLabel 不能冒充 back
+    ok = '<PageHeader title="x" back backLabel="返回测盘" />'
+    h = _PAGE_HEADER_RE.findall(ok)
+    assert h and _BACK_PROP_RE.search(h[0]), "自检失败：带 back 的 PageHeader 没被认出来"

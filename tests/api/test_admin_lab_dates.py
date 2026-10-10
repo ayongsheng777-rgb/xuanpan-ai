@@ -36,6 +36,11 @@ _ADMIN_HTML = (
 #: 托管运行时优先（见 AGENTS.md §5.3），找不到再退回 PATH 上的 node
 _MANAGED_NODE = Path.home() / ".workbuddy/binaries/node/versions/22.22.2-3/node.exe"
 
+#: node 子进程被钉死的时区。Python 侧的「今天」必须用它算，不能用宿主本地时区 ——
+#: 否则在非 UTC+8 的机器上（如 UTC-7），只要宿主与 UTC+8 跨了日期，
+#: 这条断言就会假红：错的不是被测代码，而是对照基准自身。
+_PINNED_TZ = "Asia/Shanghai"
+
 #: 从 `const _p2` 起、到 `localDateTime` 函数结束为止 —— 正是页面里那段 helper
 _HELPER_RE = re.compile(
     r"(const _p2[\s\S]*?function localDateTime\(d\) \{[\s\S]*?\n\})"
@@ -102,7 +107,7 @@ def _node_env() -> dict[str, str]:
     本机实测踩过这个坑。
     """
     env = os.environ.copy()
-    env["TZ"] = "Asia/Shanghai"
+    env["TZ"] = _PINNED_TZ
     # 让 node 不要读用户级配置，避免本机 NODE_OPTIONS 影响结果
     env.pop("NODE_OPTIONS", None)
     return env
@@ -219,9 +224,12 @@ class TestLocalDateHelper:
         assert isinstance(got, list) and len(got) == 2
         # 两个默认值都是 YYYY-MM-DD 形态，且与 Python 侧算出的本地日期一致
         import datetime as _dt
+        from zoneinfo import ZoneInfo
 
-        today = _dt.datetime.now().strftime("%Y-%m-%d")
-        assert got[0] == today, f"默认起始日应为今天 {today}，实为 {got[0]}"
+        # 与 node 子进程同基准：node 被钉死在 _PINNED_TZ（见 _node_env），
+        # 这里若用宿主本地时区，跨日窗口内会算出「昨天」而误判被测代码出错。
+        today = _dt.datetime.now(ZoneInfo(_PINNED_TZ)).strftime("%Y-%m-%d")
+        assert got[0] == today, f"默认起始日应为今天（{_PINNED_TZ}）{today}，实为 {got[0]}"
 
 
 class TestFalseGreenGuard:
