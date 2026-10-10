@@ -66,6 +66,17 @@
         }
       ],
       [
+        "./plugins/withAndroidFonts.js",
+        {
+          "fonts": [
+            {
+              "src": "./node_modules/@expo/vector-icons/build/vendor/react-native-vector-icons/Fonts/Ionicons.ttf",
+              "family": "ionicons"
+            }
+          ]
+        }
+      ],
+      [
         "expo-build-properties",
         {
           "android": {

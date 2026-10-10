@@ -17,6 +17,13 @@
  *
  * 同一时刻只显示一组，**没有一组需要滚动**。分段的划分依据是"用户来找什么"：
  * 想知道"AI 现在能用哪个"去模型，想改地址/生日去我的，其余归关于。
+ *
+ * ## 🔴 2026-10-10 用户反馈修正
+ *
+ * 之前默认 `section='model'` —— 但底栏文案是「我的」而不是「模型」，
+ * 用户进"我的"页面只看得到一张 AI 模型卡，找不到「我的信息」「网络线路」，
+ * 以为页面只剩这一张卡。**默认分段改成 `mine`**，让用户一眼看到自己的内容；
+ * 模型与关于分段保留可切换入口。
  */
 
 import { Ionicons } from '@expo/vector-icons';
@@ -57,7 +64,9 @@ const SECTIONS = [
 
 export default function MineScreen(): React.JSX.Element {
   const router = useRouter();
-  const [section, setSection] = useState<Section>('model');
+  // 2026-10-10: 默认 `mine` —— 底栏文案是「我的」，进页先看到「我的信息 + 网络线路」，
+  // 与用户预期一致；模型 / 关于仍可通过顶部分段切换进入。
+  const [section, setSection] = useState<Section>('mine');
 
   const load = useCallback(async () => {
     const client = getApiClient();
